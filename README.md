@@ -1,36 +1,32 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# R.A.C.H.I.E and P.E.G.G.I.E web
 
-## Getting Started
+One Next.js application serves both bot brands. The incoming hostname selects the
+brand configuration on the server.
 
-First, run the development server:
+## Local development
+
+Start the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Load either local hostname in a browser:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- R.A.C.H.I.E: [http://localhost:3000](http://localhost:3000)
+- P.E.G.G.I.E: [http://peggie.localhost:3000](http://peggie.localhost:3000)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Modern browsers resolve `*.localhost` to the loopback interface, so no hosts-file
+or production DNS change is required.
 
-## Learn More
+## Brand architecture
 
-To learn more about Next.js, take a look at the following resources:
+- `brands/types.ts` defines the shared, strongly typed configuration contract.
+- `brands/config.ts` contains brand-specific identity, game, copy, asset namespace,
+  hostnames, and theme values.
+- `brands/resolve.ts` performs pure hostname normalization and brand selection.
+- `brands/server.ts` reads request headers using the App Router server API and
+  returns the active brand context.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Unrecognized hostnames fall back to R.A.C.H.I.E. This includes standard localhost
+and keeps local development predictable.
