@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f5f7fb;
+        margin: 0;
+        padding: 24px 16px 40px;
+        color: #1f2937;
+      }
+
+      .page {
+        max-width: 640px;
+        margin: 0 auto;
+      }
+
+      .page-header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+
+      .page-header h1 {
+        font-size: 28px;
+        margin: 0 0 8px;
+        color: #111827;
+      }
+
+      .page-header p {
+        margin: 0;
+        color: #6b7280;
+        font-size: 14px;
+      }
+
+      .card {
+        background: #ffffff;
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+        padding: 20px;
+        margin-bottom: 18px;
+      }
+
+      .section-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 18px;
+        margin-top: 18px;
+      }
+
+      .section-card h3 {
+        margin: 0 0 4px;
+        font-size: 20px;
+        color: #111827;
+      }
+
+      .section-subtitle {
+        margin: 0 0 14px;
+        font-size: 13px;
+        color: #6b7280;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      label {
+        display: block;
+        margin-top: 12px;
+        font-weight: 600;
+        font-size: 14px;
+        color: #374151;
+      }
+
+      input, select, button {
+        width: 100%;
+        padding: 12px 14px;
+        margin-top: 6px;
+        box-sizing: border-box;
+        border-radius: 10px;
+        font-size: 15px;
+      }
+
+      input, select {
+        border: 1px solid #d1d5db;
+        background: #fff;
+        color: #111827;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      input:focus, select:focus {
+        outline: none;
+        border-color: #2563eb;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+      }
+
+      button {
+        margin-top: 22px;
+        border: none;
+        background: #2563eb;
+        color: white;
+        font-weight: 700;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.05s ease;
+      }
+
+      button:hover {
+        background: #1d4ed8;
+      }
+
+      button:active {
+        transform: translateY(1px);
+      }
+
+      .message {
+        margin-top: 18px;
+        padding: 14px 16px;
+        border-radius: 12px;
+        white-space: pre-line;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .success {
+        background: #e8f7ec;
+        color: #166534;
+        border: 1px solid #bbf7d0;
+      }
+
+      .error {
+        background: #fef2f2;
+        color: #b91c1c;
+        border: 1px solid #fecaca;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      @media (max-width: 640px) {
+        body {
+          padding: 16px 12px 28px;
+        }
+
+        .card,
+        .section-card {
+          padding: 16px;
+          border-radius: 14px;
+        }
+
+        .page-header h1 {
+          font-size: 24px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="page-header">
+        <h1>Minister Booking</h1>
+        <p>Book, change or remove your appointments for each day.</p>
+      </div>
+
+      <form id="bookingForm" class="card">
+        <label>Alliance Tag</label>
+        <input type="text" id="alliance" maxlength="3" pattern="[A-Za-z0-9]{1,3}" required>
+
+        <label>In-Game Name</label>
+        <input type="text" id="inGameName" required>
+
+        <label>Player I.D</label>
+        <input type="text" id="playerId" inputmode="numeric" pattern="[0-9]+" required>
+
+        <div class="section-card">
+          <h3>Construction Day</h3>
+          <div class="section-subtitle">Day 1</div>
+
+          <label>Construction Time</label>
+          <select id="constructionTime">
+            <option value="">- Select Time -</option>
+          </select>
+
+          <div id="constructionFcWrap" class="hidden">
+            <label>Fire Crystals (FC)</label>
+            <input type="text" id="fc" inputmode="numeric" pattern="[0-9]+" maxlength="6">
+          </div>
+
+          <div id="constructionRfcWrap" class="hidden">
+            <label>Refined Fire Crystals (RFC)</label>
+            <input type="text" id="rfc" inputmode="numeric" pattern="[0-9]+" maxlength="6">
+          </div>
+
+          <div id="constructionSpeedupsWrap" class="hidden">
+            <label>Speed-ups (days)</label>
+            <input type="text" id="constructionSpeedups" inputmode="numeric" pattern="[0-9]+" maxlength="6">
+          </div>
+        </div>
+
+        <div class="section-card">
+          <h3>Research Day</h3>
+          <div class="section-subtitle">Day 2</div>
+
+          <label>Research Time</label>
+          <select id="researchTime">
+            <option value="">- Select Time -</option>
+          </select>
+
+          <div id="researchShardsWrap" class="hidden">
+            <label>Fire Crystal Shards</label>
+            <input type="text" id="shards" inputmode="numeric" pattern="[0-9]+" maxlength="6">
+          </div>
+
+          <div id="researchSpeedupsWrap" class="hidden">
+            <label>Speed-ups (days)</label>
+            <input type="text" id="researchSpeedups" inputmode="numeric" pattern="[0-9]+" maxlength="6">
+          </div>
+        </div>
+
+        <div class="section-card">
+          <h3>Troop Training Day</h3>
+          <div class="section-subtitle">Day 4</div>
+
+          <label>Troop Time</label>
+          <select id="troopTime">
+            <option value="">- Select Time -</option>
+          </select>
+
+          <div id="troopSpeedupsWrap" class="hidden">
+            <label>Speed-ups (days)</label>
+            <input type="text" id="troopSpeedups" inputmode="numeric" pattern="[0-9]+" maxlength="6">
+          </div>
+        </div>
+
+        <button type="submit">Submit Bookings</button>
+        <div id="message"></div>
+      </form>
+    </div>
+
+    <script>
+      const sheetId = "<?= sheetId ?>";
+      const REMOVE_BOOKING_VALUE = "__REMOVE__";
+
+      const constructionTimeSelect = document.getElementById("constructionTime");
+      const researchTimeSelect = document.getElementById("researchTime");
+      const troopTimeSelect = document.getElementById("troopTime");
+
+      const messageBox = document.getElementById("message");
+
+      let bookingConfig = null;
+
+      function showMessage(text, type) {
+        messageBox.className = "message " + type;
+        messageBox.textContent = text;
+      }
+
+      function clearMessage() {
+        messageBox.className = "";
+        messageBox.textContent = "";
+      }
+
+      function savePlayerDetails() {
+        localStorage.setItem("alliance", document.getElementById("alliance").value);
+        localStorage.setItem("inGameName", document.getElementById("inGameName").value);
+        localStorage.setItem("playerId", document.getElementById("playerId").value);
+      }
+
+      function loadPlayerDetails() {
+        document.getElementById("alliance").value = localStorage.getItem("alliance") || "";
+        document.getElementById("inGameName").value = localStorage.getItem("inGameName") || "";
+        document.getElementById("playerId").value = localStorage.getItem("playerId") || "";
+      }
+
+      function setNumericOnly(id) {
+        const el = document.getElementById(id);
+        el.addEventListener("input", function () {
+          this.value = this.value.replace(/\D/g, "").slice(0, 6);
+        });
+      }
+
+      function hideAllExtraFields() {
+        [
+          "constructionFcWrap",
+          "constructionRfcWrap",
+          "constructionSpeedupsWrap",
+          "researchShardsWrap",
+          "researchSpeedupsWrap",
+          "troopSpeedupsWrap"
+        ].forEach(function (id) {
+          document.getElementById(id).classList.add("hidden");
+        });
+      }
+
+      function updateExtraFieldVisibility() {
+        hideAllExtraFields();
+
+        if (!bookingConfig) return;
+
+        const constructionSelected =
+          !!constructionTimeSelect.value &&
+          constructionTimeSelect.value !== REMOVE_BOOKING_VALUE;
+
+        const researchSelected =
+          !!researchTimeSelect.value &&
+          researchTimeSelect.value !== REMOVE_BOOKING_VALUE;
+
+        const troopSelected =
+          !!troopTimeSelect.value &&
+          troopTimeSelect.value !== REMOVE_BOOKING_VALUE;
+
+        if (constructionSelected && bookingConfig.construction_fc_required) {
+          document.getElementById("constructionFcWrap").classList.remove("hidden");
+        }
+        if (constructionSelected && bookingConfig.construction_rfc_required) {
+          document.getElementById("constructionRfcWrap").classList.remove("hidden");
+        }
+        if (constructionSelected && bookingConfig.construction_speedups_required) {
+          document.getElementById("constructionSpeedupsWrap").classList.remove("hidden");
+        }
+
+        if (researchSelected && bookingConfig.research_shards_required) {
+          document.getElementById("researchShardsWrap").classList.remove("hidden");
+        }
+        if (researchSelected && bookingConfig.research_speedups_required) {
+          document.getElementById("researchSpeedupsWrap").classList.remove("hidden");
+        }
+
+        if (troopSelected && bookingConfig.troop_speedups_required) {
+          document.getElementById("troopSpeedupsWrap").classList.remove("hidden");
+        }
+      }
+
+      function loadTimesForDropdown(day, selectEl, preserveMessage = false) {
+        return new Promise((resolve) => {
+          if (!preserveMessage) clearMessage();
+
+          selectEl.innerHTML = '<option value="">Loading...</option>';
+
+          google.script.run
+            .withSuccessHandler(function (data) {
+              selectEl.innerHTML = "";
+
+              const defaultOption = document.createElement("option");
+              defaultOption.value = "";
+              defaultOption.textContent = "- Select Time -";
+              selectEl.appendChild(defaultOption);
+
+              const removeOption = document.createElement("option");
+              removeOption.value = REMOVE_BOOKING_VALUE;
+              removeOption.textContent = "Remove existing booking";
+              selectEl.appendChild(removeOption);
+
+              if (!data.ok || !data.times || !data.times.length) {
+                updateExtraFieldVisibility();
+                resolve();
+                return;
+              }
+
+              data.times.forEach(function (time) {
+                const option = document.createElement("option");
+                option.value = time;
+                option.textContent = time;
+                selectEl.appendChild(option);
+              });
+
+              updateExtraFieldVisibility();
+              resolve();
+            })
+            .withFailureHandler(function (err) {
+              console.error(err);
+              selectEl.innerHTML = '<option value="">Error loading times</option>';
+              showMessage("Failed to load available times.", "error");
+              updateExtraFieldVisibility();
+              resolve();
+            })
+            .webGetAvailableTimes(sheetId, day);
+        });
+      }
+
+      function loadConfig() {
+        return new Promise((resolve) => {
+          google.script.run
+            .withSuccessHandler(function (data) {
+              bookingConfig = data;
+              updateExtraFieldVisibility();
+              resolve();
+            })
+            .withFailureHandler(function (err) {
+              console.error(err);
+              showMessage("Failed to load booking settings.", "error");
+              resolve();
+            })
+            .webGetBookingConfig(sheetId);
+        });
+      }
+
+      constructionTimeSelect.addEventListener("change", updateExtraFieldVisibility);
+      researchTimeSelect.addEventListener("change", updateExtraFieldVisibility);
+      troopTimeSelect.addEventListener("change", updateExtraFieldVisibility);
+
+      document.getElementById("bookingForm").addEventListener("submit", function (e) {
+        e.preventDefault();
+        clearMessage();
+
+        const payload = {
+          sheetId: sheetId,
+          alliance: document.getElementById("alliance").value,
+          inGameName: document.getElementById("inGameName").value,
+          playerId: document.getElementById("playerId").value,
+
+          constructionTime: constructionTimeSelect.value,
+          fc: document.getElementById("fc").value,
+          rfc: document.getElementById("rfc").value,
+          constructionSpeedups: document.getElementById("constructionSpeedups").value,
+
+          researchTime: researchTimeSelect.value,
+          shards: document.getElementById("shards").value,
+          researchSpeedups: document.getElementById("researchSpeedups").value,
+
+          troopTime: troopTimeSelect.value,
+          troopSpeedups: document.getElementById("troopSpeedups").value
+        };
+
+        google.script.run
+          .withSuccessHandler(async function (data) {
+            if (!data.ok || !data.results) {
+              showMessage("Booking failed.", "error");
+              return;
+            }
+
+            savePlayerDetails();
+
+            const lines = data.results.map(function (r) {
+              if (r.ok) {
+                if (r.removed) {
+                  return "✅ " + r.day + " booking removed" + (r.oldTime ? " from " + r.oldTime : "");
+                }
+                if (r.moved && r.oldTime) {
+                  return "✅ " + r.day + " changed from " + r.oldTime + " to " + r.time;
+                }
+                return "✅ " + r.day + " booked at " + r.time;
+              }
+              return "❌ " + r.day + ": " + r.error;
+            });
+
+            showMessage(lines.join("\n"), "success");
+
+            await loadTimesForDropdown("Construction", constructionTimeSelect, true);
+            await loadTimesForDropdown("Research", researchTimeSelect, true);
+            await loadTimesForDropdown("Troop", troopTimeSelect, true);
+
+            constructionTimeSelect.value = "";
+            researchTimeSelect.value = "";
+            troopTimeSelect.value = "";
+            updateExtraFieldVisibility();
+          })
+          .withFailureHandler(function (err) {
+            console.error(err);
+            showMessage("Failed to submit bookings.", "error");
+          })
+          .webBookMultiple(payload);
+      });
+
+      async function initBookingPage() {
+        loadPlayerDetails();
+
+        setNumericOnly("fc");
+        setNumericOnly("rfc");
+        setNumericOnly("constructionSpeedups");
+        setNumericOnly("shards");
+        setNumericOnly("researchSpeedups");
+        setNumericOnly("troopSpeedups");
+
+        await loadConfig();
+        await loadTimesForDropdown("Construction", constructionTimeSelect);
+        await loadTimesForDropdown("Research", researchTimeSelect, true);
+        await loadTimesForDropdown("Troop", troopTimeSelect, true);
+      }
+
+      initBookingPage();
+    </script>
+  </body>
+</html>
