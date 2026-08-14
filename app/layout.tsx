@@ -1,29 +1,40 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { ReactNode } from "react";
+
+import { getBrandCssProperties } from "@/brands/presentation";
+import { getBrandRequestContext } from "@/brands/server";
+import { AppShell } from "@/components/app-shell";
+
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+export async function generateMetadata(): Promise<Metadata> {
+  const { brand } = await getBrandRequestContext();
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+  return {
+    applicationName: brand.displayName,
+    title: {
+      default: brand.displayName,
+      template: `%s | ${brand.shortName}`,
+    },
+    description: brand.description,
+  };
+}
 
-export const metadata: Metadata = {
-  title: "Brand diagnostics",
-  description: "Multi-brand request diagnostics",
-};
+export default async function RootLayout({
+  children,
+}: Readonly<{ children: ReactNode }>) {
+  const { brand } = await getBrandRequestContext();
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      data-brand={brand.id}
+      data-theme={brand.theme.id}
+      style={getBrandCssProperties(brand)}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body>
+        <AppShell brand={brand}>{children}</AppShell>
+      </body>
     </html>
   );
 }

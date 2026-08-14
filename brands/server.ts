@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { cache } from "react";
 
 import { normalizeHostname, resolveBrand } from "./resolve";
 
@@ -7,7 +8,7 @@ export interface BrandRequestContext {
   readonly hostname: string;
 }
 
-export async function getBrandRequestContext(): Promise<BrandRequestContext> {
+export const getBrandRequestContext = cache(async (): Promise<BrandRequestContext> => {
   const requestHeaders = await headers();
   const hostHeader =
     requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
@@ -17,4 +18,4 @@ export async function getBrandRequestContext(): Promise<BrandRequestContext> {
     brand: resolveBrand(hostname),
     hostname: hostname || "unknown",
   };
-}
+});
