@@ -230,6 +230,16 @@ user ID and community come from the trusted authenticated context, never request
 parameters. It returns an explicit unregistered state or that user's active
 registration and confirmed bookings.
 
+`PUT /api/v1/booking/me/registration` is the first native write. It creates or
+updates only that owned registration and atomically records idempotency and audit
+state. See
+[native-participant-registration.md](native-participant-registration.md).
+
+`POST /api/v1/bookings` creates a confirmed appointment in one profile-scoped
+transaction. It locks and re-checks the participant and slot, captures immutable
+snapshots, and commits requirement answers, audit, outbox, and idempotency state
+together. See [native-booking-creation.md](native-booking-creation.md).
+
 ### Community resolution
 
 `r-a-c-h-i-e.com`/`localhost` resolves WOS, while
@@ -326,9 +336,10 @@ responses without SQL, credentials, table names, or stack traces. Responses use
 
 ### Intentionally unimplemented
 
-This layer does not create registrations or bookings, reschedule, cancel, clear,
-reserve, perform admin mutations, call Apps Script, import Sheets, or switch bot
-traffic. The legacy compatibility proxy remains separate.
+This layer does not create bookings, reschedule, cancel, clear, reserve, perform
+admin mutations, call Apps Script, import Sheets, or switch bot traffic.
+Participant registration create/update is the only native mutation; the legacy
+compatibility proxy remains separate.
 
 ## Legacy Behavior Not Carried Forward
 

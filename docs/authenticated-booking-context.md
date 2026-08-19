@@ -104,9 +104,8 @@ UUIDs are returned only as opaque identifiers where the booking workflow require
 them, and booking IDs are limited to the authenticated participant's own confirmed
 bookings.
 
-## Remaining Before Writes
+## Remaining Before Appointment Writes
 
-- implement participant registration and its validation/ownership transition;
 - define idempotent create, reschedule, and cancellation service transactions;
 - bind the five-minute membership assertion and future mutation rate policy to
   every mutation entry point;
@@ -117,3 +116,7 @@ bookings.
 - configure production runtime and migration roles without superuser or
   `BYPASSRLS` privileges;
 - build the public booking UI.
+
+Authenticated participant create/update is now implemented as the first native
+mutation. Its ownership, validation, replay, and audit contract is documented in
+[native-participant-registration.md](native-participant-registration.md).

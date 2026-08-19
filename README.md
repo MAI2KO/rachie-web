@@ -102,3 +102,14 @@ recently verified Discord community. `GET /api/v1/booking/me` returns only the
 current Discord user's registration and confirmed bookings. See
 [docs/authenticated-booking-context.md](docs/authenticated-booking-context.md) for
 the trust boundary, membership lease, and PostgreSQL-backed rate limits.
+
+The first native mutation is `PUT /api/v1/booking/me/registration`. It creates or
+updates only the authenticated Discord user's selected-community registration and
+requires fresh membership, CSRF, rate limiting, validation, and an idempotency
+key. See
+[docs/native-participant-registration.md](docs/native-participant-registration.md).
+
+Native appointment creation is available at `POST /api/v1/bookings`. It requires
+the same trusted context plus an active registration and atomically records the
+booking, requirement answers, audit event, outbox event, and idempotency result.
+See [docs/native-booking-creation.md](docs/native-booking-creation.md).

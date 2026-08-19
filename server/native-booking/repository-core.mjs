@@ -60,6 +60,208 @@ class ProfileScopedBookingSession {
     return result.rows[0] ?? null;
   }
 
+  async claimRegistrationIdempotency({
+    communityId,
+    idempotencyKey,
+    requestHash,
+    correlationId,
+  }) {
+    const claimed = await this.client.query(
+      `INSERT INTO booking_idempotency_keys
+         (game_profile, community_id, idempotency_key, operation,
+          request_hash, correlation_id)
+       VALUES ($1, $2, $3, 'participant_registration_upsert', $4, $5)
+       ON CONFLICT (game_profile, community_id, idempotency_key) DO NOTHING
+       RETURNING idempotency_key`,
+      [
+        this.gameProfile,
+        communityId,
+        idempotencyKey,
+        requestHash,
+        correlationId,
+      ],
+    );
+    if (claimed.rowCount === 1) return { state: "claimed" };
+
+    const existing = await this.client.query(
+      `SELECT operation, request_hash, status, response_status, response_body
+       FROM booking_idempotency_keys
+       WHERE game_profile = $1
+         AND community_id = $2
+         AND idempotency_key = $3`,
+      [this.gameProfile, communityId, idempotencyKey],
+    );
+    return { state: "existing", record: existing.rows[0] ?? null };
+  }
+
+  async completeRegistrationIdempotency(
+    communityId,
+    idempotencyKey,
+    responseStatus,
+    responseBody,
+  ) {
+    await this.client.query(
+      `UPDATE booking_idempotency_keys
+       SET status = 'completed',
+           response_status = $4,
+           response_body = $5,
+           completed_at = now()
+       WHERE game_profile = $1
+         AND community_id = $2
+         AND idempotency_key = $3`,
+      [
+        this.gameProfile,
+        communityId,
+        idempotencyKey,
+        responseStatus,
+        responseBody,
+      ],
+    );
+  }
+
+  async claimBookingIdempotency({ communityId, idempotencyKey, requestHash, correlationId }) {
+    const claimed = await this.client.query(
+      `INSERT INTO booking_idempotency_keys
+         (game_profile, community_id, idempotency_key, operation, request_hash, correlation_id)
+       VALUES ($1, $2, $3, 'booking_create', $4, $5)
+       ON CONFLICT (game_profile, community_id, idempotency_key) DO NOTHING
+       RETURNING idempotency_key`,
+      [this.gameProfile, communityId, idempotencyKey, requestHash, correlationId],
+    );
+    if (claimed.rowCount === 1) return { state: "claimed" };
+    const existing = await this.client.query(
+      `SELECT operation, request_hash, status, response_status, response_body
+       FROM booking_idempotency_keys
+       WHERE game_profile = $1 AND community_id = $2 AND idempotency_key = $3`,
+      [this.gameProfile, communityId, idempotencyKey],
+    );
+    return { state: "existing", record: existing.rows[0] ?? null };
+  }
+
+  async completeBookingIdempotency(communityId, idempotencyKey, responseStatus, responseBody) {
+    await this.client.query(
+      `UPDATE booking_idempotency_keys
+       SET status = 'completed', response_status = $4, response_body = $5, completed_at = now()
+       WHERE game_profile = $1 AND community_id = $2 AND idempotency_key = $3`,
+      [this.gameProfile, communityId, idempotencyKey, responseStatus, responseBody],
+    );
+  }
+
+  async lockCommunityForBooking(communityId) {
+    const result = await this.client.query(
+      `SELECT game_profile, id, status, bookings_open
+       FROM booking_communities
+       WHERE game_profile = $1 AND id = $2
+       FOR UPDATE`,
+      [this.gameProfile, communityId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async lockAppointmentSlot(communityId, slotId) {
+    const result = await this.client.query(
+      `SELECT slot.id, slot.community_id, slot.window_id, slot.service_date_id,
+              slot.service_code, slot.booking_date, slot.display_time_label,
+              slot.status AS slot_status, booking_window.status AS window_status,
+              booking_window.opens_at, booking_window.closes_at,
+              service.active AS service_active, service.display_label AS service_label
+       FROM appointment_slots AS slot
+       JOIN booking_windows AS booking_window
+         ON booking_window.game_profile = slot.game_profile
+        AND booking_window.id = slot.window_id
+        AND booking_window.community_id = slot.community_id
+       JOIN minister_services AS service
+         ON service.game_profile = slot.game_profile
+        AND service.service_code = slot.service_code
+       WHERE slot.game_profile = $1 AND slot.community_id = $2 AND slot.id = $3
+       FOR UPDATE OF slot`,
+      [this.gameProfile, communityId, slotId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async hasActiveSlotBlock(slotId) {
+    const result = await this.client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM booking_slot_blocks
+         WHERE game_profile = $1 AND slot_id = $2 AND cancelled_at IS NULL
+       ) AS exists`,
+      [this.gameProfile, slotId],
+    );
+    return result.rows[0].exists;
+  }
+
+  async hasConfirmedBookingForSlot(slotId) {
+    const result = await this.client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM minister_bookings
+         WHERE game_profile = $1 AND slot_id = $2 AND status = 'confirmed'
+       ) AS exists`,
+      [this.gameProfile, slotId],
+    );
+    return result.rows[0].exists;
+  }
+
+  async hasConfirmedBookingForParticipantService(communityId, windowId, serviceCode, participantId) {
+    const result = await this.client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM minister_bookings
+         WHERE game_profile = $1 AND community_id = $2 AND window_id = $3
+           AND service_code = $4 AND participant_id = $5 AND status = 'confirmed'
+       ) AS exists`,
+      [this.gameProfile, communityId, windowId, serviceCode, participantId],
+    );
+    return result.rows[0].exists;
+  }
+
+  async insertWebsiteBooking(input) {
+    const result = await this.client.query(
+      `INSERT INTO minister_bookings
+         (game_profile, id, community_id, window_id, service_date_id, service_code,
+          booking_date, slot_id, participant_id, discord_user_id, player_id_snapshot,
+          in_game_name_snapshot, alliance_snapshot, display_time_label_snapshot,
+          source, actor_type, actor_id, idempotency_key, correlation_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+               'website','discord_user',$10,$15,$16)
+       RETURNING id, service_code, booking_date, display_time_label_snapshot,
+                 in_game_name_snapshot, alliance_snapshot, status`,
+      [this.gameProfile, input.id, input.communityId, input.windowId,
+       input.serviceDateId, input.serviceCode, input.bookingDate, input.slotId,
+       input.participantId, input.discordUserId, input.playerId, input.inGameName,
+       input.alliance, input.displayTime, input.idempotencyKey, input.correlationId],
+    );
+    return result.rows[0];
+  }
+
+  async insertBookingRequirementAnswer({ bookingId, code, value, displayLabel, unit }) {
+    await this.client.query(
+      `INSERT INTO booking_requirement_answers
+         (game_profile, booking_id, requirement_code, raw_value, numeric_value, unit, display_label)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [this.gameProfile, bookingId, code, String(value), value, unit, displayLabel],
+    );
+  }
+
+  async insertBookingCreatedEvent({ id, communityId, bookingId, actorId, correlationId, afterData }) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile, id, community_id, aggregate_type, aggregate_id, event_type,
+          source, actor_type, actor_id, correlation_id, after_data)
+       VALUES ($1,$2,$3,'minister_booking',$4,'booking_created',
+               'website','discord_user',$5,$6,$7)`,
+      [this.gameProfile, id, communityId, bookingId, actorId, correlationId, afterData],
+    );
+  }
+
+  async insertBookingOutboxEvent({ id, communityId, idempotencyKey, correlationId, payload }) {
+    await this.client.query(
+      `INSERT INTO booking_outbox
+         (game_profile, id, community_id, event_type, payload, idempotency_key, correlation_id)
+       VALUES ($1,$2,$3,'booking.created',$4,$5,$6)`,
+      [this.gameProfile, id, communityId, payload, idempotencyKey, correlationId],
+    );
+  }
+
   async findCurrentBookingWindow(communityId) {
     const result = await this.client.query(
       `SELECT game_profile, id, community_id, status
@@ -188,6 +390,127 @@ class ProfileScopedBookingSession {
       [this.gameProfile, communityId, discordUserId],
     );
     return result.rows;
+  }
+
+  async lockActiveParticipantsByDiscordUser(communityId, discordUserId) {
+    const result = await this.client.query(
+      `SELECT game_profile, id, community_id, discord_user_id, player_id,
+              in_game_name, alliance
+       FROM booking_participants
+       WHERE game_profile = $1
+         AND community_id = $2
+         AND discord_user_id = $3
+         AND status = 'active'
+       ORDER BY id
+       LIMIT 2
+       FOR UPDATE`,
+      [this.gameProfile, communityId, discordUserId],
+    );
+    return result.rows;
+  }
+
+  async insertWebsiteParticipant({
+    id,
+    communityId,
+    discordUserId,
+    playerId,
+    inGameName,
+    alliance,
+    idempotencyKey,
+    correlationId,
+  }) {
+    const result = await this.client.query(
+      `INSERT INTO booking_participants
+         (game_profile, id, community_id, discord_user_id, player_id,
+          in_game_name, alliance, source, idempotency_key, correlation_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'website', $8, $9)
+       RETURNING game_profile, id, community_id, discord_user_id, player_id,
+                 in_game_name, alliance`,
+      [
+        this.gameProfile,
+        id,
+        communityId,
+        discordUserId,
+        playerId,
+        inGameName,
+        alliance,
+        idempotencyKey,
+        correlationId,
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async updateWebsiteParticipant({
+    id,
+    communityId,
+    discordUserId,
+    playerId,
+    inGameName,
+    alliance,
+    idempotencyKey,
+    correlationId,
+  }) {
+    const result = await this.client.query(
+      `UPDATE booking_participants
+       SET player_id = $5,
+           in_game_name = $6,
+           alliance = $7,
+           source = 'website',
+           idempotency_key = $8,
+           correlation_id = $9,
+           updated_at = now()
+       WHERE game_profile = $1
+         AND id = $2
+         AND community_id = $3
+         AND discord_user_id = $4
+         AND status = 'active'
+       RETURNING game_profile, id, community_id, discord_user_id, player_id,
+                 in_game_name, alliance`,
+      [
+        this.gameProfile,
+        id,
+        communityId,
+        discordUserId,
+        playerId,
+        inGameName,
+        alliance,
+        idempotencyKey,
+        correlationId,
+      ],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async insertParticipantChangeEvent({
+    id,
+    communityId,
+    participantId,
+    eventType,
+    actorId,
+    correlationId,
+    beforeData,
+    afterData,
+  }) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile, id, community_id, aggregate_type, aggregate_id,
+          event_type, source, actor_type, actor_id, correlation_id,
+          before_data, after_data)
+       VALUES ($1, $2, $3, 'booking_participant', $4, $5, 'website',
+               'discord_user', $6, $7, $8, $9)`,
+      [
+        this.gameProfile,
+        id,
+        communityId,
+        participantId,
+        eventType,
+        actorId,
+        correlationId,
+        beforeData,
+        afterData,
+      ],
+    );
   }
 
   async listConfirmedBookingsForParticipant(communityId, participantId) {

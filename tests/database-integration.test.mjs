@@ -20,6 +20,7 @@ import {
   NativeBookingCommunityNotFoundError,
   NativeBookingServiceNotFoundError,
 } from "../server/native-booking/read-service-core.mjs";
+import { createRegistrationService } from "../server/native-booking/registration-service-core.mjs";
 
 const testDatabaseUrl = String(process.env.TEST_DATABASE_URL ?? "").trim();
 
@@ -821,6 +822,65 @@ test(
         assert.doesNotMatch(
           JSON.stringify(participantBookings),
           /other-discord-user|player-two|Player Two/,
+        );
+
+        const snapshotBeforeRegistrationUpdate = await withProfile(
+          runtimePool,
+          "wos",
+          (client) =>
+            client.query(
+              `SELECT player_id_snapshot, in_game_name_snapshot,
+                      alliance_snapshot
+               FROM minister_bookings
+               WHERE id = $1`,
+              [bookingOne],
+            ),
+        );
+        const registrationService = createRegistrationService({
+          context: {
+            gameProfile: "wos",
+            community: { id: wosCommunity },
+            discordUser: { id: "trusted-discord-user" },
+          },
+          repository: wosRepository,
+        });
+        await registrationService.upsert(
+          {
+            playerId: "987654",
+            inGameName: "Updated Player",
+            alliance: "NEW",
+          },
+          "snapshot-update-0001",
+        );
+        assert.deepEqual(
+          await readService.getParticipantBookingsForDiscordUser(
+            "trusted-discord-user",
+          ),
+          {
+            registration: {
+              status: "registered",
+              playerId: "987654",
+              inGameName: "Updated Player",
+              alliance: "NEW",
+            },
+            bookings: participantBookings.bookings,
+          },
+        );
+        const snapshotAfterRegistrationUpdate = await withProfile(
+          runtimePool,
+          "wos",
+          (client) =>
+            client.query(
+              `SELECT player_id_snapshot, in_game_name_snapshot,
+                      alliance_snapshot
+               FROM minister_bookings
+               WHERE id = $1`,
+              [bookingOne],
+            ),
+        );
+        assert.deepEqual(
+          snapshotAfterRegistrationUpdate.rows,
+          snapshotBeforeRegistrationUpdate.rows,
         );
         assert.deepEqual(
           await readService.getParticipantBookingsForDiscordUser(

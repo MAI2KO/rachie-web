@@ -99,6 +99,30 @@ export interface NativeBookingSession {
     communityId: string,
     idempotencyKey: string,
   ): Promise<BookingIdempotencyRecord | null>;
+  claimRegistrationIdempotency(input: {
+    communityId: string;
+    idempotencyKey: string;
+    requestHash: string;
+    correlationId: string;
+  }): Promise<
+    | { readonly state: "claimed" }
+    | {
+        readonly state: "existing";
+        readonly record: {
+          readonly operation: string;
+          readonly request_hash: string;
+          readonly status: "started" | "completed" | "failed";
+          readonly response_status: number | null;
+          readonly response_body: Record<string, unknown> | null;
+        } | null;
+      }
+  >;
+  completeRegistrationIdempotency(
+    communityId: string,
+    idempotencyKey: string,
+    responseStatus: number,
+    responseBody: Record<string, unknown>,
+  ): Promise<void>;
   findCurrentBookingWindow(
     communityId: string,
   ): Promise<BookingWindowRecord | null>;
@@ -123,13 +147,47 @@ export interface NativeBookingSession {
     communityId: string,
     discordUserId: string,
   ): Promise<readonly BookingParticipantRecord[]>;
+  lockActiveParticipantsByDiscordUser(
+    communityId: string,
+    discordUserId: string,
+  ): Promise<readonly BookingParticipantRecord[]>;
+  insertWebsiteParticipant(input: {
+    id: string;
+    communityId: string;
+    discordUserId: string;
+    playerId: string;
+    inGameName: string;
+    alliance: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<BookingParticipantRecord>;
+  updateWebsiteParticipant(input: {
+    id: string;
+    communityId: string;
+    discordUserId: string;
+    playerId: string;
+    inGameName: string;
+    alliance: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<BookingParticipantRecord | null>;
+  insertParticipantChangeEvent(input: {
+    id: string;
+    communityId: string;
+    participantId: string;
+    eventType: "participant_registered" | "participant_registration_updated";
+    actorId: string;
+    correlationId: string;
+    beforeData: Record<string, unknown> | null;
+    afterData: Record<string, unknown>;
+  }): Promise<void>;
   listConfirmedBookingsForParticipant(
     communityId: string,
     participantId: string,
   ): Promise<readonly ParticipantBookingRecord[]>;
 }
 
-export interface NativeBookingRepository extends NativeBookingSession {
+export interface NativeBookingRepository {
   readonly gameProfile: GameProfile;
   withTransaction<T>(
     work: (session: NativeBookingSession) => Promise<T>,
