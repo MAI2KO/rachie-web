@@ -118,3 +118,8 @@ Owned appointment rescheduling and cancellation are available through
 `PATCH`/`DELETE /api/v1/bookings/{bookingId}`. See
 [docs/native-booking-mutations.md](docs/native-booking-mutations.md) for lineage,
 locking, closed-booking policy, idempotency, audit, and outbox semantics.
+
+The shared public booking workflow is now available at `/booking`. See
+[docs/public-booking-interface.md](docs/public-booking-interface.md) for user
+states, native API integration, accessibility, mobile behavior, and the boundary
+with future visual work.

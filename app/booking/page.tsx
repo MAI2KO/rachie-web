@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
 
-import { PagePlaceholder } from "@/components/page-placeholder";
+import { getBrandRequestContext } from "@/brands/server";
+import { BookingExperience } from "@/components/booking/booking-experience";
 
 export const metadata: Metadata = {
   title: "Booking",
 };
 
-export default function BookingPage() {
-  return (
-    <PagePlaceholder title="Booking">
-      Booking services will appear here.
-    </PagePlaceholder>
-  );
+export default async function BookingPage() {
+  const { brand } = await getBrandRequestContext();
+  return <BookingExperience brand={brand} />;
 }
