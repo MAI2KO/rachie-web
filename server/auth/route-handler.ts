@@ -1,5 +1,9 @@
 import "server-only";
 
+import { createServerRateLimiter } from "@/server/rate-limit/limiter";
+import { RATE_LIMIT_POLICIES } from "@/server/rate-limit/policies.mjs";
+import { requestNetworkSubject } from "@/server/rate-limit/request-subject.mjs";
+
 import {
   AUTH_SESSION_COOKIE,
   OAUTH_STATE_COOKIE,
@@ -42,7 +46,8 @@ function configuredService(request: Request) {
   const oauthConfig = getDiscordOAuthConfig(context.gameProfile);
   const repository = createAuthRepository(context.gameProfile);
   const sessionSecret = getAuthSessionSecret();
-  if (!oauthConfig || !repository || !sessionSecret) return null;
+  const rateLimiter = createServerRateLimiter(context.gameProfile);
+  if (!oauthConfig || !repository || !sessionSecret || !rateLimiter) return null;
   return {
     context,
     service: createAuthService({
@@ -51,7 +56,25 @@ function configuredService(request: Request) {
       discordClient: createDiscordOAuthClient(oauthConfig),
       sessionSecret,
     }),
+    rateLimiter,
   };
+}
+
+function rateLimitResponse(retryAfterSeconds: number) {
+  return json(
+    { error: "Too many requests.", code: "rate_limited" },
+    429,
+    { "Retry-After": String(retryAfterSeconds) },
+  );
+}
+
+async function applyRateLimit(
+  configured: NonNullable<ReturnType<typeof configuredService>>,
+  policy: (typeof RATE_LIMIT_POLICIES)[keyof typeof RATE_LIMIT_POLICIES],
+  subject: string,
+) {
+  const result = await configured.rateLimiter.consume(policy, subject);
+  return result.allowed ? null : rateLimitResponse(result.retryAfterSeconds);
 }
 
 function cookieSecure() {
@@ -83,6 +106,12 @@ export async function handleAuthLogin(request: Request): Promise<Response> {
   const configured = configuredService(request);
   if (!configured) return json({ error: "Authentication is unavailable." }, 503);
   try {
+    const limited = await applyRateLimit(
+      configured,
+      RATE_LIMIT_POLICIES.oauthLogin,
+      requestNetworkSubject(request),
+    );
+    if (limited) return limited;
     const login = await configured.service.beginLogin();
     return new Response(null, {
       status: 302,
@@ -114,6 +143,12 @@ export async function handleAuthCallback(request: Request): Promise<Response> {
   });
 
   try {
+    const limited = await applyRateLimit(
+      configured,
+      RATE_LIMIT_POLICIES.oauthCallback,
+      requestNetworkSubject(request),
+    );
+    if (limited) return limited;
     const result = await configured.service.completeLogin({
       code,
       state,
@@ -159,10 +194,15 @@ export async function handleAuthSession(request: Request): Promise<Response> {
   const configured = configuredService(request);
   if (!configured) return json({ error: "Authentication is unavailable." }, 503);
   try {
+    const sessionToken = parseCookie(request, AUTH_SESSION_COOKIE);
+    const limited = await applyRateLimit(
+      configured,
+      RATE_LIMIT_POLICIES.authSessionRead,
+      sessionToken ?? requestNetworkSubject(request),
+    );
+    if (limited) return limited;
     return json(
-      await configured.service.getSession(
-        parseCookie(request, AUTH_SESSION_COOKIE),
-      ),
+      await configured.service.getSession(sessionToken),
     );
   } catch {
     return json({ error: "Authentication is unavailable." }, 503);
@@ -181,9 +221,16 @@ export async function handleCommunitySelection(
   if (!body) return json({ error: "A JSON object is required." }, 400);
 
   try {
+    const sessionToken = parseCookie(request, AUTH_SESSION_COOKIE);
+    const limited = await applyRateLimit(
+      configured,
+      RATE_LIMIT_POLICIES.communityChange,
+      sessionToken ?? requestNetworkSubject(request),
+    );
+    if (limited) return limited;
     return json(
       await configured.service.selectCommunity({
-        sessionToken: parseCookie(request, AUTH_SESSION_COOKIE),
+        sessionToken,
         csrfToken: request.headers.get("x-csrf-token"),
         locationCode: body.locationCode,
       }),
@@ -209,8 +256,15 @@ export async function handleAuthLogout(request: Request): Promise<Response> {
     return json({ error: "The request could not be verified." }, 403);
   }
   try {
+    const sessionToken = parseCookie(request, AUTH_SESSION_COOKIE);
+    const limited = await applyRateLimit(
+      configured,
+      RATE_LIMIT_POLICIES.logout,
+      sessionToken ?? requestNetworkSubject(request),
+    );
+    if (limited) return limited;
     await configured.service.logout({
-      sessionToken: parseCookie(request, AUTH_SESSION_COOKIE),
+      sessionToken,
       csrfToken: request.headers.get("x-csrf-token"),
     });
     return json(

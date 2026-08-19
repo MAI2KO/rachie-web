@@ -79,11 +79,11 @@ The first native read-only API is available at:
 
 - `GET /api/v1/booking/context`
 - `GET /api/v1/booking/availability?service=construction`
+- `GET /api/v1/booking/me`
 
-The hostname selects the profile. Server-only
-`WOS_NATIVE_BOOKING_COMMUNITY_CODE` and
-`KINGSHOT_NATIVE_BOOKING_COMMUNITY_CODE` settings select the temporary single
-community for each profile; clients cannot provide either value.
+The hostname selects the profile, and the authenticated session supplies its
+selected verified community. The old environment community codes are not used by
+these routes.
 
 ## Discord authentication foundation
 
@@ -96,3 +96,9 @@ This foundation has no public login UI and does not authorize booking writes yet
 See [docs/discord-authentication.md](docs/discord-authentication.md) for routes,
 required server environment variables, scopes, session security, and remaining
 work.
+
+Native booking reads now require that authenticated session and its selected,
+recently verified Discord community. `GET /api/v1/booking/me` returns only the
+current Discord user's registration and confirmed bookings. See
+[docs/authenticated-booking-context.md](docs/authenticated-booking-context.md) for
+the trust boundary, membership lease, and PostgreSQL-backed rate limits.

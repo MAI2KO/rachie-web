@@ -59,11 +59,14 @@ export interface NativeBookingAvailability {
 }
 
 export interface NativeParticipantBookingSummary {
-  readonly participant: {
-    readonly playerId: string;
-    readonly inGameName: string;
-    readonly alliance: string;
-  };
+  readonly registration:
+    | { readonly status: "unregistered" }
+    | {
+        readonly status: "registered";
+        readonly playerId: string;
+        readonly inGameName: string;
+        readonly alliance: string;
+      };
   readonly bookings: readonly {
     readonly bookingId: string;
     readonly serviceCode: MinisterServiceCode;

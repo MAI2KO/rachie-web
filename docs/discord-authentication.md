@@ -74,6 +74,7 @@ Migration `0002_discord_auth_foundation.sql` adds:
 | `website_auth_sessions` | Hashed opaque session tokens, expiry, and revocation |
 | `website_auth_session_communities` | Communities verified from the login-time guild list |
 | `website_auth_session_selection` | At most one selected verified community per session |
+| `website_rate_limit_buckets` | Profile-scoped distributed abuse counters added by migration `0003` |
 
 The raw random session token is stored only in a host-only, HTTP-only,
 `SameSite=Lax` cookie. Production cookies also use `Secure`. PostgreSQL stores only
@@ -121,8 +122,9 @@ profile values as authority.
 
 The existing `WOS_NATIVE_BOOKING_COMMUNITY_CODE` and
 `KINGSHOT_NATIVE_BOOKING_COMMUNITY_CODE` settings remain a development bridge for
-the unauthenticated read-only API. They do not grant access, populate authenticated
-choices, or authorize any future mutation.
+isolated service testing only. Authenticated native booking routes do not read
+them. They do not grant access, populate authenticated choices, or authorize any
+future mutation.
 
 ## Safe Session Response
 
@@ -135,10 +137,10 @@ database identifiers, guild IDs, session hashes, or credentials.
 
 Before native booking writes:
 
-- define the trusted authenticated request-context adapter consumed by booking
-  services, including the selected internal community UUID;
-- decide the membership refresh/re-authentication policy for long-running browser
-  sessions and removed guild memberships;
+- retain the trusted authenticated request-context adapter for every booking
+  service and never replace it with request parameters;
+- evaluate whether community-link changes should revoke affected sessions before
+  the bounded membership lease expires;
 - decide whether sessions should be revoked across devices when a community link
   changes;
 - add participant registration and ownership rules without treating Discord
@@ -151,3 +153,9 @@ Before native booking writes:
 
 No production Discord credentials, deployment settings, or database connection
 were created by this phase.
+
+Authenticated booking reads use a 30-minute login-time guild-membership lease.
+Stale membership requires a fresh Discord sign-in; future mutations have an
+implemented five-minute freshness assertion. Authentication and booking routes
+also use profile-scoped PostgreSQL fixed-window limits. Full details are in
+[authenticated-booking-context.md](authenticated-booking-context.md).

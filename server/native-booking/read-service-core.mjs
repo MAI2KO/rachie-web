@@ -12,6 +12,13 @@ export class NativeBookingServiceNotFoundError extends Error {
   }
 }
 
+export class NativeBookingParticipantAmbiguousError extends Error {
+  constructor() {
+    super("Participant registration ownership is ambiguous.");
+    this.name = "NativeBookingParticipantAmbiguousError";
+  }
+}
+
 function mapRequirements(settings) {
   if (!settings) return null;
 
@@ -31,8 +38,8 @@ function mapRequirements(settings) {
   };
 }
 
-async function requireCommunity(session, locationCode) {
-  const community = await session.findCommunityByLocationCode(locationCode);
+async function requireCommunity(session, communityId) {
+  const community = await session.findCommunityById(communityId);
   if (!community || community.status !== "active") {
     throw new NativeBookingCommunityNotFoundError();
   }
@@ -41,7 +48,7 @@ async function requireCommunity(session, locationCode) {
 
 export function createNativeBookingReadService({
   gameProfile,
-  communityLocationCode,
+  communityId,
   repository,
 }) {
   return Object.freeze({
@@ -51,7 +58,7 @@ export function createNativeBookingReadService({
       return repository.withTransaction(async (session) => {
         const community = await requireCommunity(
           session,
-          communityLocationCode,
+          communityId,
         );
         const window = await session.findCurrentBookingWindow(community.id);
         const services = await session.listActiveMinisterServices();
@@ -87,7 +94,7 @@ export function createNativeBookingReadService({
       return repository.withTransaction(async (session) => {
         const community = await requireCommunity(
           session,
-          communityLocationCode,
+          communityId,
         );
         const window = await session.findCurrentBookingWindow(community.id);
         const services = await session.listActiveMinisterServices();
@@ -137,14 +144,20 @@ export function createNativeBookingReadService({
       return repository.withTransaction(async (session) => {
         const community = await requireCommunity(
           session,
-          communityLocationCode,
+          communityId,
         );
-        const participant =
-          await session.findActiveParticipantByDiscordUser(
+        const participants =
+          await session.listActiveParticipantsByDiscordUser(
             community.id,
             trustedDiscordUserId,
           );
-        if (!participant) return null;
+        if (participants.length > 1) {
+          throw new NativeBookingParticipantAmbiguousError();
+        }
+        const participant = participants[0];
+        if (!participant) {
+          return { registration: { status: "unregistered" }, bookings: [] };
+        }
 
         const bookings = await session.listConfirmedBookingsForParticipant(
           community.id,
@@ -152,7 +165,8 @@ export function createNativeBookingReadService({
         );
 
         return {
-          participant: {
+          registration: {
+            status: "registered",
             playerId: participant.player_id,
             inGameName: participant.in_game_name,
             alliance: participant.alliance,

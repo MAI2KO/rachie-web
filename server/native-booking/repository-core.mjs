@@ -167,6 +167,14 @@ class ProfileScopedBookingSession {
   }
 
   async findActiveParticipantByDiscordUser(communityId, discordUserId) {
+    const participants = await this.listActiveParticipantsByDiscordUser(
+      communityId,
+      discordUserId,
+    );
+    return participants[0] ?? null;
+  }
+
+  async listActiveParticipantsByDiscordUser(communityId, discordUserId) {
     const result = await this.client.query(
       `SELECT game_profile, id, community_id, discord_user_id, player_id,
               in_game_name, alliance
@@ -174,10 +182,12 @@ class ProfileScopedBookingSession {
        WHERE game_profile = $1
          AND community_id = $2
          AND discord_user_id = $3
-         AND status = 'active'`,
+         AND status = 'active'
+       ORDER BY id
+       LIMIT 2`,
       [this.gameProfile, communityId, discordUserId],
     );
-    return result.rows[0] ?? null;
+    return result.rows;
   }
 
   async listConfirmedBookingsForParticipant(communityId, participantId) {
@@ -278,6 +288,14 @@ export function createProfileScopedBookingRepository(gameProfile, pool) {
     findActiveParticipantByDiscordUser(communityId, discordUserId) {
       return withTransaction((session) =>
         session.findActiveParticipantByDiscordUser(
+          communityId,
+          discordUserId,
+        ),
+      );
+    },
+    listActiveParticipantsByDiscordUser(communityId, discordUserId) {
+      return withTransaction((session) =>
+        session.listActiveParticipantsByDiscordUser(
           communityId,
           discordUserId,
         ),

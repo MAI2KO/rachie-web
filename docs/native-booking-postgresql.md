@@ -14,6 +14,9 @@ Discord website identity and community selection now use the additive, ordered
 `0002_discord_auth_foundation.sql` migration. This does not make native booking
 writes available. See [discord-authentication.md](discord-authentication.md).
 
+Migration `0003_rate_limit_foundation.sql` adds distributed, profile-RLS request
+counters for authentication, authenticated reads, and future mutations.
+
 ## Configuration
 
 `DATABASE_URL` is read only by server modules. It must be a PostgreSQL connection
@@ -26,15 +29,15 @@ unavailable.
 random schema, run migrations there, and drop it afterward. It must point to a safe
 disposable database where schema creation is permitted, never a production database.
 
-The read-only native API also uses these server-only settings:
+These server-only settings remain only as development helpers for isolated service
+testing:
 
 - `WOS_NATIVE_BOOKING_COMMUNITY_CODE`
 - `KINGSHOT_NATIVE_BOOKING_COMMUNITY_CODE`
 
-Each value is the exact `booking_communities.location_code` served for that
-profile's hostname. They are a controlled single-community bridge until the site
-has authenticated State/Kingdom selection. They must not be exposed with a
-`NEXT_PUBLIC_` prefix.
+Each value is a profile-specific `booking_communities.location_code`. The
+authenticated native routes do not read either setting, and neither value is
+authorization. They must not be exposed with a `NEXT_PUBLIC_` prefix.
 
 ### Disposable local PostgreSQL
 
@@ -187,12 +190,13 @@ re-run as a no-op. Concurrent runners applied it exactly once under the advisory
 lock. The recorded SHA-256 checksum was present, and a mismatched checksum was
 rejected.
 
-The database integration suite verifies all 14 native tables, forced RLS and its
-policies, both directions of composite profile isolation, transaction rollback,
-idempotency uniqueness, participant rules, active slot/block/player uniqueness,
-and rollback of a multi-step reschedule shape. The reschedule test ends the old
-booking and creates its successor in one transaction, forces a later failure, and
-confirms neither intermediate change survives.
+The database integration suite verifies all native booking, authentication, and
+rate-limit tables, forced RLS and its policies, both directions of composite
+profile isolation, transaction rollback, idempotency uniqueness, participant
+rules, active slot/block/player uniqueness, and rollback of a multi-step
+reschedule shape. The reschedule test ends the old booking and creates its
+successor in one transaction, forces a later failure, and confirms neither
+intermediate change survives.
 
 The PostgreSQL catalog index audit found no correctness defect or removable index.
 Some unique indexes intentionally overlap because PostgreSQL requires the exact
@@ -208,7 +212,9 @@ The first native service layer is read only:
 ```text
 Hostname
   -> trusted brand/profile resolution
-  -> profile-specific configured community code
+  -> authenticated profile-scoped session
+  -> selected verified Discord guild/community relationship
+  -> bounded membership freshness
   -> profile-bound repository transaction and RLS context
   -> native read service
   -> versioned public response
@@ -219,27 +225,24 @@ definitions, service dates, public requirement settings, available slots, and an
 internally trusted Discord user's active registration/current bookings. Raw SQL
 rows are mapped into typed domain objects before they reach route handlers.
 
-The participant read has no public route. It is reserved for a future authenticated
-Discord identity context and cannot currently be invoked by supplying a user ID in
-a query string.
-
-The authentication foundation now provides a profile-scoped Discord session and
-verified community selection, but it has deliberately not yet been connected to
-this participant read. The environment community codes remain a development-only
-read bridge and are never authentication or mutation authority.
+The participant read is exposed only through `GET /api/v1/booking/me`. Its Discord
+user ID and community come from the trusted authenticated context, never request
+parameters. It returns an explicit unregistered state or that user's active
+registration and confirmed bookings.
 
 ### Community resolution
 
-`r-a-c-h-i-e.com`/`localhost` resolves the WOS profile and its configured WOS
-community code. `peggie.r-a-c-h-i-e.com`/`peggie.localhost` resolves Kingshot and
-its separately configured code. Unknown hosts, absent configuration, archived or
+`r-a-c-h-i-e.com`/`localhost` resolves WOS, while
+`peggie.r-a-c-h-i-e.com`/`peggie.localhost` resolves Kingshot. The selected
+community must be a current session choice derived from a same-profile Discord
+guild mapping. Unknown hosts, invalid sessions, stale membership, archived or
 missing communities, and profile/community mismatches fail closed.
 
-No request body, query parameter, cookie, or arbitrary header chooses
-`game_profile` or community. This deliberately supports only one configured
-community per profile for now. Before multi-community public use, an authenticated
-Discord guild/community membership or another approved server-owned selection
-mechanism is required.
+No request body, query parameter, or arbitrary header chooses `game_profile` or
+community. The host chooses the profile; the opaque session cookie identifies a
+server-side selection restricted to communities verified during Discord login.
+The old environment community codes remain development-only helpers and are not
+used by authenticated routes.
 
 ### Current window and availability
 
@@ -260,7 +263,7 @@ A slot is returned only when all of these database conditions hold:
 Slots are ordered by ordinal and then stable slot ID. Occupied player, participant,
 Discord, alliance, and booking details are never selected or returned.
 
-### Public routes
+### Authenticated routes
 
 `GET /api/v1/booking/context` returns:
 
@@ -310,17 +313,22 @@ Discord, alliance, and booking details are never selected or returned.
 }
 ```
 
+`GET /api/v1/booking/me` returns the selected community plus either an explicit
+`unregistered` state or the current Discord user's registration and confirmed
+bookings. It cannot accept a Discord user ID or player ID selector.
+
 Only `construction`, `research`, and `troop` are accepted service codes. Missing or
-malformed codes return a controlled `400`. Missing contexts return `404`, while
-database/configuration failures return controlled `503` responses without SQL,
-credentials, table names, or stack traces. Responses use `Cache-Control: no-store`.
+malformed codes return a controlled `400`. Authentication and stale membership
+return controlled `401` responses, missing selection returns `409`, rate limits
+return `429`, and database/configuration failures return controlled `503`
+responses without SQL, credentials, table names, or stack traces. Responses use
+`Cache-Control: no-store`.
 
 ### Intentionally unimplemented
 
 This layer does not create registrations or bookings, reschedule, cancel, clear,
-reserve, perform admin mutations, authenticate website users, expose participant
-reads publicly, call Apps Script, import Sheets, or switch bot traffic. The legacy
-compatibility proxy remains separate.
+reserve, perform admin mutations, call Apps Script, import Sheets, or switch bot
+traffic. The legacy compatibility proxy remains separate.
 
 ## Legacy Behavior Not Carried Forward
 

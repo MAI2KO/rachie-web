@@ -11,12 +11,14 @@ import type {
 import {
   createNativeBookingReadService as createReadServiceCore,
   NativeBookingCommunityNotFoundError,
+  NativeBookingParticipantAmbiguousError,
   NativeBookingServiceNotFoundError,
 } from "./read-service-core.mjs";
 import type { NativeBookingRepository } from "./repository";
 
 export {
   NativeBookingCommunityNotFoundError,
+  NativeBookingParticipantAmbiguousError,
   NativeBookingServiceNotFoundError,
 };
 
@@ -28,21 +30,23 @@ export interface NativeBookingReadService {
   ): Promise<NativeBookingAvailability>;
   getParticipantBookingsForDiscordUser(
     trustedDiscordUserId: string,
-  ): Promise<NativeParticipantBookingSummary | null>;
+  ): Promise<NativeParticipantBookingSummary>;
 }
 
 export function createNativeBookingReadService(
-  trustedGameProfile: GameProfile,
-  trustedCommunityLocationCode: string,
+  trustedContext: {
+    readonly gameProfile: GameProfile;
+    readonly community: { readonly id: string };
+  },
   repository: NativeBookingRepository,
 ): NativeBookingReadService {
-  if (repository.gameProfile !== trustedGameProfile) {
+  if (repository.gameProfile !== trustedContext.gameProfile) {
     throw new TypeError("Native booking repository profile mismatch.");
   }
 
   return createReadServiceCore({
-    gameProfile: trustedGameProfile,
-    communityLocationCode: trustedCommunityLocationCode,
+    gameProfile: trustedContext.gameProfile,
+    communityId: trustedContext.community.id,
     repository,
   }) as NativeBookingReadService;
 }

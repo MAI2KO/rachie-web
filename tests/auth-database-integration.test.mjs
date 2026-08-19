@@ -6,10 +6,16 @@ import test from "node:test";
 import pg from "pg";
 
 import {
+  BookingMembershipRefreshRequiredError,
+  resolveAuthenticatedBookingContextCore,
+} from "../server/auth/authenticated-booking-context-core.mjs";
+import {
   loadMigrations,
   runMigrations,
 } from "../server/database/migrations.mjs";
 import { createProfileScopedAuthRepository } from "../server/auth/repository-core.mjs";
+import { createRateLimiter } from "../server/rate-limit/limiter-core.mjs";
+import { createProfileScopedRateLimitRepository } from "../server/rate-limit/repository-core.mjs";
 
 const testDatabaseUrl = String(process.env.TEST_DATABASE_URL ?? "").trim();
 
@@ -65,7 +71,7 @@ test(
         fileURLToPath(new URL("../db/migrations/", import.meta.url)),
       );
       const migrationResult = await runMigrations(migrationPool, migrations);
-      assert.deepEqual(migrationResult.applied, ["0001", "0002"]);
+      assert.deepEqual(migrationResult.applied, ["0001", "0002", "0003"]);
 
       await adminPool.query(
         `CREATE ROLE ${runtimeRole}
@@ -128,6 +134,14 @@ test(
 
       const wos = createProfileScopedAuthRepository("wos", runtimePool);
       const kingshot = createProfileScopedAuthRepository("kingshot", runtimePool);
+      const wosRateLimits = createProfileScopedRateLimitRepository(
+        "wos",
+        runtimePool,
+      );
+      const kingshotRateLimits = createProfileScopedRateLimitRepository(
+        "kingshot",
+        runtimePool,
+      );
 
       await t.test("OAuth states are one-use, expiring, and profile-bound", async () => {
         const stateHash = "a".repeat(64);
@@ -197,6 +211,61 @@ test(
         );
       });
 
+      await t.test("trusted booking context uses the persisted selected community", async () => {
+        const wosHash = "3".repeat(64);
+        const kingshotHash = "4".repeat(64);
+        await wos.createSession(
+          sessionInput(wosHash, "context-wos-user", ["wos-guild-one"]),
+        );
+        await kingshot.createSession(
+          sessionInput(kingshotHash, "context-kingshot-user", [
+            "kingshot-guild-one",
+          ]),
+        );
+
+        async function resolve(profile, tokenHash) {
+          return resolveAuthenticatedBookingContextCore(
+            new Request(
+              `http://example/api/v1/booking/context?game_profile=${
+                profile === "wos" ? "kingshot" : "wos"
+              }&community_id=hostile`,
+            ),
+            {
+              resolveHostContext: () => ({
+                brand: { game: { profile } },
+                hostname: profile === "wos" ? "localhost" : "peggie.localhost",
+                gameProfile: profile,
+              }),
+              readSessionToken: () => tokenHash,
+              hashSessionToken: (value) => value,
+              createAuthRepository: (repositoryProfile) =>
+                repositoryProfile === "wos" ? wos : kingshot,
+            },
+          );
+        }
+
+        const wosContext = await resolve("wos", wosHash);
+        const kingshotContext = await resolve("kingshot", kingshotHash);
+        assert.equal(wosContext.discordUser.id, "context-wos-user");
+        assert.equal(wosContext.community.id, wosOne);
+        assert.equal(wosContext.community.discordGuildId, "wos-guild-one");
+        assert.equal(kingshotContext.discordUser.id, "context-kingshot-user");
+        assert.equal(kingshotContext.community.id, kingshotOne);
+
+        await withProfile(runtimePool, "wos", (client) =>
+          client.query(
+            `UPDATE website_auth_session_communities
+             SET verified_at = now() - interval '31 minutes'
+             WHERE session_token_hash = $1`,
+            [wosHash],
+          ),
+        );
+        await assert.rejects(
+          resolve("wos", wosHash),
+          BookingMembershipRefreshRequiredError,
+        );
+      });
+
       await t.test("forced RLS hides auth rows and logout revokes server state", async () => {
         const tokenHash = "1".repeat(64);
         await wos.createSession(
@@ -234,6 +303,41 @@ test(
           );
         });
         assert.equal(await wos.findSession(expiredHash), null);
+      });
+
+      await t.test("rate limits are atomic and profile-isolated", async () => {
+        const fixedNow = new Date("2026-08-19T12:00:30.000Z");
+        const policy = { code: "integration", limit: 2, windowSeconds: 60 };
+        const wosLimiter = createRateLimiter({
+          gameProfile: "wos",
+          repository: wosRateLimits,
+          secret: "r".repeat(32),
+          now: () => fixedNow,
+        });
+        const kingshotLimiter = createRateLimiter({
+          gameProfile: "kingshot",
+          repository: kingshotRateLimits,
+          secret: "r".repeat(32),
+          now: () => fixedNow,
+        });
+        const attempts = await Promise.all([
+          wosLimiter.consume(policy, "same-subject"),
+          wosLimiter.consume(policy, "same-subject"),
+          wosLimiter.consume(policy, "same-subject"),
+        ]);
+        assert.equal(attempts.filter((attempt) => attempt.allowed).length, 2);
+        assert.equal(attempts.filter((attempt) => !attempt.allowed).length, 1);
+        assert.equal(
+          (await kingshotLimiter.consume(policy, "same-subject")).allowed,
+          true,
+        );
+
+        const wosRows = await withProfile(runtimePool, "wos", (client) =>
+          client.query(
+            "SELECT game_profile FROM website_rate_limit_buckets",
+          ),
+        );
+        assert.ok(wosRows.rows.every((row) => row.game_profile === "wos"));
       });
     } finally {
       await runtimePool?.end();

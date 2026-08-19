@@ -119,6 +119,10 @@ export interface NativeBookingSession {
     communityId: string,
     discordUserId: string,
   ): Promise<BookingParticipantRecord | null>;
+  listActiveParticipantsByDiscordUser(
+    communityId: string,
+    discordUserId: string,
+  ): Promise<readonly BookingParticipantRecord[]>;
   listConfirmedBookingsForParticipant(
     communityId: string,
     participantId: string,

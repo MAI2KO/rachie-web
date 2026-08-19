@@ -145,6 +145,7 @@ test(
             "website_auth_sessions",
             "website_discord_identities",
             "website_oauth_states",
+            "website_rate_limit_buckets",
           ],
         );
       });
@@ -747,6 +748,12 @@ test(
              WHERE id = $1`,
             [participantOne],
           );
+          await client.query(
+            `UPDATE booking_participants
+             SET discord_user_id = 'other-discord-user'
+             WHERE id = $1`,
+            [participantTwo],
+          );
         });
 
         const wosRepository = createProfileScopedBookingRepository(
@@ -755,7 +762,7 @@ test(
         );
         const readService = createNativeBookingReadService({
           gameProfile: "wos",
-          communityLocationCode: "1001",
+          communityId: wosCommunity,
           repository: wosRepository,
         });
         const publicContext = await readService.getContext();
@@ -795,7 +802,8 @@ test(
             "trusted-discord-user",
           );
         assert.deepEqual(participantBookings, {
-          participant: {
+          registration: {
+            status: "registered",
             playerId: "player-one",
             inGameName: "Player One",
             alliance: "TAG",
@@ -810,11 +818,15 @@ test(
             },
           ],
         });
-        assert.equal(
+        assert.doesNotMatch(
+          JSON.stringify(participantBookings),
+          /other-discord-user|player-two|Player Two/,
+        );
+        assert.deepEqual(
           await readService.getParticipantBookingsForDiscordUser(
             "not-registered",
           ),
-          null,
+          { registration: { status: "unregistered" }, bookings: [] },
         );
 
         const kingshotRepository = createProfileScopedBookingRepository(
@@ -823,7 +835,7 @@ test(
         );
         const crossProfileService = createNativeBookingReadService({
           gameProfile: "kingshot",
-          communityLocationCode: "1001",
+          communityId: wosCommunity,
           repository: kingshotRepository,
         });
         await assert.rejects(
@@ -832,7 +844,7 @@ test(
         );
         const kingshotService = createNativeBookingReadService({
           gameProfile: "kingshot",
-          communityLocationCode: "2002",
+          communityId: kingshotCommunity,
           repository: kingshotRepository,
         });
         const kingshotContext = await kingshotService.getContext();

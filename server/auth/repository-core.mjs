@@ -108,6 +108,7 @@ class ProfileScopedAuthSession {
     const communities = await this.client.query(
       `SELECT community.id, community.location_code, community.display_name,
               session_community.discord_guild_id,
+              session_community.verified_at,
               (selection.community_id IS NOT NULL) AS selected
        FROM website_auth_session_communities AS session_community
        JOIN booking_communities AS community
@@ -138,6 +139,7 @@ class ProfileScopedAuthSession {
         locationCode: row.location_code,
         displayName: row.display_name,
         discordGuildId: row.discord_guild_id,
+        verifiedAt: row.verified_at,
         selected: row.selected,
       })),
     };
