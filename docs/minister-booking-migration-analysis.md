@@ -1214,6 +1214,13 @@ Do not point tests at production Sheets.
 
 ### Stage 2: additive PostgreSQL and service foundation
 
+**Implemented foundation (not deployed):** the website now contains an ordered,
+checksummed PostgreSQL migration system and the initial profile-isolated native
+booking schema. Composite profile foreign keys, forced row-level security,
+transaction-local repository context, active slot/player uniqueness, an
+idempotency ledger, audit events, and an outbox are present. No native booking API,
+import, production database configuration, or traffic switch has been implemented.
+
 1. Create reviewed migrations only after Stages 0-1.
 2. Add composite profile ownership, constraints, RLS, transactions, audit, outbox,
    and idempotency.

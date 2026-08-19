@@ -55,3 +55,32 @@ Configure the server-only `RACHIE_LEGACY_BOOKING_URL` and
 its path profile, recognized request hostname, and configured profile backend all
 agree. See [docs/booking-compatibility-proxy.md](docs/booking-compatibility-proxy.md)
 for the action allowlist and operating constraints.
+
+## Native booking database foundation
+
+Native booking infrastructure uses the server-only `DATABASE_URL` setting. The
+ordinary website and legacy compatibility proxy continue to start when it is not
+configured; native booking repositories are then unavailable instead of opening a
+connection implicitly.
+
+Apply ordered PostgreSQL migrations with:
+
+```bash
+npm run db:migrate
+```
+
+Migrations are checksummed, transactionally recorded, and serialized with a
+PostgreSQL advisory lock. Never edit an applied migration; add a new ordered file.
+For optional database integration tests, point `TEST_DATABASE_URL` only at a safe
+disposable PostgreSQL database. See
+[docs/native-booking-postgresql.md](docs/native-booking-postgresql.md).
+
+The first native read-only API is available at:
+
+- `GET /api/v1/booking/context`
+- `GET /api/v1/booking/availability?service=construction`
+
+The hostname selects the profile. Server-only
+`WOS_NATIVE_BOOKING_COMMUNITY_CODE` and
+`KINGSHOT_NATIVE_BOOKING_COMMUNITY_CODE` settings select the temporary single
+community for each profile; clients cannot provide either value.
