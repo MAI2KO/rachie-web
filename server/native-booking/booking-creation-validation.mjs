@@ -30,6 +30,21 @@ export function validateBookingChoice(value) {
   return { serviceCode: value.serviceCode, slotId, requirements };
 }
 
+export function validateRescheduleChoice(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new InvalidBookingRequestError("invalid_slot", "Reschedule details are invalid.");
+  }
+  const slotId = typeof value.slotId === "string" ? value.slotId.trim() : "";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(slotId)) {
+    throw new InvalidBookingRequestError("invalid_slot", "Invalid appointment slot.");
+  }
+  const requirements = value.requirements ?? {};
+  if (!requirements || typeof requirements !== "object" || Array.isArray(requirements)) {
+    throw new InvalidBookingRequestError("invalid_requirements", "Requirement answers are invalid.");
+  }
+  return { slotId, requirements };
+}
+
 const LABELS = Object.freeze({
   wos: Object.freeze({ fc: "Fire Crystals", rfc: "Refined Fire Crystals", shards: "Fire Crystal Shards", speedups: "Speedups" }),
   kingshot: Object.freeze({ fc: "Truegold", rfc: "Tempered Truegold", shards: "Truegold Dust", speedups: "Speedups" }),

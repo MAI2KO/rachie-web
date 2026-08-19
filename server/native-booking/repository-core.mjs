@@ -147,6 +147,132 @@ class ProfileScopedBookingSession {
     );
   }
 
+  async claimBookingMutationIdempotency({ communityId, idempotencyKey, operation, requestHash, correlationId }) {
+    const claimed = await this.client.query(
+      `INSERT INTO booking_idempotency_keys
+         (game_profile, community_id, idempotency_key, operation, request_hash, correlation_id)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (game_profile, community_id, idempotency_key) DO NOTHING
+       RETURNING idempotency_key`,
+      [this.gameProfile, communityId, idempotencyKey, operation, requestHash, correlationId],
+    );
+    if (claimed.rowCount === 1) return { state: "claimed" };
+    const existing = await this.client.query(
+      `SELECT operation, request_hash, status, response_status, response_body
+       FROM booking_idempotency_keys
+       WHERE game_profile=$1 AND community_id=$2 AND idempotency_key=$3`,
+      [this.gameProfile, communityId, idempotencyKey],
+    );
+    return { state: "existing", record: existing.rows[0] ?? null };
+  }
+
+  async lockOwnedBooking(communityId, participantId, bookingId) {
+    const result = await this.client.query(
+      `SELECT booking.*, service.display_label AS service_label
+       FROM minister_bookings AS booking
+       JOIN minister_services AS service
+         ON service.game_profile=booking.game_profile
+        AND service.service_code=booking.service_code
+       WHERE booking.game_profile=$1 AND booking.community_id=$2
+         AND booking.participant_id=$3 AND booking.id=$4
+       FOR UPDATE OF booking`,
+      [this.gameProfile, communityId, participantId, bookingId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async lockBookingMutation(bookingId) {
+    await this.client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`${this.gameProfile}:${bookingId}`],
+    );
+  }
+
+  async listBookingRequirementAnswers(bookingId) {
+    const result = await this.client.query(
+      `SELECT requirement_code, numeric_value, unit, display_label
+       FROM booking_requirement_answers
+       WHERE game_profile=$1 AND booking_id=$2
+       ORDER BY requirement_code`,
+      [this.gameProfile, bookingId],
+    );
+    return result.rows;
+  }
+
+  async hasConfirmedBookingForSlotExcluding(slotId, bookingId) {
+    const result = await this.client.query(
+      `SELECT EXISTS (SELECT 1 FROM minister_bookings
+       WHERE game_profile=$1 AND slot_id=$2 AND status='confirmed' AND id<>$3) AS exists`,
+      [this.gameProfile, slotId, bookingId],
+    );
+    return result.rows[0].exists;
+  }
+
+  async replaceBookingAtomically(input) {
+    const result = await this.client.query(
+      `WITH replaced AS (
+         UPDATE minister_bookings
+         SET status='replaced', cancellation_reason='rescheduled',
+             cancelled_at=now(), cancelled_by_actor_type='discord_user',
+             cancelled_by_actor_id=$10, version=version+1, updated_at=now()
+         WHERE game_profile=$1 AND id=$2 AND community_id=$3
+           AND participant_id=$9 AND status='confirmed'
+         RETURNING id
+       )
+       INSERT INTO minister_bookings
+         (game_profile,id,community_id,window_id,service_date_id,service_code,
+          booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
+          in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
+          source,actor_type,actor_id,idempotency_key,correlation_id,
+          rescheduled_from_booking_id)
+       SELECT $1,$4,$3,$5,$6,$7,$8,$11,$9,$10,$12,$13,$14,$15,
+              'website','discord_user',$10,$16,$17,$2
+       FROM replaced
+       RETURNING id,service_code,booking_date,display_time_label_snapshot,
+                 in_game_name_snapshot,alliance_snapshot,status`,
+      [this.gameProfile, input.oldBookingId, input.communityId, input.newBookingId,
+       input.windowId, input.serviceDateId, input.serviceCode, input.bookingDate,
+       input.participantId, input.discordUserId, input.slotId, input.playerId,
+       input.inGameName, input.alliance, input.displayTime, input.idempotencyKey,
+       input.correlationId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async cancelOwnedBooking({ communityId, participantId, bookingId, actorId }) {
+    const result = await this.client.query(
+      `UPDATE minister_bookings
+       SET status='cancelled', cancellation_reason='cancelled_by_user',
+           cancelled_at=now(), cancelled_by_actor_type='discord_user',
+           cancelled_by_actor_id=$5, version=version+1, updated_at=now()
+       WHERE game_profile=$1 AND community_id=$2 AND participant_id=$3
+         AND id=$4 AND status='confirmed'
+       RETURNING id,service_code,booking_date,display_time_label_snapshot,status`,
+      [this.gameProfile, communityId, participantId, bookingId, actorId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async insertBookingMutationEvent({ id, communityId, bookingId, eventType, actorId, correlationId, beforeData, afterData }) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,
+          source,actor_type,actor_id,correlation_id,before_data,after_data)
+       VALUES ($1,$2,$3,'minister_booking',$4,$5,'website','discord_user',$6,$7,$8,$9)`,
+      [this.gameProfile, id, communityId, bookingId, eventType, actorId,
+       correlationId, beforeData, afterData],
+    );
+  }
+
+  async insertBookingMutationOutbox({ id, communityId, eventType, idempotencyKey, correlationId, payload }) {
+    await this.client.query(
+      `INSERT INTO booking_outbox
+         (game_profile,id,community_id,event_type,payload,idempotency_key,correlation_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [this.gameProfile, id, communityId, eventType, payload, idempotencyKey, correlationId],
+    );
+  }
+
   async lockCommunityForBooking(communityId) {
     const result = await this.client.query(
       `SELECT game_profile, id, status, bookings_open

@@ -240,6 +240,11 @@ transaction. It locks and re-checks the participant and slot, captures immutable
 snapshots, and commits requirement answers, audit, outbox, and idempotency state
 together. See [native-booking-creation.md](native-booking-creation.md).
 
+Owned active bookings can be rescheduled or cancelled through the opaque booking
+route. Reschedules preserve immutable rows through `rescheduled_from_booking_id`;
+cancellations preserve snapshots and free slots without deletion. See
+[native-booking-mutations.md](native-booking-mutations.md).
+
 ### Community resolution
 
 `r-a-c-h-i-e.com`/`localhost` resolves WOS, while
@@ -336,10 +341,9 @@ responses without SQL, credentials, table names, or stack traces. Responses use
 
 ### Intentionally unimplemented
 
-This layer does not create bookings, reschedule, cancel, clear, reserve, perform
-admin mutations, call Apps Script, import Sheets, or switch bot traffic.
-Participant registration create/update is the only native mutation; the legacy
-compatibility proxy remains separate.
+This layer does not clear, reserve, perform admin mutations, deliver notifications,
+call Apps Script, import Sheets, or switch bot traffic. The legacy compatibility
+proxy remains separate.
 
 ## Legacy Behavior Not Carried Forward
 

@@ -87,8 +87,8 @@ Controlled errors include `authentication_required`,
 `booking_already_exists`, `invalid_requirements`, `csrf_invalid`,
 `rate_limited`, `idempotency_conflict`, and `service_unavailable`.
 
-## Remaining work
+## Related mutations
 
-Rescheduling must later replace a booking atomically and preserve lineage.
-Cancellation needs its own authorization, state transition, audit, idempotency,
-and outbox contract. Neither behavior is inferred from creation.
+Owned rescheduling and cancellation are documented in
+[native-booking-mutations.md](native-booking-mutations.md). Admin operations and
+notification delivery remain unimplemented.

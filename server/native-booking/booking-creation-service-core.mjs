@@ -44,11 +44,11 @@ export function createBookingCreationService({ context, repository, createId = r
       try {
         return await repository.withTransaction(async (session) => {
           const correlationId = createId();
+          const community = await session.lockCommunityForBooking(context.community.id);
           const claim = await session.claimBookingIdempotency({ communityId: context.community.id, idempotencyKey: key, requestHash: hash, correlationId });
           const prior = replay(claim, hash);
           if (prior) return prior;
 
-          const community = await session.lockCommunityForBooking(context.community.id);
           if (!community || community.status !== "active" || !community.bookings_open) throw new BookingCreationError("bookings_closed", "Bookings are closed.");
           const participants = await session.lockActiveParticipantsByDiscordUser(context.community.id, context.discordUser.id);
           if (participants.length !== 1) throw new BookingCreationError("registration_required", "An active participant registration is required.");

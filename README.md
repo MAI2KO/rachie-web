@@ -113,3 +113,8 @@ Native appointment creation is available at `POST /api/v1/bookings`. It requires
 the same trusted context plus an active registration and atomically records the
 booking, requirement answers, audit event, outbox event, and idempotency result.
 See [docs/native-booking-creation.md](docs/native-booking-creation.md).
+
+Owned appointment rescheduling and cancellation are available through
+`PATCH`/`DELETE /api/v1/bookings/{bookingId}`. See
+[docs/native-booking-mutations.md](docs/native-booking-mutations.md) for lineage,
+locking, closed-booking policy, idempotency, audit, and outbox semantics.
