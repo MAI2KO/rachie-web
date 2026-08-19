@@ -10,6 +10,10 @@ migration work.
 
 The website database is independent from every Discord bot database.
 
+Discord website identity and community selection now use the additive, ordered
+`0002_discord_auth_foundation.sql` migration. This does not make native booking
+writes available. See [discord-authentication.md](discord-authentication.md).
+
 ## Configuration
 
 `DATABASE_URL` is read only by server modules. It must be a PostgreSQL connection
@@ -218,6 +222,11 @@ rows are mapped into typed domain objects before they reach route handlers.
 The participant read has no public route. It is reserved for a future authenticated
 Discord identity context and cannot currently be invoked by supplying a user ID in
 a query string.
+
+The authentication foundation now provides a profile-scoped Discord session and
+verified community selection, but it has deliberately not yet been connected to
+this participant read. The environment community codes remain a development-only
+read bridge and are never authentication or mutation authority.
 
 ### Community resolution
 

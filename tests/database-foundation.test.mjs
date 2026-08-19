@@ -181,9 +181,12 @@ test("migration files are ordered and checksummed", async () => {
 
   assert.deepEqual(
     migrations.map(({ version, name }) => ({ version, name })),
-    [{ version: "0001", name: "native_booking_schema" }],
+    [
+      { version: "0001", name: "native_booking_schema" },
+      { version: "0002", name: "discord_auth_foundation" },
+    ],
   );
-  assert.match(migrations[0].checksum, /^[0-9a-f]{64}$/);
+  assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));
 });
 
 test("migration re-runs are safe and concurrent runners serialize", async () => {

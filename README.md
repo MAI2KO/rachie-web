@@ -84,3 +84,15 @@ The hostname selects the profile. Server-only
 `WOS_NATIVE_BOOKING_COMMUNITY_CODE` and
 `KINGSHOT_NATIVE_BOOKING_COMMUNITY_CODE` settings select the temporary single
 community for each profile; clients cannot provide either value.
+
+## Discord authentication foundation
+
+Server-side Discord OAuth and profile-scoped community selection are available
+under `/api/v1/auth/*`. The hostname chooses the OAuth application and database
+profile; Discord guild IDs are matched against `booking_discord_guilds`, and only
+those verified choices can be selected. Access tokens are never stored or exposed.
+
+This foundation has no public login UI and does not authorize booking writes yet.
+See [docs/discord-authentication.md](docs/discord-authentication.md) for routes,
+required server environment variables, scopes, session security, and remaining
+work.

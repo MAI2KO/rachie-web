@@ -79,6 +79,7 @@ test(
         await assert.rejects(
           runMigrations(migrationPool, [
             { ...migrations[0], checksum: "0".repeat(64) },
+            ...migrations.slice(1),
           ]),
           /has been modified/,
         );
@@ -139,6 +140,11 @@ test(
             "booking_windows",
             "minister_bookings",
             "minister_services",
+            "website_auth_session_communities",
+            "website_auth_session_selection",
+            "website_auth_sessions",
+            "website_discord_identities",
+            "website_oauth_states",
           ],
         );
       });
