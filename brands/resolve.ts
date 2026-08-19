@@ -17,7 +17,7 @@ export function normalizeHostname(host: string | null): string {
   return firstHost.split(":", 1)[0]?.replace(/\.$/, "") ?? "";
 }
 
-export function resolveBrand(hostname: string): ActiveBrand {
+export function resolveKnownBrand(hostname: string): ActiveBrand | null {
   const normalizedHostname = normalizeHostname(hostname);
 
   return (
@@ -27,6 +27,10 @@ export function resolveBrand(hostname: string): ActiveBrand {
         brand.localHostnames.some(
           (localHostname) => localHostname === normalizedHostname,
         ),
-    ) ?? brandConfigs[DEFAULT_BRAND_ID]
+    ) ?? null
   );
+}
+
+export function resolveBrand(hostname: string): ActiveBrand {
+  return resolveKnownBrand(hostname) ?? brandConfigs[DEFAULT_BRAND_ID];
 }

@@ -1244,6 +1244,14 @@ Apps Script remains source of truth and no API route changes in this stage.
 
 ### Stage 5: booking compatibility proxy in legacy-forward mode
 
+**Implemented foundation (not deployed):** the website now has separate
+`/api/compat/booking/wos` and `/api/compat/booking/kingshot` POST routes. Each
+requires the route profile to match the server-resolved hostname profile and uses
+only its profile-specific server environment setting. A central booking-action
+allowlist excludes state, Drive/Sheet lifecycle, general configuration, admin
+role, and banter operations. Requests and valid legacy JSON responses are
+forwarded without reserialization; Apps Script remains authoritative.
+
 1. Deploy separate WOS and Kingshot booking compatibility routes with distinct,
    profile-bound credentials.
 2. Route only the bot's booking client through the proxy; continue state/Drive and

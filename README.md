@@ -40,3 +40,18 @@ both configured hostnames.
 
 Unrecognized hostnames fall back to R.A.C.H.I.E. This includes standard localhost
 and keeps local development predictable.
+
+## Legacy booking compatibility
+
+The server exposes profile-scoped compatibility routes that forward approved
+booking actions to the existing Apps Script deployments. Apps Script remains the
+authoritative booking system; the proxy does not store or reinterpret bookings.
+
+- WOS: `POST /api/compat/booking/wos`
+- Kingshot: `POST /api/compat/booking/kingshot`
+
+Configure the server-only `RACHIE_LEGACY_BOOKING_URL` and
+`PEGGIE_LEGACY_BOOKING_URL` environment variables. A route is usable only when
+its path profile, recognized request hostname, and configured profile backend all
+agree. See [docs/booking-compatibility-proxy.md](docs/booking-compatibility-proxy.md)
+for the action allowlist and operating constraints.
