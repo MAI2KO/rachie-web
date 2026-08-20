@@ -123,3 +123,7 @@ The shared public booking workflow is now available at `/booking`. See
 [docs/public-booking-interface.md](docs/public-booking-interface.md) for user
 states, native API integration, accessibility, mobile behavior, and the boundary
 with future visual work.
+
+For persistent local PostgreSQL, real Discord OAuth setup, idempotent development
+seed data, and the manual booking checklist, see
+[docs/local-manual-booking-testing.md](docs/local-manual-booking-testing.md).

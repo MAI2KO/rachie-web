@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: rachie-peggie-web-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rachie_peggie_dev
+      POSTGRES_USER: rachie_peggie_dev
+      POSTGRES_PASSWORD: local_development_only
+    ports:
+      - "127.0.0.1:55439:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rachie_peggie_dev -d rachie_peggie_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - rachie_peggie_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  rachie_peggie_postgres_data:
+    name: rachie_peggie_web_postgres_data
