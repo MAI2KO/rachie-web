@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-import { beginRescheduleState, createInFlightRequestDeduper, createLatestRequestCoordinator, profileTerms, requirementFields, resolveBookingUiState, shouldShowLogout, signedOutBookingState, sortSlots, uiError } from "../components/booking/booking-ui-model.mjs";
+import { beginRescheduleState, communityPresentation, createInFlightRequestDeduper, createLatestRequestCoordinator, profileTerms, requirementFields, resolveBookingUiState, shouldShowLogout, signedOutBookingState, sortSlots, uiError } from "../components/booking/booking-ui-model.mjs";
 
 const selected = { authenticated: true, selectedCommunity: { locationCode: "1" } };
 const context = { bookingsOpen: true };
@@ -53,6 +53,24 @@ test("WOS and Kingshot terminology and required fields cannot leak across profil
   assert.deepEqual(requirementFields("wos", "construction", config).map((field) => field.label), ["Fire Crystals", "Speed-ups (days)"]);
   assert.deepEqual(requirementFields("kingshot", "research", config).map((field) => field.label), ["Truegold Dust"]);
   assert.deepEqual(requirementFields("wos", "construction", config)[1], { code: "speedups", label: "Speed-ups (days)", helpText: "Enter whole days only." });
+});
+
+test("community presentation shows profile terminology, code, and public display name", () => {
+  const community = { locationCode: "9999", displayName: "Test Server" };
+  assert.deepEqual(communityPresentation("wos", community), {
+    codeLabel: "State 9999",
+    displayName: "Test Server",
+    compactLabel: "Test Server · State 9999",
+  });
+  assert.deepEqual(communityPresentation("kingshot", community), {
+    codeLabel: "Kingdom 9999",
+    displayName: "Test Server",
+    compactLabel: "Test Server · Kingdom 9999",
+  });
+  const source = fs.readFileSync(new URL("../components/booking/booking-experience.tsx", import.meta.url), "utf8");
+  assert.match(source, /bookingCommunityPresentation\.codeLabel/);
+  assert.match(source, /bookingCommunityPresentation\.displayName/);
+  assert.match(source, /bookingCommunityPresentation\.compactLabel/);
 });
 
 test("availability remains deterministic and handles no slots", () => {

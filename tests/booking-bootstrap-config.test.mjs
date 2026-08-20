@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  bookingConfigWizardQuestions,
   buildBookingCommunityConfig,
   generateAppointmentSchedule,
   requirementChoices,
@@ -17,6 +18,17 @@ import {
 import { validateBookingBootstrapConfig } from "../server/bootstrap/booking-community-bootstrap.mjs";
 
 const slots = generateAppointmentSchedule({ firstSlotTime: "08:00", intervalMinutes: 30, numberOfSlots: 4 });
+
+test("wizard wording distinguishes the in-game code and both display names", () => {
+  const wos = bookingConfigWizardQuestions("wos");
+  const kingshot = bookingConfigWizardQuestions("kingshot");
+  assert.match(wos.communityCode, /State code.*in-game State number.*9999/i);
+  assert.match(kingshot.communityCode, /Kingdom code.*in-game Kingdom number.*9999/i);
+  for (const questions of [wos, kingshot]) {
+    assert.match(questions.publicDisplayName, /name shown on the website.*Test Server/i);
+    assert.match(questions.discordDisplayName, /current name of the Discord server.*same as the public display name/i);
+  }
+});
 
 function input(profile, overrides = {}) {
   return {

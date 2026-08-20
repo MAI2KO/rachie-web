@@ -6,6 +6,15 @@ export function profileTerms(profile) {
     : { community: "State", fc: "Fire Crystals", rfc: "Refined Fire Crystals", shards: "Fire Crystal Shards", speedups: "Speed-ups (days)" };
 }
 
+export function communityPresentation(profile, community) {
+  const codeLabel = `${profileTerms(profile).community} ${community.locationCode}`;
+  return {
+    codeLabel,
+    displayName: community.displayName,
+    compactLabel: `${community.displayName} · ${codeLabel}`,
+  };
+}
+
 export function requirementFields(profile, serviceCode, requirements) {
   const terms = profileTerms(profile);
   const config = requirements?.[serviceCode] ?? {};

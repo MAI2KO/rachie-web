@@ -232,6 +232,16 @@ async function askValidated(prompter, question, validator) {
   }
 }
 
+export function bookingConfigWizardQuestions(profile) {
+  const details = PROFILE_DETAILS[profile];
+  if (!details) invalid("Profile must be wos or kingshot.");
+  return Object.freeze({
+    communityCode: `${details.communityTerm} code - the in-game ${details.communityTerm} number, e.g. 9999: `,
+    publicDisplayName: "Public display name - the name shown on the website, e.g. Test Server: ",
+    discordDisplayName: "Discord server display name - the current name of the Discord server. This may be the same as the public display name: ",
+  });
+}
+
 export async function runBookingConfigWizard({ prompter, outputDirectory = DEFAULT_OUTPUT_DIRECTORY }) {
   prompter.message("Booking community configuration wizard");
   prompter.message("This creates JSON only. It does not connect to PostgreSQL, Railway, or Discord.");
@@ -239,10 +249,11 @@ export async function runBookingConfigWizard({ prompter, outputDirectory = DEFAU
 
   const profile = await prompter.select("Which profile?", Object.entries(PROFILE_DETAILS).map(([value, details]) => ({ value, label: details.label })));
   const details = PROFILE_DETAILS[profile];
-  const communityCode = await askValidated(prompter, `${details.communityTerm} number or code: `, validateCommunityCode);
-  const displayName = await askValidated(prompter, "Public display name: ", (value) => validateHumanName(value, "Public display name"));
+  const questions = bookingConfigWizardQuestions(profile);
+  const communityCode = await askValidated(prompter, questions.communityCode, validateCommunityCode);
+  const displayName = await askValidated(prompter, questions.publicDisplayName, (value) => validateHumanName(value, "Public display name"));
   const discordGuildId = await askValidated(prompter, "Discord server ID: ", validateDiscordGuildId);
-  const discordGuildDisplayName = await askValidated(prompter, "Discord server display name: ", (value) => validateHumanName(value, "Discord server display name"));
+  const discordGuildDisplayName = await askValidated(prompter, questions.discordDisplayName, (value) => validateHumanName(value, "Discord server display name"));
   const timeZone = await askValidated(prompter, "IANA timezone (for example Europe/London): ", validateTimeZone);
   const keepClosed = await prompter.confirm("Keep bookings closed initially?", true);
 

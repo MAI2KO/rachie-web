@@ -78,6 +78,40 @@ Unknown fields/profiles, malformed identifiers, dates, times or zones, missing
 fields, duplicates, and unsupported requirement codes are rejected before a
 database connection is opened.
 
+## Open or close bookings manually
+
+Bootstrap normally creates a community with bookings closed. Operators can open
+or close an existing community later without editing SQL or rerunning bootstrap.
+This is the immediate/manual operator control; it does not change appointment
+dates, slots, services, Discord guild mappings, registrations, or bookings.
+
+Open WOS community `9999`:
+
+```bash
+npm run db:booking-window -- --profile wos --community 9999 --open
+```
+
+Close it again:
+
+```bash
+npm run db:booking-window -- --profile wos --community 9999 --close
+```
+
+Use `--profile kingshot` for the independent Kingshot community. The command
+requires `DATABASE_URL` to use the migration/operator role. The restricted
+website runtime role is deliberately refused. It selects only the requested
+profile and community, coordinates the community and current-window open state
+in one transaction, prints no connection details, and rolls back on failure.
+Running an already-satisfied `--open` or `--close` is safe and reports `no
+change`. The command does not create or alter optional `opens_at`/`closes_at`
+window bounds. Bootstrap-created windows have no such bounds; if future tooling
+adds them, those bounds will remain effective.
+
+Operationally, bookings will typically be opened four to five days before the
+first appointment day. Automatic scheduled opening is not implemented yet;
+until that separate feature is designed and approved, an operator must run this
+manual command at the chosen time.
+
 ## Role, dry run, and remote safeguards
 
 Creating the JSON is the only step covered by the wizard. Later, when a database
