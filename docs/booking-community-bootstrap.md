@@ -57,6 +57,13 @@ Version 1 requires:
   with a date, required requirement codes, and an ordered non-empty slot list;
 - each slot: a public label and 24-hour `HH:MM` local start time.
 
+Community codes and Discord guild IDs are unique **within a game profile**, not
+globally across R.A.C.H.I.E and P.E.G.G.I.E. For example, WOS community `9999`
+and Kingshot community `9999` are independent and valid. The same Discord guild
+may be mapped once in WOS and once in Kingshot so that it can host both bots.
+Within one profile, a location code still identifies only one community and a
+Discord guild still maps to only one community.
+
 Supported requirements are `fc`, `rfc`, and `speedups` for construction;
 `shards` and `speedups` for research; and `speedups` for troop. Omit a supported
 code to make it optional. The stable `speedups` code means a positive whole
@@ -126,8 +133,9 @@ URL on the web service; the value above is a placeholder only.
 ## Idempotency and reconciliation
 
 The command takes a transaction advisory lock, sets `app.game_profile` for each
-profile-scoped query/write, checks both profiles for identity collisions, and
-plans everything before writing. New object UUIDs are deterministic, so the
+profile-scoped query/write, and plans everything before writing. Profile-local
+constraints reject identity collisions without treating an identity in the
+other game profile as a conflict. New object UUIDs are deterministic, so the
 same file reruns without duplicate communities, mappings, windows, dates or
 slots.
 

@@ -122,6 +122,68 @@ test("booking bootstrap PostgreSQL integration", { skip: !testDatabaseUrl && "TE
       assert.equal(kingshotPlan.slots.create, 4);
     });
 
+    await t.test("staging-shaped WOS and Kingshot configurations may share code and guild without changing WOS", async () => {
+      const sharedGuildId = "999999999999999999";
+      const wosInput = configuration("wos", "999");
+      wosInput.community.code = "9999";
+      wosInput.community.displayName = "WOS staging 9999";
+      wosInput.community.discordGuild = { id: sharedGuildId, displayName: "Shared staging guild" };
+      const kingshotInput = configuration("kingshot", "999");
+      kingshotInput.community.code = "9999";
+      kingshotInput.community.displayName = "Kingshot staging 9999";
+      kingshotInput.community.discordGuild = { id: sharedGuildId, displayName: "Shared staging guild" };
+      const wos = validateBookingBootstrapConfig(wosInput);
+      const kingshot = validateBookingBootstrapConfig(kingshotInput);
+
+      const wosPlan = await runBookingCommunityBootstrap({ pool: bootstrapPool, config: wos });
+      assert.equal(wosPlan.community, "create");
+      assert.equal(wosPlan.guildMapping, "create");
+      const before = await profileQuery(
+        bootstrapPool,
+        "wos",
+        `SELECT to_jsonb(c) AS community, to_jsonb(g) AS guild
+         FROM booking_communities c
+         JOIN booking_discord_guilds g ON g.game_profile=c.game_profile AND g.community_id=c.id
+         WHERE c.game_profile='wos' AND c.location_code=$1 AND g.discord_guild_id=$2`,
+        ["9999", sharedGuildId],
+      );
+
+      const kingshotPlan = await runBookingCommunityBootstrap({ pool: bootstrapPool, config: kingshot });
+      assert.equal(kingshotPlan.community, "create");
+      assert.equal(kingshotPlan.guildMapping, "create");
+      assert.deepEqual(kingshotPlan.conflicts, []);
+
+      const after = await profileQuery(
+        bootstrapPool,
+        "wos",
+        `SELECT to_jsonb(c) AS community, to_jsonb(g) AS guild
+         FROM booking_communities c
+         JOIN booking_discord_guilds g ON g.game_profile=c.game_profile AND g.community_id=c.id
+         WHERE c.game_profile='wos' AND c.location_code=$1 AND g.discord_guild_id=$2`,
+        ["9999", sharedGuildId],
+      );
+      assert.deepEqual(after.rows, before.rows);
+
+      for (const profile of ["wos", "kingshot"]) {
+        const visible = await profileQuery(
+          restrictedPool,
+          profile,
+          "SELECT game_profile,display_name FROM booking_communities WHERE location_code='9999'",
+        );
+        assert.deepEqual(visible.rows, [{
+          game_profile: profile,
+          display_name: profile === "wos" ? "WOS staging 9999" : "Kingshot staging 9999",
+        }]);
+      }
+
+      for (const config of [wos, kingshot]) {
+        const repeat = await runBookingCommunityBootstrap({ pool: bootstrapPool, config });
+        assert.equal(repeat.community, "existing");
+        assert.equal(repeat.guildMapping, "existing");
+        assert.equal(repeat.operations.length, 0);
+      }
+    });
+
     await t.test("repeat is idempotent", async () => {
       const config = validateBookingBootstrapConfig(configuration("wos", "101"));
       const plan = await runBookingCommunityBootstrap({ pool: bootstrapPool, config });
@@ -141,20 +203,37 @@ test("booking bootstrap PostgreSQL integration", { skip: !testDatabaseUrl && "TE
       assert.equal(count.rows[0].count, 0);
     });
 
-    await t.test("guild conflict is rejected", async () => {
-      const input = configuration("wos", "404");
-      input.community.discordGuild.id = configuration("wos", "101").community.discordGuild.id;
-      const config = validateBookingBootstrapConfig(input);
-      await assert.rejects(runBookingCommunityBootstrap({ pool: bootstrapPool, config }), (error) =>
-        error instanceof BookingBootstrapError && error.code === "configuration_conflict" && error.details.some((detail) => /different community/.test(detail)));
+    await t.test("a second community cannot claim an existing guild within either profile", async () => {
+      for (const profile of ["wos", "kingshot"]) {
+        const input = configuration(profile, profile === "wos" ? "404" : "405");
+        input.community.discordGuild.id = "999999999999999999";
+        const config = validateBookingBootstrapConfig(input);
+        await assert.rejects(runBookingCommunityBootstrap({ pool: bootstrapPool, config }), (error) =>
+          error instanceof BookingBootstrapError && error.code === "configuration_conflict"
+            && error.details.some((detail) => /different community/.test(detail)));
+      }
     });
 
-    await t.test("cross-profile community-code collision is rejected", async () => {
-      const input = configuration("kingshot", "505");
-      input.community.code = configuration("wos", "101").community.code;
-      const config = validateBookingBootstrapConfig(input);
-      await assert.rejects(runBookingCommunityBootstrap({ pool: bootstrapPool, config }), (error) =>
-        error instanceof BookingBootstrapError && error.details.some((detail) => /another profile/.test(detail)));
+    await t.test("database constraints reject duplicate location codes within either profile", async () => {
+      for (const profile of ["wos", "kingshot"]) {
+        const client = await bootstrapPool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SELECT set_config('app.game_profile',$1,true)", [profile]);
+          await assert.rejects(
+            client.query(
+              `INSERT INTO booking_communities
+                 (game_profile,id,location_code,display_name,status,bookings_open)
+               VALUES ($1,$2,'9999','Duplicate','active',false)`,
+              [profile, randomUUID()],
+            ),
+            (error) => error.code === "23505",
+          );
+          await client.query("ROLLBACK");
+        } finally {
+          client.release();
+        }
+      }
     });
 
     await t.test("safe mutable display, open-state, guild-name, and requirement reconciliation works", async () => {

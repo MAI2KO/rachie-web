@@ -249,16 +249,6 @@ async function checkAdministrativeRole(client) {
   }
 }
 
-async function findAcrossProfiles(client, sql, values) {
-  const rows = [];
-  for (const profile of PROFILES) {
-    await setProfile(client, profile);
-    const result = await client.query(sql, [profile, ...values]);
-    rows.push(...result.rows);
-  }
-  return rows;
-}
-
 function comparableTime(value) {
   return value == null ? null : String(value).slice(0, 5);
 }
@@ -266,19 +256,13 @@ function comparableTime(value) {
 export async function planBookingCommunityBootstrap(client, config) {
   const plan = emptyPlan(config);
   const communityId = deterministicUuid("booking-community", config.profile, config.community.code);
-  const crossCode = await findAcrossProfiles(
-    client,
-    "SELECT game_profile, id FROM booking_communities WHERE game_profile=$1 AND location_code=$2",
-    [config.community.code],
-  );
-  const wrongProfileCode = crossCode.find((row) => row.game_profile !== config.profile);
-  if (wrongProfileCode) {
-    plan.community = "conflict";
-    plan.conflicts.push(`Community code ${config.community.code} already belongs to another profile.`);
-  }
-
   await setProfile(client, config.profile);
-  const selectedCommunity = crossCode.find((row) => row.game_profile === config.profile);
+  const communities = (await client.query(
+    "SELECT game_profile, id FROM booking_communities WHERE game_profile=$1 AND location_code=$2",
+    [config.profile, config.community.code],
+  )).rows;
+
+  const selectedCommunity = communities[0];
   let effectiveCommunityId = communityId;
   let communityRow = null;
   if (selectedCommunity) {
@@ -299,17 +283,12 @@ export async function planBookingCommunityBootstrap(client, config) {
     plan.operations.push({ type: "createCommunity", id: communityId });
   }
 
-  const guildRows = await findAcrossProfiles(
-    client,
+  const guildRows = (await client.query(
     `SELECT game_profile, discord_guild_id, community_id, discord_guild_name
      FROM booking_discord_guilds WHERE game_profile=$1 AND discord_guild_id=$2`,
-    [config.community.discordGuild.id],
-  );
-  const guildRow = guildRows.find((row) => row.game_profile === config.profile);
-  if (guildRows.some((row) => row.game_profile !== config.profile)) {
-    plan.guildMapping = "conflict";
-    plan.conflicts.push("Discord guild ID is already mapped to another profile.");
-  }
+    [config.profile, config.community.discordGuild.id],
+  )).rows;
+  const guildRow = guildRows[0];
   if (!guildRow) {
     plan.guildMapping = "create";
     plan.operations.push({ type: "createGuild", communityId: effectiveCommunityId });
