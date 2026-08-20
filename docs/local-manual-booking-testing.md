@@ -101,6 +101,12 @@ Do not change production hostname configuration.
 
 ## 5. Exercise the flow
 
+In development, authenticated route and profile-scoped database transaction
+durations are logged as `[development timing] ...: Nms`. Labels contain only the
+static route or operation name and `wos` or `kingshot`; cookies, tokens, session
+hashes, request bodies, and database details are never logged. These timing lines
+are disabled unless `NODE_ENV=development`.
+
 For each hostname:
 
 1. Select **Sign in with Discord** and complete the matching application login.

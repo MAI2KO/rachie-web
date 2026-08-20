@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-import { profileTerms, requirementFields, resolveBookingUiState, shouldShowLogout, signedOutBookingState, sortSlots, uiError } from "../components/booking/booking-ui-model.mjs";
+import { beginRescheduleState, createInFlightRequestDeduper, createLatestRequestCoordinator, profileTerms, requirementFields, resolveBookingUiState, shouldShowLogout, signedOutBookingState, sortSlots, uiError } from "../components/booking/booking-ui-model.mjs";
 
 const selected = { authenticated: true, selectedCommunity: { locationCode: "1" } };
 const context = { bookingsOpen: true };
@@ -54,6 +54,60 @@ test("availability remains deterministic and handles no slots", () => {
   assert.deepEqual(sortSlots([]), []);
 });
 
+test("one reschedule click enters mode immediately and starts one guarded availability load", async () => {
+  const booking = { bookingId: "booking-1", serviceCode: "research" };
+  const state = beginRescheduleState(booking);
+  assert.deepEqual(state, {
+    selectedService: "research", selectedSlot: "", requirements: {},
+    mode: { type: "reschedule", booking }, availability: null, availabilityFailed: false,
+  });
+
+  let requests = 0;
+  let resolveRequest;
+  const coordinator = createLatestRequestCoordinator();
+  const request = () => { requests += 1; return new Promise((resolve) => { resolveRequest = resolve; }); };
+  const first = coordinator.run("research", request);
+  const duplicate = coordinator.run("research", request);
+  assert.equal(first.started, true);
+  assert.equal(duplicate.started, false);
+  assert.equal(requests, 0, "loading state can render before fetch work begins");
+  await Promise.resolve();
+  assert.equal(requests, 1);
+  resolveRequest({ slots: [{ slotId: "slot-1" }] });
+  assert.deepEqual(await first.promise, { slots: [{ slotId: "slot-1" }] });
+  await duplicate.promise;
+});
+
+test("availability success, failure, and stale responses have deterministic UI outcomes", async () => {
+  const coordinator = createLatestRequestCoordinator();
+  let resolveConstruction;
+  let resolveResearch;
+  const construction = coordinator.run("construction", () => new Promise((resolve) => { resolveConstruction = resolve; }));
+  const research = coordinator.run("research", () => new Promise((resolve) => { resolveResearch = resolve; }));
+  assert.equal(construction.isLatest(), false);
+  assert.equal(research.isLatest(), true);
+  await Promise.resolve();
+  resolveResearch({ service: "research", slots: ["new"] });
+  const newest = await research.promise;
+  assert.deepEqual(newest.slots, ["new"]);
+  resolveConstruction({ service: "construction", slots: ["stale"] });
+  await construction.promise;
+  assert.equal(construction.isLatest(), false, "an older response cannot replace the newer service");
+
+  const failed = coordinator.run("troop", async () => { throw new Error("offline"); });
+  await assert.rejects(failed.promise, /offline/);
+  assert.equal(failed.isLatest(), true);
+});
+
+test("authenticated bootstrap deduplicates Strict Mode repeats without mixing profiles", async () => {
+  const deduper = createInFlightRequestDeduper();
+  let requests = 0;
+  const load = (profile) => deduper.run(`booking:${profile}:community`, async () => { requests += 1; return profile; });
+  const [wosOne, wosTwo, kingshot] = await Promise.all([load("wos"), load("wos"), load("kingshot")]);
+  assert.deepEqual([wosOne, wosTwo, kingshot], ["wos", "wos", "kingshot"]);
+  assert.equal(requests, 2);
+});
+
 test("booking conflicts, closed windows, stale membership, rate limits, and outages have actionable messages", () => {
   assert.match(uiError("slot_unavailable"), /refreshed/i);
   assert.match(uiError("booking_already_exists"), /already/i);
@@ -73,4 +127,7 @@ test("shared booking component uses only native APIs and explicit confirmation f
   assert.match(source, /Confirm reschedule/);
   assert.match(source, /Idempotency-Replayed|idempotency-key/i);
   assert.match(source, /step="1"/);
+  assert.match(source, /beginReschedule\(booking\)/);
+  assert.match(source, /Loading replacement times\.\.\./);
+  assert.match(source, /Availability could not be loaded\..*Try again/);
 });

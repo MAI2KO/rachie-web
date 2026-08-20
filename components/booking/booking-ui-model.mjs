@@ -23,6 +23,62 @@ export function sortSlots(slots) {
   return [...slots].sort((left, right) => left.ordinal - right.ordinal || left.slotId.localeCompare(right.slotId));
 }
 
+export function beginRescheduleState(booking) {
+  return {
+    selectedService: booking.serviceCode,
+    selectedSlot: "",
+    requirements: {},
+    mode: { type: "reschedule", booking },
+    availability: null,
+    availabilityFailed: false,
+  };
+}
+
+export function createInFlightRequestDeduper() {
+  const requests = new Map();
+  return Object.freeze({
+    run(key, request) {
+      const existing = requests.get(key);
+      if (existing) return existing;
+      const promise = Promise.resolve().then(request);
+      requests.set(key, promise);
+      void promise.then(
+        () => { if (requests.get(key) === promise) requests.delete(key); },
+        () => { if (requests.get(key) === promise) requests.delete(key); },
+      );
+      return promise;
+    },
+    clear() { requests.clear(); },
+  });
+}
+
+export function createLatestRequestCoordinator() {
+  let current = null;
+  let latestId = 0;
+  return Object.freeze({
+    run(key, request) {
+      if (current?.key === key) {
+        return { promise: current.promise, started: false, isLatest: () => latestId === current?.id };
+      }
+      current?.controller.abort();
+      const controller = new AbortController();
+      const id = ++latestId;
+      const promise = Promise.resolve().then(() => request(controller.signal));
+      current = { key, id, controller, promise };
+      void promise.then(
+        () => { if (current?.id === id) current = null; },
+        () => { if (current?.id === id) current = null; },
+      );
+      return { promise, started: true, isLatest: () => latestId === id };
+    },
+    cancel() {
+      latestId += 1;
+      current?.controller.abort();
+      current = null;
+    },
+  });
+}
+
 export function resolveBookingUiState(session, context, me, errorCode = /** @type {string | null} */ (null)) {
   if (!session) return "loading";
   if (!session.authenticated) return "unauthenticated";

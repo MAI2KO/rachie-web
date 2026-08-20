@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActiveBrand } from "@/brands/config";
-import { makeAttemptKey, profileTerms, requirementFields, resolveBookingUiState, SERVICE_ORDER, shouldShowLogout, signedOutBookingState, sortSlots, uiError } from "./booking-ui-model.mjs";
+import { beginRescheduleState, createInFlightRequestDeduper, createLatestRequestCoordinator, makeAttemptKey, profileTerms, requirementFields, resolveBookingUiState, SERVICE_ORDER, shouldShowLogout, signedOutBookingState, sortSlots, uiError } from "./booking-ui-model.mjs";
 
 type Community = { locationCode: string; displayName: string };
-type Session = { authenticated: boolean; gameProfile?: "wos" | "kingshot"; user?: { username: string; globalName: string | null }; communities?: Community[]; selectedCommunity?: Community | null; csrfToken?: string };
+type Session = { authenticated: boolean; gameProfile?: "wos" | "kingshot"; user?: { username: string; globalName: string | null }; communities?: Community[]; selectedCommunity?: Community | null; expiresAt?: string; csrfToken?: string };
 type RequirementConfig = Record<string, Record<string, boolean>>;
 type Service = { code: string; displayLabel: string; appointmentLabel: string; date: string | null };
 type BookingContext = { community: Community; bookingsOpen: boolean; windowState: string; requirements: RequirementConfig | null; services: Service[] };
@@ -16,15 +16,32 @@ type Slot = { slotId: string; displayTime: string; ordinal: number };
 type Availability = { service: { code: string; displayLabel: string }; date: string | null; bookingsOpen: boolean; slots: Slot[] };
 type ApiError = { code?: string; error?: string; fields?: Record<string, string> };
 type BookingConfirmation = { serviceLabel: string; date: string; displayTime: string; playerName: string; alliance: string; requirements: { code: string; label: string; value: number; unit?: string }[] };
+const REQUEST_TIMEOUT_MS = 15_000;
 
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { credentials: "same-origin", ...init });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body.error ?? "Request failed") as Error & { response: Response; body: ApiError };
-    error.response = response; error.body = body; throw error;
+  const controller = new AbortController();
+  let timedOut = false;
+  const abort = () => controller.abort();
+  if (init?.signal?.aborted) abort();
+  else init?.signal?.addEventListener("abort", abort, { once: true });
+  const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { credentials: "same-origin", ...init, signal: controller.signal });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(body.error ?? "Request failed") as Error & { response: Response; body: ApiError };
+      error.response = response; error.body = body; throw error;
+    }
+    return body as T;
+  } catch (caught) {
+    if (!timedOut) throw caught;
+    const error = new Error("The request took too long. Please try again.") as Error & { body: ApiError };
+    error.body = { error: error.message };
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    init?.signal?.removeEventListener("abort", abort);
   }
-  return body as T;
 }
 
 function Button({ children, secondary = false, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { secondary?: boolean }) {
@@ -48,6 +65,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   const [me, setMe] = useState<Me | null>(null);
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [availabilityFailed, setAvailabilityFailed] = useState(false);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [selectedService, setSelectedService] = useState("construction");
   const [selectedSlot, setSelectedSlot] = useState("");
   const [requirements, setRequirements] = useState<Record<string, string>>({});
@@ -61,6 +79,8 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   const errorRef = useRef<HTMLDivElement>(null);
   const successRef = useRef<HTMLDivElement>(null);
   const attempts = useRef(new Map<string, string>());
+  const bootstrapRequests = useRef(createInFlightRequestDeduper());
+  const availabilityRequests = useRef(createLatestRequestCoordinator());
 
   const explainError = useCallback((caught: unknown) => {
     const api = caught as Error & { response?: Response; body?: ApiError };
@@ -81,13 +101,30 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   }, [explainError, selectedService]);
 
   const loadAvailability = useCallback(async (serviceCode: string) => {
-    try { setAvailability(await jsonRequest<Availability>(`/api/v1/booking/availability?service=${encodeURIComponent(serviceCode)}`)); setAvailabilityFailed(false); }
-    catch (caught) { explainError(caught); setAvailability(null); setAvailabilityFailed(true); }
+    const task = availabilityRequests.current.run(
+      serviceCode,
+      (signal: AbortSignal) => jsonRequest<Availability>(`/api/v1/booking/availability?service=${encodeURIComponent(serviceCode)}`, { signal }),
+    );
+    if (!task.started) {
+      await task.promise.catch(() => undefined);
+      return;
+    }
+    setAvailabilityLoading(true); setAvailability(null); setAvailabilityFailed(false);
+    try {
+      const next = await task.promise;
+      if (task.isLatest()) { setAvailability(next); setAvailabilityFailed(false); setError(""); setErrorCode(null); }
+    } catch (caught) {
+      if (!task.isLatest() || (caught instanceof DOMException && caught.name === "AbortError")) return;
+      explainError(caught); setAvailability(null); setAvailabilityFailed(true);
+    } finally {
+      if (task.isLatest()) setAvailabilityLoading(false);
+    }
   }, [explainError]);
 
   useEffect(() => {
     let active = true;
-    void jsonRequest<Session>("/api/v1/auth/session")
+    const request = bootstrapRequests.current.run("auth-session", () => jsonRequest<Session>("/api/v1/auth/session")) as Promise<Session>;
+    void request
       .then((next) => { if (active) setSession(next); })
       .catch((caught) => { if (active) { explainError(caught); setSession({ authenticated: false }); } });
     return () => { active = false; };
@@ -95,19 +132,19 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   useEffect(() => {
     if (!session?.authenticated || !session.selectedCommunity) return;
     let active = true;
-    void Promise.all([jsonRequest<BookingContext>("/api/v1/booking/context"), jsonRequest<Me>("/api/v1/booking/me")])
+    const key = `booking:${session.gameProfile ?? profile}:${session.selectedCommunity.locationCode}:${session.expiresAt ?? "session"}`;
+    const request = bootstrapRequests.current.run(key, () => Promise.all([jsonRequest<BookingContext>("/api/v1/booking/context"), jsonRequest<Me>("/api/v1/booking/me")])) as Promise<[BookingContext, Me]>;
+    void request
       .then(([nextContext, nextMe]) => { if (active) { setContext(nextContext); setMe(nextMe); } })
       .catch((caught) => { if (active) explainError(caught); });
     return () => { active = false; };
-  }, [session, explainError]);
+  }, [session, profile, explainError]);
+  const registrationStatus = me?.registration.status;
+  const contextLocationCode = context?.community.locationCode;
   useEffect(() => {
-    if (me?.registration.status !== "registered" || !context) return;
-    let active = true;
-    void jsonRequest<Availability>(`/api/v1/booking/availability?service=${encodeURIComponent(selectedService)}`)
-      .then((next) => { if (active) { setAvailability(next); setAvailabilityFailed(false); } })
-      .catch((caught) => { if (active) { explainError(caught); setAvailability(null); setAvailabilityFailed(true); } });
-    return () => { active = false; };
-  }, [me, context, selectedService, explainError]);
+    if (registrationStatus !== "registered" || !contextLocationCode) return;
+    void loadAvailability(selectedService);
+  }, [registrationStatus, contextLocationCode, selectedService, loadAvailability]);
 
   const service = context?.services.find((item) => item.code === selectedService) ?? null;
   const fields = useMemo(() => requirementFields(profile, selectedService, context?.requirements), [profile, selectedService, context]);
@@ -146,6 +183,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
       setSession(signedOut.session); setContext(signedOut.context); setMe(signedOut.me); setAvailability(signedOut.availability); setAvailabilityFailed(signedOut.availabilityFailed);
       setSelectedService(signedOut.selectedService); setSelectedSlot(signedOut.selectedSlot); setRequirements(signedOut.requirements); setMode(signedOut.mode);
       setError(signedOut.error); setErrorCode(signedOut.errorCode); setSuccess(signedOut.success); setConfirmation(signedOut.confirmation); attempts.current.clear();
+      availabilityRequests.current.cancel(); setAvailabilityLoading(false); bootstrapRequests.current.clear();
     } catch (caught) { explainError(caught); } finally { setLoggingOut(false); }
   }
 
@@ -187,6 +225,18 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
     } catch (caught) { explainError(caught); } finally { setBusy(false); }
   }
 
+  function chooseService(serviceCode: string) {
+    setSelectedService(serviceCode); setSelectedSlot(""); setRequirements({});
+    void loadAvailability(serviceCode);
+  }
+
+  function beginReschedule(booking: Booking) {
+    const next = beginRescheduleState(booking);
+    setSelectedService(next.selectedService); setSelectedSlot(next.selectedSlot); setRequirements(next.requirements); setMode({ type: "reschedule", booking });
+    setAvailability(next.availability); setAvailabilityFailed(next.availabilityFailed); setError("");
+    void loadAvailability(booking.serviceCode);
+  }
+
   if (!session) return <section className="booking-screen" aria-busy="true"><p className="booking-kicker">Booking console</p><h1>Loading your booking access</h1><div className="booking-loading" /></section>;
   return <section className="booking-screen" aria-labelledby="booking-title">
     <header className="booking-heading"><div><p className="booking-kicker">{brand.game.name} appointments</p><h1 id="booking-title">Minister booking</h1></div>{shouldShowLogout(session) && <div className="session-actions"><span className="session-mark">Discord: {session.user?.globalName ?? session.user?.username}</span><Button disabled={loggingOut} onClick={() => void logout()} secondary type="button">{loggingOut ? "Logging out..." : "Log out"}</Button></div>}</header>
@@ -201,13 +251,13 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
     : uiState === "registration" && context ? <form className="registration-form" onSubmit={register}><div><p className="booking-kicker">{context.community.displayName}</p><h2>Register your player</h2><p>Your saved identity is copied into each appointment confirmation.</p></div><label>Player ID<input autoComplete="off" inputMode="numeric" name="playerId" pattern="[0-9]+" required /></label><label>In-game name<input autoComplete="nickname" maxLength={30} name="inGameName" required /></label><label>Alliance<input autoCapitalize="characters" maxLength={3} minLength={3} name="alliance" pattern="[A-Za-z0-9]{3}" required /></label><Button disabled={busy} type="submit">{busy ? "Saving..." : "Save registration"}</Button></form>
     : <div className="booking-dashboard">
       <div className="booking-summary"><div><span>{terms.community}</span><strong>{bookingCommunity.displayName}</strong></div><div><span>Registered player</span><strong>{registration.inGameName} · {registration.alliance}</strong><small>ID {registration.playerId}</small></div><div><span>Booking window</span><strong>{bookingsOpen ? "Open" : "Closed"}</strong></div></div>
-      <section className="current-bookings" aria-labelledby="current-bookings-title"><div className="section-heading"><h2 id="current-bookings-title">Current appointments</h2><span>{currentBookings.length}</span></div>{currentBookings.length ? <div className="booking-card-list">{currentBookings.map((booking) => <article className="booking-card" key={booking.bookingId}><div><p>{services.find((item) => item.code === booking.serviceCode)?.displayLabel ?? booking.serviceCode}</p><strong>{booking.date}</strong><span>{booking.displayTime}</span></div><div className="booking-card__actions"><Button secondary onClick={() => { setSelectedService(booking.serviceCode); setAvailability(null); setAvailabilityFailed(false); setSelectedSlot(""); setRequirements({}); setMode({ type: "reschedule", booking }); }}>Reschedule</Button><Button secondary onClick={() => setMode({ type: "cancel", booking })}>Cancel</Button></div></article>)}</div> : <p className="booking-empty">No active appointments.</p>}</section>
+      <section className="current-bookings" aria-labelledby="current-bookings-title"><div className="section-heading"><h2 id="current-bookings-title">Current appointments</h2><span>{currentBookings.length}</span></div>{currentBookings.length ? <div className="booking-card-list">{currentBookings.map((booking) => <article className="booking-card" key={booking.bookingId}><div><p>{services.find((item) => item.code === booking.serviceCode)?.displayLabel ?? booking.serviceCode}</p><strong>{booking.date}</strong><span>{booking.displayTime}</span></div><div className="booking-card__actions"><Button disabled={mode?.type === "reschedule" && availabilityLoading} secondary onClick={() => beginReschedule(booking)}>{mode?.type === "reschedule" && mode.booking.bookingId === booking.bookingId && availabilityLoading ? "Loading times..." : "Reschedule"}</Button><Button secondary onClick={() => setMode({ type: "cancel", booking })}>Cancel</Button></div></article>)}</div> : <p className="booking-empty">No active appointments.</p>}</section>
       {mode?.type === "cancel" && <section className="cancel-confirmation" aria-labelledby="cancel-title"><h2 id="cancel-title">Cancel this appointment?</h2><p>{mode.booking.date} at {mode.booking.displayTime}. This cannot be undone from this screen.</p><div><Button disabled={busy} onClick={() => void cancel()}>{busy ? "Cancelling..." : "Confirm cancellation"}</Button><Button disabled={busy} onClick={() => setMode(null)} secondary>Keep appointment</Button></div></section>}
       <section className="service-booking" aria-labelledby="service-title"><div className="section-heading"><div><p className="booking-kicker">Schedule</p><h2 id="service-title">{mode?.type === "reschedule" ? "Choose a replacement time" : "Book an appointment"}</h2></div><span className={bookingsOpen ? "status-open" : "status-closed"}>{bookingsOpen ? "Open" : "Closed"}</span></div>
-        <div className="service-tabs" role="tablist" aria-label="Minister services">{SERVICE_ORDER.map((code) => { const item = services.find((candidate) => candidate.code === code); if (!item) return null; return <button aria-selected={selectedService === code} className="service-tab" disabled={mode?.type === "reschedule" && selectedService !== code} key={code} onClick={() => { setSelectedService(code); setAvailability(null); setAvailabilityFailed(false); setSelectedSlot(""); setRequirements({}); }} role="tab" type="button"><strong>{item.displayLabel}</strong><span>{item.date ?? "Date pending"}</span></button>; })}</div>
+        <div className="service-tabs" role="tablist" aria-label="Minister services">{SERVICE_ORDER.map((code) => { const item = services.find((candidate) => candidate.code === code); if (!item) return null; return <button aria-selected={selectedService === code} className="service-tab" disabled={mode?.type === "reschedule" && selectedService !== code} key={code} onClick={() => chooseService(code)} role="tab" type="button"><strong>{item.displayLabel}</strong><span>{item.date ?? "Date pending"}</span></button>; })}</div>
         {service && <div className="availability-heading"><div><span>Selected service</span><strong>{service.displayLabel}</strong></div><div><span>Service date</span><strong>{availability?.date ?? service.date ?? "Not scheduled"}</strong></div></div>}
         {!bookingsOpen && mode?.type !== "cancel" ? <p className="booking-empty">New bookings and rescheduling are unavailable while the window is closed.</p>
-        : <form className="slot-form" onSubmit={mode?.type === "reschedule" ? reschedule : submitBooking}><fieldset disabled={busy || !availability?.slots.length}><legend>Available times</legend><div className="slot-grid">{availability ? sortSlots(availability.slots).map((slot) => <label className="slot-option" key={slot.slotId}><input checked={selectedSlot === slot.slotId} name="slot" onChange={() => setSelectedSlot(slot.slotId)} required type="radio" value={slot.slotId} /><span>{slot.displayTime}</span></label>) : availabilityFailed ? <p className="booking-empty">Availability could not be loaded. Try the service again.</p> : <span className="booking-loading" />}</div>{availability && !availability.slots.length && <p className="booking-empty">No times are currently available for this service.</p>}</fieldset><RequirementInputs disabled={busy} fields={fields} values={requirements} onChange={(code, value) => setRequirements((current) => ({ ...current, [code]: value }))} /><div className="form-actions"><Button disabled={busy || !selectedSlot || !bookingsOpen} type="submit">{busy ? "Working..." : mode?.type === "reschedule" ? "Confirm reschedule" : "Confirm booking"}</Button>{mode?.type === "reschedule" && <Button onClick={() => setMode(null)} secondary type="button">Keep current time</Button>}</div></form>}
+        : <form className="slot-form" onSubmit={mode?.type === "reschedule" ? reschedule : submitBooking}><fieldset aria-busy={availabilityLoading} disabled={busy || availabilityLoading}><legend>Available times</legend>{availabilityLoading ? <div className="availability-loading" role="status"><span aria-hidden="true" className="booking-loading" /><span>{mode?.type === "reschedule" ? "Loading replacement times..." : "Loading available times..."}</span></div> : <div className="slot-grid">{availability ? sortSlots(availability.slots).map((slot) => <label className="slot-option" key={slot.slotId}><input checked={selectedSlot === slot.slotId} name="slot" onChange={() => setSelectedSlot(slot.slotId)} required type="radio" value={slot.slotId} /><span>{slot.displayTime}</span></label>) : availabilityFailed ? <div className="availability-retry"><p className="booking-empty">Availability could not be loaded.</p><Button onClick={() => void loadAvailability(selectedService)} secondary type="button">Try again</Button></div> : null}</div>}{availability && !availability.slots.length && <p className="booking-empty">No times are currently available for this service.</p>}</fieldset><RequirementInputs disabled={busy || availabilityLoading} fields={fields} values={requirements} onChange={(code, value) => setRequirements((current) => ({ ...current, [code]: value }))} /><div className="form-actions"><Button disabled={busy || availabilityLoading || !selectedSlot || !bookingsOpen} type="submit">{busy ? "Working..." : mode?.type === "reschedule" ? "Confirm reschedule" : "Confirm booking"}</Button>{mode?.type === "reschedule" && <Button onClick={() => setMode(null)} secondary type="button">Keep current time</Button>}</div></form>}
       </section>
     </div>}
   </section>;

@@ -1,3 +1,5 @@
+import { withDevelopmentTiming } from "../development-timing.mjs";
+
 const GAME_PROFILES = new Set(["wos", "kingshot"]);
 
 function assertGameProfile(gameProfile) {
@@ -191,21 +193,23 @@ export function createProfileScopedAuthRepository(gameProfile, pool) {
   assertGameProfile(gameProfile);
 
   async function withTransaction(work) {
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SELECT set_config('app.game_profile', $1, true)", [
-        gameProfile,
-      ]);
-      const result = await work(new ProfileScopedAuthSession(client, gameProfile));
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    return withDevelopmentTiming(`database auth transaction (${gameProfile})`, async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.game_profile', $1, true)", [
+          gameProfile,
+        ]);
+        const result = await work(new ProfileScopedAuthSession(client, gameProfile));
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    });
   }
 
   return Object.freeze({

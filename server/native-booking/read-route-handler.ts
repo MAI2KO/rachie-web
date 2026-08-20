@@ -1,6 +1,7 @@
 import "server-only";
 
 import { resolveAuthenticatedBookingRequestContext } from "@/server/auth/authenticated-booking-context";
+import { withDevelopmentTiming } from "@/server/development-timing.mjs";
 import { createServerRateLimiter } from "@/server/rate-limit/limiter";
 import { RATE_LIMIT_POLICIES } from "@/server/rate-limit/policies.mjs";
 
@@ -22,17 +23,17 @@ const nativeBookingReadApi = createNativeBookingReadApi({
 export async function handleNativeBookingContextRead(
   request: Request,
 ): Promise<Response> {
-  return nativeBookingReadApi.context(request);
+  return withDevelopmentTiming("route GET /api/v1/booking/context", () => nativeBookingReadApi.context(request));
 }
 
 export async function handleNativeBookingAvailabilityRead(
   request: Request,
 ): Promise<Response> {
-  return nativeBookingReadApi.availability(request);
+  return withDevelopmentTiming("route GET /api/v1/booking/availability", () => nativeBookingReadApi.availability(request));
 }
 
 export async function handleNativeBookingMeRead(
   request: Request,
 ): Promise<Response> {
-  return nativeBookingReadApi.me(request);
+  return withDevelopmentTiming("route GET /api/v1/booking/me", () => nativeBookingReadApi.me(request));
 }
