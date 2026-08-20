@@ -68,7 +68,7 @@ test("speed-ups are whole days for both profiles", () => {
 test("API ignores hostile ownership fields and enforces CSRF, rate, and freshness", async () => {
   let captured;
   const successful = api({ createService() { return { async create(choice) { captured = choice; return { status: 201, body: { booking: { bookingId: "public" } }, replayed: false }; } }; } });
-  const response = await successful.create(request({ game_profile: "kingshot", communityId: "hostile", discordUserId: "hostile", playerId: "hostile" }));
+  const response = await successful.create(request({ game_profile: "kingshot", communityId: "hostile", discordUserId: "hostile", guildId: "hostile", playerId: "hostile" }));
   assert.equal(response.status, 201);
   assert.deepEqual(captured, { serviceCode: "construction", slotId, requirements: {} });
 

@@ -2,8 +2,10 @@ import {
   assertFutureBookingMutationMembershipFresh,
   AuthenticatedBookingHostNotFoundError,
   BookingAuthenticationRequiredError,
+  BookingCommunityMembershipLostError,
   BookingCommunitySelectionRequiredError,
   BookingMembershipRefreshRequiredError,
+  BookingMembershipVerificationUnavailableError,
 } from "../auth/authenticated-booking-context-core.mjs";
 import {
   RegistrationIdempotencyConflictError,
@@ -39,6 +41,12 @@ function contextError(error) {
       "membership_refresh_required",
     );
   }
+  if (error instanceof BookingCommunityMembershipLostError) {
+    return errorResponse(409, "Your Discord membership in the selected community could not be confirmed.", "community_membership_lost");
+  }
+  if (error instanceof BookingMembershipVerificationUnavailableError) {
+    return errorResponse(503, "Discord membership could not be verified right now.", "membership_verification_unavailable", {}, error.retryAfterSeconds === null ? {} : { "Retry-After": String(error.retryAfterSeconds) });
+  }
   if (error instanceof BookingCommunitySelectionRequiredError) {
     return errorResponse(
       409,
@@ -66,7 +74,6 @@ export function createRegistrationApi(dependencies) {
       let context;
       try {
         context = await dependencies.resolveAuthenticatedContext(request);
-        assertFutureBookingMutationMembershipFresh(context);
       } catch (error) {
         return contextError(error);
       }
@@ -91,6 +98,15 @@ export function createRegistrationApi(dependencies) {
 
       if (!dependencies.verifyCsrf(request, context)) {
         return errorResponse(403, "The request could not be verified.", "csrf_invalid");
+      }
+
+      try {
+        if (dependencies.refreshAuthenticatedMembership) {
+          context = await dependencies.refreshAuthenticatedMembership(context);
+        }
+        assertFutureBookingMutationMembershipFresh(context);
+      } catch (error) {
+        return contextError(error);
       }
 
       let idempotencyKey;

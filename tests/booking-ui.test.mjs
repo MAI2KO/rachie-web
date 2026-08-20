@@ -14,6 +14,12 @@ test("booking UI resolves unauthenticated, community, registration, and dashboar
   assert.equal(resolveBookingUiState(selected, context, { registration: { status: "registered" } }), "dashboard");
   assert.equal(resolveBookingUiState(selected, null, null, "membership_refresh_required"), "reauthentication-required");
   assert.equal(resolveBookingUiState(selected, null, null, "service_unavailable"), "unavailable");
+  assert.equal(resolveBookingUiState(selected, null, null, "membership_verification_unavailable"), "unavailable");
+});
+
+test("server membership refresh failures have clear non-OAuth UI messages", () => {
+  assert.match(uiError("membership_verification_unavailable", "7"), /retry in 7 seconds/i);
+  assert.match(uiError("community_membership_lost"), /selected Discord community/i);
 });
 
 test("logout stays visible throughout every authenticated booking state", () => {

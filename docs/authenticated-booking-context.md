@@ -57,35 +57,43 @@ the result as ambiguous instead of choosing one.
 
 Discord guild membership is verified during OAuth login and recorded in
 `website_auth_session_communities.verified_at`. OAuth access and refresh tokens
-are not retained, so periodic background Discord calls are intentionally
-impossible.
+are not retained. Profile-specific server bot tokens provide the separate,
+server-only mechanism for verifying an already known user/guild relationship.
 
 Authenticated reads accept that membership lease for 30 minutes. Once stale, the
 user must sign in through Discord again; a normal session lookup alone does not
 extend membership authority. This avoids a Discord request on every read while
 bounding how long removed guild membership remains usable.
 
-Future booking mutations must call the exported mutation freshness assertion,
-which uses a stricter five-minute lease. It fails closed with
-`membership_refresh_required`. Creation, registration, rescheduling, and
-cancellation all enforce this assertion. The 12-hour website session remains
-valid when this happens, but it cannot refresh the five-minute membership lease:
-`verified_at` is written only from the guild list returned during OAuth, and no
-Discord access or refresh token is retained. The browser is therefore sent
-through OAuth again after the mutation lease expires, even though reads continue
-to accept the same proof for 30 minutes.
+Future booking mutations use a stricter five-minute lease. After the session and
+mutation rate limit are checked, CSRF is verified before any Discord request. If
+the proof is stale, the profile-specific bot calls Get Guild Member with the
+authenticated Discord user ID and the guild stored on the selected
+session-community relationship. Request JSON cannot choose any of those values.
 
-The recommended final policy is to preserve short mutation freshness but add a
-server-side membership revalidation path. Prefer a trusted, profile-scoped bot or
-membership-attestation service that checks the known Discord user against the
-selected guild and refreshes only that community's `verified_at`. It must clear or
-reject the selected community when membership is absent and must retain hostname
-profile isolation, CSRF, session binding, and mutation rate limits. If that service
-is unavailable, fail closed and fall back to OAuth. A second choice is encrypted,
-rotated, server-only OAuth refresh-token storage bounded to the website session;
-that is a larger secrets and revocation policy decision. Merely extending the
-five-minute lease would weaken removal responsiveness and is not the recommended
-fix.
+- `member`: transactionally update only that relationship's `verified_at`, then
+  run the existing five-minute assertion and continue the requested mutation.
+- `not_member`: delete only that session-community relationship. Its selected row
+  is removed by the existing foreign key, the website session and unrelated
+  communities remain, and the mutation is denied.
+- `unavailable`: deny the mutation with
+  `membership_verification_unavailable`; a Discord `Retry-After` value is bounded
+  and forwarded when present.
+
+Concurrent checks for the same profile/session/user/community/guild are coalesced
+inside one application process. This map contains only in-flight promises and is
+never authoritative; PostgreSQL `verified_at` remains the cache shared across
+Railway instances. The verifier uses a five-second timeout and exposes only
+bounded `member`, `not_member`, or `unavailable` results. It never returns raw
+Discord errors or credentials to booking code or the browser.
+
+The resulting policy keeps the five-minute mutation freshness target and the
+30-minute read tolerance. Routine mutation expiry is transparent and does not
+start OAuth. OAuth remains the fallback for expired/revoked sessions, stale read
+bootstrap, identity re-establishment, and a user who must restore community
+membership. Bot authentication failures, missing guild access, 429s, network
+failure, timeout, and malformed responses fail closed rather than trusting stale
+proof.
 
 ## Rate Limiting
 
@@ -107,8 +115,8 @@ Current policies are:
 | Native booking reads | 120 per minute per session |
 | Future booking mutations | 10 per minute per session/community subject |
 
-The future mutation policy exists as a shared definition but is not attached to
-an endpoint. Database or limiter failure returns a controlled unavailable response
+The future mutation policy is attached to registration, creation, rescheduling,
+and cancellation. Database or limiter failure returns a controlled unavailable response
 rather than silently disabling protection. Production network subjects rely on
 the deployment proxy supplying the client address in `X-Forwarded-For`; the
 application never uses it for profile or community authorization.

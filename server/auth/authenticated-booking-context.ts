@@ -45,3 +45,18 @@ export async function resolveAuthenticatedBookingRequestContext(
     createAuthRepository,
   }) as Promise<TrustedAuthenticatedBookingContext>;
 }
+
+export async function resolveAuthenticatedBookingMutationRequestContext(
+  request: Request,
+): Promise<TrustedAuthenticatedBookingContext> {
+  return resolveAuthenticatedBookingContextCore(request, {
+    resolveHostContext: resolveAuthRequestContext,
+    readSessionToken: (currentRequest: Request) =>
+      parseCookie(currentRequest, AUTH_SESSION_COOKIE),
+    hashSessionToken: hashOpaqueToken,
+    createAuthRepository,
+    // The stale relationship is used only to identify the trusted guild. Every
+    // mutation revalidates it below before gaining mutation authority.
+    membershipMaxAgeSeconds: Number.POSITIVE_INFINITY,
+  }) as Promise<TrustedAuthenticatedBookingContext>;
+}

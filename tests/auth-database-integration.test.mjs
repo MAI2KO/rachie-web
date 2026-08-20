@@ -266,6 +266,53 @@ test(
         );
       });
 
+      await t.test("membership refresh and loss stay session/community/profile scoped", async () => {
+        const tokenHash = "5".repeat(64);
+        await wos.createSession(
+          sessionInput(tokenHash, "refresh-user", [
+            "wos-guild-one",
+            "wos-guild-two",
+          ]),
+        );
+        assert.equal(await wos.selectCommunity(tokenHash, "1001"), true);
+        await withProfile(runtimePool, "wos", (client) =>
+          client.query(
+            `UPDATE website_auth_session_communities
+             SET verified_at = now() - interval '10 minutes'
+             WHERE session_token_hash = $1`,
+            [tokenHash],
+          ),
+        );
+        const before = await wos.findSession(tokenHash);
+        const refreshedAt = await wos.refreshSessionCommunityMembership(
+          tokenHash,
+          wosOne,
+          "wos-guild-one",
+        );
+        assert.ok(refreshedAt > before.communities.find((item) => item.id === wosOne).verifiedAt);
+        assert.equal(
+          await kingshot.refreshSessionCommunityMembership(
+            tokenHash,
+            wosOne,
+            "wos-guild-one",
+          ),
+          null,
+        );
+
+        assert.equal(
+          await wos.revokeSessionCommunityMembership(
+            tokenHash,
+            wosOne,
+            "wos-guild-one",
+          ),
+          true,
+        );
+        const after = await wos.findSession(tokenHash);
+        assert.equal(after.user.id, "refresh-user");
+        assert.deepEqual(after.communities.map((item) => item.id), [wosTwo]);
+        assert.equal(after.communities[0].selected, false);
+      });
+
       await t.test("forced RLS hides auth rows and logout revokes server state", async () => {
         const tokenHash = "1".repeat(64);
         await wos.createSession(

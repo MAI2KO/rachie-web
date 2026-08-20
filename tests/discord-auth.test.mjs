@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   resolveAuthSessionSecret,
+  resolveDiscordBotToken,
   resolveDiscordOAuthConfig,
 } from "../server/auth/auth-config.mjs";
 import {
@@ -125,6 +126,8 @@ test("OAuth configuration and secrets are profile-scoped and fail closed", () =>
     PEGGIE_DISCORD_OAUTH_CLIENT_SECRET: "peggie-secret",
     PEGGIE_DISCORD_OAUTH_REDIRECT_URI: "http://peggie.localhost/callback",
     AUTH_SESSION_SECRET: "x".repeat(32),
+    RACHIE_DISCORD_BOT_TOKEN: "rachie-bot-token",
+    PEGGIE_DISCORD_BOT_TOKEN: "peggie-bot-token",
   };
   assert.equal(resolveDiscordOAuthConfig("wos", environment).clientId, "rachie-id");
   assert.equal(
@@ -133,6 +136,8 @@ test("OAuth configuration and secrets are profile-scoped and fail closed", () =>
   );
   assert.equal(resolveDiscordOAuthConfig("invalid", environment), null);
   assert.equal(resolveDiscordOAuthConfig("wos", {}), null);
+  assert.equal(resolveDiscordBotToken("wos", environment), "rachie-bot-token");
+  assert.equal(resolveDiscordBotToken("kingshot", environment), "peggie-bot-token");
   assert.equal(resolveAuthSessionSecret({ AUTH_SESSION_SECRET: "short" }), null);
   assert.equal(resolveAuthSessionSecret(environment), "x".repeat(32));
 });

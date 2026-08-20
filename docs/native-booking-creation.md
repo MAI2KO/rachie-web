@@ -88,7 +88,9 @@ pending `booking.created` outbox event; and the completed idempotency response.
 Failure of any write rolls everything back. Outbox delivery is not implemented.
 
 Controlled errors include `authentication_required`,
-`membership_refresh_required`, `community_selection_required`,
+`membership_refresh_required` (stale read/bootstrap),
+`membership_verification_unavailable`, `community_membership_lost`,
+`community_selection_required`,
 `registration_required`, `bookings_closed`, `booking_window_unavailable`,
 `invalid_service`, `invalid_slot`, `slot_unavailable`,
 `booking_already_exists`, `invalid_requirements`, `csrf_invalid`,

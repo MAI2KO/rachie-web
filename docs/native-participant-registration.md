@@ -103,8 +103,9 @@ The mutation requires all of the following before validation or persistence:
 - the PostgreSQL-backed `future_booking_mutation` limit of 10 attempts per minute,
   scoped to the session and selected community.
 
-Stable errors include `authentication_required`, `membership_refresh_required`,
-`community_selection_required`, `csrf_invalid`, `rate_limited`,
+Stable errors include `authentication_required`, `membership_refresh_required`
+(stale read/bootstrap), `membership_verification_unavailable`,
+`community_membership_lost`, `community_selection_required`, `csrf_invalid`, `rate_limited`,
 `invalid_registration`, `idempotency_key_invalid`, `idempotency_conflict`, and
 controlled `unavailable`. SQL, stack traces, and database details are never
 returned.

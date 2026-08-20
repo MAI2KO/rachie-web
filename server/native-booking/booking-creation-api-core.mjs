@@ -2,8 +2,10 @@ import {
   assertFutureBookingMutationMembershipFresh,
   AuthenticatedBookingHostNotFoundError,
   BookingAuthenticationRequiredError,
+  BookingCommunityMembershipLostError,
   BookingCommunitySelectionRequiredError,
   BookingMembershipRefreshRequiredError,
+  BookingMembershipVerificationUnavailableError,
 } from "../auth/authenticated-booking-context-core.mjs";
 import { InvalidIdempotencyKeyError } from "./registration-validation.mjs";
 import { BookingCreationError, BookingIdempotencyConflictError } from "./booking-creation-service-core.mjs";
@@ -16,6 +18,8 @@ function contextError(error) {
   if (error instanceof AuthenticatedBookingHostNotFoundError) return errorResponse(404, "Native booking context not found.", "not_found");
   if (error instanceof BookingAuthenticationRequiredError) return errorResponse(401, "Authentication is required.", "authentication_required");
   if (error instanceof BookingMembershipRefreshRequiredError) return errorResponse(401, "Discord membership must be refreshed by signing in again.", "membership_refresh_required");
+  if (error instanceof BookingCommunityMembershipLostError) return errorResponse(409, "Your Discord membership in the selected community could not be confirmed.", "community_membership_lost");
+  if (error instanceof BookingMembershipVerificationUnavailableError) return errorResponse(503, "Discord membership could not be verified right now.", "membership_verification_unavailable", {}, error.retryAfterSeconds === null ? {} : { "Retry-After": String(error.retryAfterSeconds) });
   if (error instanceof BookingCommunitySelectionRequiredError) return errorResponse(409, "A verified booking community must be selected.", "community_selection_required");
   return errorResponse(503, "Booking service is unavailable.", "service_unavailable");
 }
@@ -26,13 +30,18 @@ export function createBookingCreationApi(dependencies) {
       let context;
       try {
         context = await dependencies.resolveAuthenticatedContext(request);
-        assertFutureBookingMutationMembershipFresh(context);
       } catch (error) { return contextError(error); }
       try {
         const limit = await dependencies.consumeMutationRateLimit(context.gameProfile, `${context.session.tokenHash}:${context.community.id}`);
         if (!limit.allowed) return errorResponse(429, "Too many requests.", "rate_limited", {}, { "Retry-After": String(limit.retryAfterSeconds) });
       } catch { return errorResponse(503, "Booking service is unavailable.", "service_unavailable"); }
       if (!dependencies.verifyCsrf(request, context)) return errorResponse(403, "The request could not be verified.", "csrf_invalid");
+      try {
+        if (dependencies.refreshAuthenticatedMembership) {
+          context = await dependencies.refreshAuthenticatedMembership(context);
+        }
+        assertFutureBookingMutationMembershipFresh(context);
+      } catch (error) { return contextError(error); }
 
       let choice;
       let idempotencyKey;

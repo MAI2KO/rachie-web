@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { BookingMembershipRefreshRequiredError } from "../server/auth/authenticated-booking-context-core.mjs";
+import {
+  BookingCommunityMembershipLostError,
+  BookingMembershipRefreshRequiredError,
+  BookingMembershipVerificationUnavailableError,
+} from "../server/auth/authenticated-booking-context-core.mjs";
 import { createBookingMutationApi } from "../server/native-booking/booking-mutation-api-core.mjs";
 import { BookingMutationError, BookingMutationIdempotencyConflictError } from "../server/native-booking/booking-mutation-service-core.mjs";
 
@@ -22,6 +26,45 @@ test("mutation API enforces membership, CSRF, and rate limiting", async () => {
   assert.equal((await api({ verifyCsrf() { return false; } }).cancel(request("DELETE"), bookingId)).status, 403);
   const limited = await api({ async consumeMutationRateLimit() { return { allowed: false, retryAfterSeconds: 7 }; } }).cancel(request("DELETE"), bookingId);
   assert.equal(limited.status, 429); assert.equal(limited.headers.get("retry-after"), "7");
+});
+
+test("stale membership refresh happens after CSRF and prevents an OAuth response", async () => {
+  const stale = { ...trusted, community: { ...trusted.community, membershipVerifiedAt: new Date(0), discordGuildId: "trusted-guild" } };
+  let refreshes = 0;
+  const refreshed = await api({
+    async resolveAuthenticatedContext() { return stale; },
+    async refreshAuthenticatedMembership(context) {
+      refreshes += 1;
+      assert.equal(context.community.discordGuildId, "trusted-guild");
+      return { ...context, community: { ...context.community, membershipVerifiedAt: new Date() } };
+    },
+  }).cancel(request("DELETE"), bookingId);
+  assert.equal(refreshed.status, 200);
+  assert.equal(refreshes, 1);
+  assert.notEqual((await refreshed.json()).code, "membership_refresh_required");
+
+  const rejected = await api({
+    async resolveAuthenticatedContext() { return stale; },
+    verifyCsrf() { return false; },
+    async refreshAuthenticatedMembership() { refreshes += 1; return stale; },
+  }).cancel(request("DELETE"), bookingId);
+  assert.equal(rejected.status, 403);
+  assert.equal(refreshes, 1);
+});
+
+test("membership loss and verifier failure are controlled mutation errors", async () => {
+  const lost = await api({
+    async refreshAuthenticatedMembership() { throw new BookingCommunityMembershipLostError(); },
+  }).cancel(request("DELETE"), bookingId);
+  assert.equal(lost.status, 409);
+  assert.equal((await lost.json()).code, "community_membership_lost");
+
+  const unavailable = await api({
+    async refreshAuthenticatedMembership() { throw new BookingMembershipVerificationUnavailableError(6); },
+  }).cancel(request("DELETE"), bookingId);
+  assert.equal(unavailable.status, 503);
+  assert.equal(unavailable.headers.get("retry-after"), "6");
+  assert.equal((await unavailable.json()).code, "membership_verification_unavailable");
 });
 
 test("mutation API maps ownership, active-state, idempotency, and failures safely", async () => {

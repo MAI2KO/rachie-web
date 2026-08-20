@@ -22,6 +22,21 @@ export class BookingMembershipRefreshRequiredError extends Error {
   }
 }
 
+export class BookingMembershipVerificationUnavailableError extends Error {
+  constructor(retryAfterSeconds = null) {
+    super("Discord membership could not be verified right now.");
+    this.name = "BookingMembershipVerificationUnavailableError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+export class BookingCommunityMembershipLostError extends Error {
+  constructor() {
+    super("Discord membership in the selected community could not be confirmed.");
+    this.name = "BookingCommunityMembershipLostError";
+  }
+}
+
 export class AuthenticatedBookingContextUnavailableError extends Error {
   constructor() {
     super("Authenticated booking context is unavailable.");

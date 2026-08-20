@@ -115,6 +115,8 @@ export function uiError(code, retryAfter) {
   const messages = {
     authentication_required: "Your Discord session has ended. Sign in again to continue.",
     membership_refresh_required: "Your Discord membership needs refreshing. Sign in again before making changes.",
+    membership_verification_unavailable: `Discord membership could not be checked. Please retry${retryAfter ? ` in ${retryAfter} seconds` : " shortly"}.`,
+    community_membership_lost: "Your membership in the selected Discord community could not be confirmed. Rejoin it or choose another verified community.",
     community_selection_required: "Choose a verified community before booking.",
     registration_required: "Register your player details before booking.",
     bookings_closed: "Bookings are currently closed. Existing appointments can still be cancelled.",

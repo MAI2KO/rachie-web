@@ -14,13 +14,16 @@ commit it. Keep the supplied local `DATABASE_URL` and
   from the R.A.C.H.I.E application under Discord Developer Portal > OAuth2;
 - `PEGGIE_DISCORD_OAUTH_CLIENT_ID` and `PEGGIE_DISCORD_OAUTH_CLIENT_SECRET`
   from the P.E.G.G.I.E application under Discord Developer Portal > OAuth2;
+- `RACHIE_DISCORD_BOT_TOKEN` and `PEGGIE_DISCORD_BOT_TOKEN` with the bot token
+  from each corresponding application under Discord Developer Portal > Bot;
 - `WOS_DEV_DISCORD_GUILD_ID` with the real development guild containing the
   OAuth test user for the WOS State;
 - `KINGSHOT_DEV_DISCORD_GUILD_ID` with the real development guild containing the
   OAuth test user for the Kingshot Kingdom.
 
-Do not paste bot tokens. The website requests only Discord OAuth `identify` and
-`guilds` scopes and does not need a bot token.
+These are bot tokens, not OAuth client secrets. Keep them only in the ignored
+`.env.local`; never paste them into source, logs, browser code, or test output.
+The website's visible user OAuth flow still requests only `identify` and `guilds`.
 
 ## 2. Register local Discord callbacks
 

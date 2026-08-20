@@ -11,6 +11,11 @@ const PROFILE_ENVIRONMENT = Object.freeze({
   }),
 });
 
+const PROFILE_BOT_TOKEN_ENVIRONMENT = Object.freeze({
+  wos: "RACHIE_DISCORD_BOT_TOKEN",
+  kingshot: "PEGGIE_DISCORD_BOT_TOKEN",
+});
+
 function readNonEmpty(environment, name) {
   const value = String(environment[name] ?? "").trim();
   return value || null;
@@ -26,6 +31,11 @@ export function resolveDiscordOAuthConfig(gameProfile, environment) {
   if (!clientId || !clientSecret || !redirectUri) return null;
 
   return Object.freeze({ clientId, clientSecret, redirectUri });
+}
+
+export function resolveDiscordBotToken(gameProfile, environment) {
+  const name = PROFILE_BOT_TOKEN_ENVIRONMENT[gameProfile];
+  return name ? readNonEmpty(environment, name) : null;
 }
 
 export function resolveAuthSessionSecret(environment) {

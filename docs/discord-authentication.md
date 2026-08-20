@@ -9,7 +9,9 @@ website administrator permissions.
 
 Protocol behavior follows Discord's official [OAuth2 documentation](https://docs.discord.com/developers/topics/oauth2),
 [OAuth2 overview](https://docs.discord.com/developers/platform/oauth2-and-permissions),
-and [User resource documentation](https://docs.discord.com/developers/resources/user).
+the [User resource documentation](https://docs.discord.com/developers/resources/user),
+the [Get Guild Member endpoint](https://docs.discord.com/developers/resources/guild#get-guild-member),
+and [Discord rate-limit guidance](https://docs.discord.com/developers/topics/rate-limits).
 
 ## OAuth Routes
 
@@ -46,9 +48,11 @@ All values are server-only. None may use a `NEXT_PUBLIC_` prefix.
 | `RACHIE_DISCORD_OAUTH_CLIENT_ID` | R.A.C.H.I.E Discord OAuth application ID |
 | `RACHIE_DISCORD_OAUTH_CLIENT_SECRET` | R.A.C.H.I.E Discord OAuth secret |
 | `RACHIE_DISCORD_OAUTH_REDIRECT_URI` | Exact R.A.C.H.I.E callback URI |
+| `RACHIE_DISCORD_BOT_TOKEN` | R.A.C.H.I.E bot token used only for WOS membership checks |
 | `PEGGIE_DISCORD_OAUTH_CLIENT_ID` | P.E.G.G.I.E Discord OAuth application ID |
 | `PEGGIE_DISCORD_OAUTH_CLIENT_SECRET` | P.E.G.G.I.E Discord OAuth secret |
 | `PEGGIE_DISCORD_OAUTH_REDIRECT_URI` | Exact P.E.G.G.I.E callback URI |
+| `PEGGIE_DISCORD_BOT_TOKEN` | P.E.G.G.I.E bot token used only for Kingshot membership checks |
 | `AUTH_SESSION_SECRET` | At least 32 bytes used to derive profile-bound CSRF tokens |
 | `DATABASE_URL` | Server-only PostgreSQL connection used for sessions and mappings |
 
@@ -62,6 +66,11 @@ https://peggie.r-a-c-h-i-e.com/api/v1/auth/callback
 Local Discord application redirect entries can instead use the corresponding
 `localhost:3000` and `peggie.localhost:3000` callback URLs. Each profile has its
 own credentials and redirect setting; there is no cross-profile fallback.
+
+The two bot-token values in `.env.local` must be bot tokens copied from the
+Discord Developer Portal, not OAuth client secrets. They must remain server-only
+and must never use a `NEXT_PUBLIC_` prefix. Each existing bot must be installed in
+the guilds mapped to its profile so the server can call Get Guild Member.
 
 ## Session Model
 
@@ -83,12 +92,13 @@ before expiring the browser cookie. Invalid, expired, revoked, or unknown tokens
 produce an unauthenticated context.
 
 Booking membership authority expires sooner than the website session: reads accept
-the login-time guild proof for 30 minutes, while registration and booking mutations
-accept it for five minutes. Because Discord tokens are deliberately not persisted,
-normal session reads cannot refresh that proof. After five minutes the current UI
-must start OAuth again before another mutation; this is membership freshness, not
-website-session expiry. The security-preserving refresh recommendation is recorded
-in [authenticated-booking-context.md](authenticated-booking-context.md#membership-freshness).
+the guild proof for 30 minutes, while registration and booking mutations accept it
+for five minutes. A stale mutation uses the profile's bot identity to query only
+the Discord user and guild already bound to the selected session community. A
+confirmed member refreshes that row's `verified_at`; a confirmed non-member removes
+only that relationship and its selected-community row. Temporary Discord failures
+fail closed with a retryable error. OAuth access and refresh tokens remain
+unpersisted.
 
 State is a separate random token stored in an HTTP-only callback-path cookie and
 as a profile-scoped database hash. The callback requires the query and cookie
@@ -162,8 +172,8 @@ Before native booking writes:
 No production Discord credentials, deployment settings, or database connection
 were created by this phase.
 
-Authenticated booking reads use a 30-minute login-time guild-membership lease.
-Stale membership requires a fresh Discord sign-in; future mutations have an
-implemented five-minute freshness assertion. Authentication and booking routes
+Authenticated booking reads use a 30-minute guild-membership lease. Stale reads
+retain the OAuth fallback; stale mutations transparently use the server-side bot
+verifier before enforcing the five-minute freshness assertion. Authentication and booking routes
 also use profile-scoped PostgreSQL fixed-window limits. Full details are in
 [authenticated-booking-context.md](authenticated-booking-context.md).

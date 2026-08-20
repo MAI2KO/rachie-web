@@ -72,6 +72,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   const [mode, setMode] = useState<{ type: "reschedule" | "cancel"; booking: Booking } | null>(null);
   const [busy, setBusy] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [membershipCheckSlow, setMembershipCheckSlow] = useState(false);
   const [error, setError] = useState("");
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [success, setSuccess] = useState("");
@@ -160,12 +161,24 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   async function mutation<T>(attempt: string, url: string, method: string, body?: unknown): Promise<T> {
     let key = attempts.current.get(attempt);
     if (!key) { key = makeAttemptKey(); attempts.current.set(attempt, key); }
+    const slowTimer = window.setTimeout(() => setMembershipCheckSlow(true), 600);
     try {
       const result = await jsonRequest<T>(url, { method, headers: { "content-type": "application/json", "idempotency-key": key, "x-csrf-token": session?.csrfToken ?? "" }, ...(body ? { body: JSON.stringify(body) } : {}) });
       attempts.current.delete(attempt); return result;
     } catch (caught) {
       if ((caught as Error & { response?: Response }).response) attempts.current.delete(attempt);
+      if ((caught as Error & { body?: ApiError }).body?.code === "community_membership_lost") {
+        try {
+          const nextSession = await jsonRequest<Session>("/api/v1/auth/session");
+          setSession(nextSession); setContext(null); setMe(null); setAvailability(null); setMode(null);
+        } catch {
+          // Preserve the controlled membership-loss error from the mutation.
+        }
+      }
       throw caught;
+    } finally {
+      window.clearTimeout(slowTimer);
+      setMembershipCheckSlow(false);
     }
   }
 
@@ -241,6 +254,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   return <section className="booking-screen" aria-labelledby="booking-title">
     <header className="booking-heading"><div><p className="booking-kicker">{brand.game.name} appointments</p><h1 id="booking-title">Minister booking</h1></div>{shouldShowLogout(session) && <div className="session-actions"><span className="session-mark">Discord: {session.user?.globalName ?? session.user?.username}</span><Button disabled={loggingOut} onClick={() => void logout()} secondary type="button">{loggingOut ? "Logging out..." : "Log out"}</Button></div>}</header>
     {error && <StatusNotice kind="error" message={error} noticeRef={errorRef} />}
+    {membershipCheckSlow && <StatusNotice message="Checking your Discord booking access..." />}
     {success && <StatusNotice kind="success" message={success} noticeRef={successRef} />}
     {confirmation && <section className="booking-confirmation" aria-labelledby="confirmation-title"><div><p className="booking-kicker">Confirmed</p><h2 id="confirmation-title">{confirmation.serviceLabel}</h2></div><dl><div><dt>Date</dt><dd>{confirmation.date}</dd></div><div><dt>Time</dt><dd>{confirmation.displayTime}</dd></div><div><dt>Player</dt><dd>{confirmation.playerName}</dd></div><div><dt>Alliance</dt><dd>{confirmation.alliance}</dd></div>{confirmation.requirements.map((answer) => <div key={answer.code}><dt>{answer.label}</dt><dd>{answer.value}{answer.unit ? ` ${answer.unit}` : ""}</dd></div>)}</dl></section>}
     {uiState === "unauthenticated" ? <div className="booking-gate"><p>Sign in with Discord to verify your community and manage your appointments.</p><a className="booking-button" href="/api/v1/auth/login">Sign in with Discord</a></div>

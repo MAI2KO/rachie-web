@@ -177,6 +177,38 @@ class ProfileScopedAuthSession {
     return result.rowCount === 1;
   }
 
+  async refreshSessionCommunityMembership(tokenHash, communityId, discordGuildId) {
+    const result = await this.client.query(
+      `UPDATE website_auth_session_communities AS session_community
+       SET verified_at = now()
+       FROM website_auth_sessions AS session
+       WHERE session_community.game_profile = $1
+         AND session_community.session_token_hash = $2
+         AND session_community.community_id = $3
+         AND session_community.discord_guild_id = $4
+         AND session.game_profile = session_community.game_profile
+         AND session.token_hash = session_community.session_token_hash
+         AND session.revoked_at IS NULL
+         AND session.expires_at > now()
+       RETURNING session_community.verified_at`,
+      [this.gameProfile, tokenHash, communityId, discordGuildId],
+    );
+    return result.rowCount === 1 ? result.rows[0].verified_at : null;
+  }
+
+  async revokeSessionCommunityMembership(tokenHash, communityId, discordGuildId) {
+    const result = await this.client.query(
+      `DELETE FROM website_auth_session_communities
+       WHERE game_profile = $1
+         AND session_token_hash = $2
+         AND community_id = $3
+         AND discord_guild_id = $4
+       RETURNING community_id`,
+      [this.gameProfile, tokenHash, communityId, discordGuildId],
+    );
+    return result.rowCount === 1;
+  }
+
   async revokeSession(tokenHash) {
     const result = await this.client.query(
       `UPDATE website_auth_sessions
@@ -232,6 +264,24 @@ export function createProfileScopedAuthRepository(gameProfile, pool) {
     selectCommunity(tokenHash, locationCode) {
       return withTransaction((session) =>
         session.selectCommunity(tokenHash, locationCode),
+      );
+    },
+    refreshSessionCommunityMembership(tokenHash, communityId, discordGuildId) {
+      return withTransaction((session) =>
+        session.refreshSessionCommunityMembership(
+          tokenHash,
+          communityId,
+          discordGuildId,
+        ),
+      );
+    },
+    revokeSessionCommunityMembership(tokenHash, communityId, discordGuildId) {
+      return withTransaction((session) =>
+        session.revokeSessionCommunityMembership(
+          tokenHash,
+          communityId,
+          discordGuildId,
+        ),
       );
     },
     revokeSession(tokenHash) {

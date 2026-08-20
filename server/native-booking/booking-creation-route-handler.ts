@@ -1,6 +1,7 @@
 import "server-only";
 
-import { resolveAuthenticatedBookingRequestContext } from "@/server/auth/authenticated-booking-context";
+import { resolveAuthenticatedBookingMutationRequestContext } from "@/server/auth/authenticated-booking-context";
+import { refreshAuthenticatedBookingMembership } from "@/server/auth/booking-membership-refresh";
 import { verifyAuthenticatedMutationCsrf } from "@/server/auth/mutation-csrf";
 import { createServerRateLimiter } from "@/server/rate-limit/limiter";
 import { RATE_LIMIT_POLICIES } from "@/server/rate-limit/policies.mjs";
@@ -9,7 +10,8 @@ import { createNativeBookingRepository } from "./repository";
 import { createNativeBookingCreationService } from "./booking-creation-service";
 
 const api = createBookingCreationApi({
-  resolveAuthenticatedContext: resolveAuthenticatedBookingRequestContext,
+  resolveAuthenticatedContext: resolveAuthenticatedBookingMutationRequestContext,
+  refreshAuthenticatedMembership: refreshAuthenticatedBookingMembership,
   verifyCsrf: verifyAuthenticatedMutationCsrf,
   createRepository: createNativeBookingRepository,
   createService: createNativeBookingCreationService,
