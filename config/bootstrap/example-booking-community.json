@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "profile": "<wos-or-kingshot>",
+  "community": {
+    "code": "<community-code>",
+    "displayName": "<public-community-name>",
+    "discordGuild": {
+      "id": "<discord-guild-id>",
+      "displayName": "<public-discord-guild-name>"
+    }
+  },
+  "booking": {
+    "enabled": true,
+    "open": false
+  },
+  "timeZone": "<IANA-time-zone>",
+  "services": [
+    {
+      "code": "construction",
+      "bookingDate": "<YYYY-MM-DD>",
+      "requirements": ["fc", "rfc", "speedups"],
+      "slots": [
+        {
+          "displayTimeLabel": "<public-time-label>",
+          "localStartTime": "<HH:MM>"
+        }
+      ]
+    },
+    {
+      "code": "research",
+      "bookingDate": "<YYYY-MM-DD>",
+      "requirements": ["shards", "speedups"],
+      "slots": [
+        {
+          "displayTimeLabel": "<public-time-label>",
+          "localStartTime": "<HH:MM>"
+        }
+      ]
+    },
+    {
+      "code": "troop",
+      "bookingDate": "<YYYY-MM-DD>",
+      "requirements": ["speedups"],
+      "slots": [
+        {
+          "displayTimeLabel": "<public-time-label>",
+          "localStartTime": "<HH:MM>"
+        }
+      ]
+    }
+  ]
+}

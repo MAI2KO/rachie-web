@@ -56,6 +56,7 @@ is server-only even when its value is not intrinsically secret.
 | `WOS_NATIVE_BOOKING_COMMUNITY_CODE` | Optional obsolete bridge | No | WOS | Local isolated tests only | Authenticated routes do not read it; omit from staging/production. |
 | `KINGSHOT_NATIVE_BOOKING_COMMUNITY_CODE` | Optional obsolete bridge | No | Kingshot | Local isolated tests only | Authenticated routes do not read it; omit from staging/production. |
 | `ALLOW_DEVELOPMENT_DATABASE_SEED` | Required only for local seed | No | Shared | Local only | Must be `true`; seed also rejects remote DBs and production mode. |
+| `BOOKING_BOOTSTRAP_ENABLED` | Required only for operator bootstrap | No | Shared | One-shot operator command only | Must be exactly `true`; never set on the web service. Remote commands also require the CLI confirmation flag. |
 | `WOS_DEV_DISCORD_GUILD_ID` | Required only for local seed | No | WOS | Local only | Development seed guild; never staging authority. |
 | `KINGSHOT_DEV_DISCORD_GUILD_ID` | Required only for local seed | No | Kingshot | Local only | Development seed guild; never staging authority. |
 | `TEST_DATABASE_URL` | Optional runtime; required for DB tests | Yes | Shared | Local/CI only | Disposable test database; never staging/production. |
@@ -243,7 +244,9 @@ Railway secrets into tickets, or include database URLs in screenshots.
 4. Run `0001`–`0004` through the migration release job and verify the ledger.
 5. Apply and verify runtime grants and forced RLS.
 6. Load reviewed staging community/guild/settings/window/service/date/slot data.
-   Do not use `db:seed`; it intentionally refuses staging databases.
+   Follow the [booking bootstrap guide](booking-community-bootstrap.md) with the
+   migration/bootstrap role. Do not use `db:seed`; it intentionally refuses
+   staging databases.
 7. Configure required variables, including `TRUSTED_PROXY=railway`; omit all
    development-only values.
 8. Add the two exact staging redirects to matching Discord applications.
@@ -294,8 +297,9 @@ Railway secrets into tickets, or include database URLs in screenshots.
   provisioned or verified.
 - DNS and Discord redirect changes need separate explicit authorization.
 - Both staging bot credentials and guild membership must be verified.
-- There is no non-local staging-data bootstrap. A reviewed repeatable loader is
-  needed; the development seed correctly refuses remote databases.
+- Prepare and peer-review a staging community JSON outside source, then dry-run
+  and apply it with the migration/bootstrap role. The development seed still
+  correctly refuses remote databases.
 - Decide whether legacy compatibility is needed; otherwise omit its variables and
   expect controlled 503s from those endpoints.
 - Verify `npm run build` in an unrestricted Node 22 CI/Railway builder. The local

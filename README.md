@@ -132,3 +132,6 @@ with future visual work.
 For persistent local PostgreSQL, real Discord OAuth setup, idempotent development
 seed data, and the manual booking checklist, see
 [docs/local-manual-booking-testing.md](docs/local-manual-booking-testing.md).
+
+For reviewed initial staging/production community configuration, see
+[docs/booking-community-bootstrap.md](docs/booking-community-bootstrap.md).

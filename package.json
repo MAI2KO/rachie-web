@@ -12,6 +12,7 @@
     "db:down": "docker compose down",
     "db:reset": "docker compose down --volumes",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
+    "db:bootstrap": "node --env-file-if-exists=.env.local scripts/bootstrap-booking-community.mjs",
     "db:seed": "node --env-file-if-exists=.env.local scripts/seed-development.mjs",
     "start": "next start",
     "lint": "eslint",
