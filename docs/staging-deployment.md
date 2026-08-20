@@ -120,6 +120,20 @@ Use Railway's private `DATABASE_URL`, not `DATABASE_PUBLIC_URL`. If PgBouncer is
 enabled, migrations need the unpooled/direct private URL because the runner holds
 an advisory lock and transactions.
 
+### PostgreSQL version validation
+
+PostgreSQL 16 remains the original development and local Compose baseline. The
+Railway staging database target was compatibility-validated against a disposable
+local PostgreSQL 18.6 container using the real migration runner and the complete
+PostgreSQL-backed test suite. Migrations `0001`-`0004` applied successfully, a
+second run was a clean no-op, and all 135 tests passed, including forced RLS,
+restricted roles, concurrency, advisory locks, dates/timestamps, authentication,
+rate limiting, and community bootstrap. No PostgreSQL 18 compatibility warning or
+application defect was found.
+
+Staging may proceed on Railway PostgreSQL 18.6. This validation does not claim
+production support beyond the exact PostgreSQL 18.6 staging target tested here.
+
 ## PostgreSQL roles
 
 Connect as the Railway database administrator. Substitute generated passwords
