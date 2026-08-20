@@ -258,7 +258,11 @@ Railway secrets into tickets, or include database URLs in screenshots.
 4. Run `0001`–`0004` through the migration release job and verify the ledger.
 5. Apply and verify runtime grants and forced RLS.
 6. Load reviewed staging community/guild/settings/window/service/date/slot data.
-   Follow the [booking bootstrap guide](booking-community-bootstrap.md) with the
+   First create each JSON file with `npm run db:bootstrap-config`; this local
+   wizard requires no PostgreSQL knowledge and makes no database connection.
+   Review its summary and generated file. Later, follow the
+   [booking bootstrap guide](booking-community-bootstrap.md) to run the
+   `npm run db:bootstrap` dry run with the generated file and the
    migration/bootstrap role. Do not use `db:seed`; it intentionally refuses
    staging databases.
 7. Configure required variables, including `TRUSTED_PROXY=railway`; omit all
@@ -311,9 +315,10 @@ Railway secrets into tickets, or include database URLs in screenshots.
   provisioned or verified.
 - DNS and Discord redirect changes need separate explicit authorization.
 - Both staging bot credentials and guild membership must be verified.
-- Prepare and peer-review a staging community JSON outside source, then dry-run
-  and apply it with the migration/bootstrap role. The development seed still
-  correctly refuses remote databases.
+- Create both staging community files with `npm run db:bootstrap-config`, keep
+  them outside source, and peer-review them. Then dry-run and apply each one with
+  the migration/bootstrap role. The development seed still correctly refuses
+  remote databases.
 - Decide whether legacy compatibility is needed; otherwise omit its variables and
   expect controlled 503s from those endpoints.
 - Complete the real-identity smoke checklist after staging exists.

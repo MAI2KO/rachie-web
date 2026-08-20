@@ -8,11 +8,43 @@ database target before every run.
 Do not use `scripts/seed-development.mjs` or `npm run db:seed` outside the local
 development database. Those protections remain separate and unchanged.
 
-## Configuration file
+## Create a configuration with the wizard
 
-Copy `config/bootstrap/example-booking-community.json` to an untracked,
-access-controlled location and replace every angle-bracket placeholder. Never
-put real guild IDs, player data, credentials, or secrets in source.
+You do not need to know PostgreSQL or edit JSON. From the project directory, run:
+
+```bash
+npm run db:bootstrap-config
+```
+
+Choose R.A.C.H.I.E / Whiteout Survival or P.E.G.G.I.E / Kingshot, then answer
+the plain-language questions. Press Enter at `Keep bookings closed initially?
+[Y/n]` to use the safer default. The wizard validates each answer, previews the
+appointment schedule, prints a complete summary, and asks before writing.
+
+By default it creates the directory `/home/mark/rachie-staging-config/` and
+writes one of these files:
+
+- `staging-wos-booking-community.json`
+- `staging-kingshot-booking-community.json`
+
+It never silently replaces an existing file. It asks for a separate explicit
+confirmation if the selected file already exists. After writing, it reads the
+file back and runs the existing bootstrap configuration validator locally. This
+step does not use `DATABASE_URL`, connect to PostgreSQL, contact Railway, or make
+any Discord change.
+
+The recovered legacy source proves that the old template used 48 rows
+(`A12:A59`), but the repository does not contain the spreadsheet template's
+actual times or interval. The wizard therefore asks for a first time, interval,
+and number of slots and does not invent a legacy schedule. The schedule is used
+for Construction, Research, and Troop.
+
+These files are configuration, not a place for secrets. They must **not**
+contain bot tokens, OAuth secrets, database passwords, or session secrets. Keep
+the files outside the repository and share them only through an appropriate
+private channel.
+
+## What the generated file contains
 
 Version 1 requires:
 
@@ -30,11 +62,33 @@ Supported requirements are `fc`, `rfc`, and `speedups` for construction;
 code to make it optional. The stable `speedups` code means a positive whole
 number of **days**; bootstrap stores only whether the answer is required.
 
+The wizard shows profile-specific names and handles these codes for you. WOS
+uses Fire Crystals, Refined Fire Crystals, Fire Crystal Shards, and Speed-ups
+(days). Kingshot uses Truegold, Tempered Truegold, Truegold Dust, and Speed-ups
+(days).
+
 Unknown fields/profiles, malformed identifiers, dates, times or zones, missing
 fields, duplicates, and unsupported requirement codes are rejected before a
 database connection is opened.
 
 ## Role, dry run, and remote safeguards
+
+Creating the JSON is the only step covered by the wizard. Later, when a database
+operator has supplied the reviewed migration-role connection securely, dry-run
+the generated file before applying anything. For example, the WOS command shape
+is:
+
+```bash
+npm run db:bootstrap -- \
+  --config /home/mark/rachie-staging-config/staging-wos-booking-community.json \
+  --dry-run \
+  --confirm-remote-bootstrap
+```
+
+That later command also needs `BOOKING_BOOTSTRAP_ENABLED=true` and the correct
+administrative `DATABASE_URL`; do not guess either value. A dry run does connect
+to the selected database, so stop and ask the database operator if those terms
+or the target are unfamiliar.
 
 Use the direct, unpooled migration/bootstrap administrative `DATABASE_URL`.
 That role must own or have `INSERT` and `UPDATE` on every bootstrap table. The
