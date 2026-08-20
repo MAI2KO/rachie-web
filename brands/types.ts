@@ -10,6 +10,7 @@ export interface BrandConfig {
   readonly shortName: string;
   readonly description: string;
   readonly domain: string;
+  readonly stagingDomain: string;
   readonly localHostnames: readonly string[];
   readonly game: {
     readonly name: string;

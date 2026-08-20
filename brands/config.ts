@@ -1,4 +1,5 @@
 import type { BrandConfig, BrandId } from "./types";
+import { brandHostnames } from "./hostnames.mjs";
 
 export const DEFAULT_BRAND_ID: BrandId = "rachie";
 
@@ -8,8 +9,9 @@ export const brandConfigs = {
     displayName: "R.A.C.H.I.E",
     shortName: "RACHIE",
     description: "Community tools and resources for Whiteout Survival.",
-    domain: "r-a-c-h-i-e.com",
-    localHostnames: ["localhost", "127.0.0.1", "::1"],
+    domain: brandHostnames.rachie.production,
+    stagingDomain: brandHostnames.rachie.staging,
+    localHostnames: brandHostnames.rachie.local,
     game: { name: "Whiteout Survival", profile: "wos" },
     assets: { namespace: "rachie", basePath: "/brands/rachie" },
     theme: {
@@ -33,8 +35,9 @@ export const brandConfigs = {
     displayName: "P.E.G.G.I.E",
     shortName: "PEGGIE",
     description: "Community tools and resources for Kingshot.",
-    domain: "peggie.r-a-c-h-i-e.com",
-    localHostnames: ["peggie.localhost"],
+    domain: brandHostnames.peggie.production,
+    stagingDomain: brandHostnames.peggie.staging,
+    localHostnames: brandHostnames.peggie.local,
     game: { name: "Kingshot", profile: "kingshot" },
     assets: { namespace: "peggie", basePath: "/brands/peggie" },
     theme: {

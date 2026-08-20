@@ -2,6 +2,7 @@ import "server-only";
 
 import { normalizeHostname, resolveKnownBrand } from "@/brands/resolve";
 import type { GameProfile } from "@/brands/types";
+import { requestHostnameHeader, trustsRailwayProxy } from "@/server/request-proxy.mjs";
 
 import { getLegacyBookingBackendUrl } from "./config";
 import { handleLegacyBookingProxyRequest } from "./proxy-core.mjs";
@@ -11,7 +12,7 @@ const legacyBookingTransport = createLegacyBookingTransport();
 
 function getRequestHostname(request: Request): string {
   return normalizeHostname(
-    request.headers.get("x-forwarded-host") ?? request.headers.get("host"),
+    requestHostnameHeader(request.headers, trustsRailwayProxy()),
   );
 }
 

@@ -1,5 +1,8 @@
-export function requestNetworkSubject(request) {
-  const forwarded = request.headers.get("x-forwarded-for");
-  const firstAddress = forwarded?.split(",", 1)[0]?.trim();
-  return firstAddress || "unknown-network";
+import { railwayClientAddress, trustsRailwayProxy } from "../request-proxy.mjs";
+
+export function requestNetworkSubject(request, environment = process.env) {
+  return (
+    railwayClientAddress(request.headers, trustsRailwayProxy(environment)) ??
+    "unknown-network"
+  );
 }

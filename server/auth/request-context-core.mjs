@@ -1,9 +1,11 @@
 export function resolveAuthRequestContextCore(
   request,
-  { normalizeHostname, resolveKnownBrand },
+  { normalizeHostname, resolveKnownBrand, requestHostnameHeader },
 ) {
   const hostname = normalizeHostname(
-    request.headers.get("x-forwarded-host") ?? request.headers.get("host"),
+    requestHostnameHeader
+      ? requestHostnameHeader(request.headers)
+      : request.headers.get("host"),
   );
   const brand = resolveKnownBrand(hostname);
   return brand

@@ -117,9 +117,10 @@ Current policies are:
 
 The future mutation policy is attached to registration, creation, rescheduling,
 and cancellation. Database or limiter failure returns a controlled unavailable response
-rather than silently disabling protection. Production network subjects rely on
-the deployment proxy supplying the client address in `X-Forwarded-For`; the
-application never uses it for profile or community authorization.
+rather than silently disabling protection. Railway network subjects require
+explicit `TRUSTED_PROXY=railway` and use its edge-injected `X-Real-IP`.
+Caller-controlled `X-Forwarded-For` is ignored. Network identity is never used
+for profile or community authorization.
 
 ## Data Exposure
 

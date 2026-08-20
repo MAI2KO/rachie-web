@@ -3,32 +3,15 @@ import {
   DEFAULT_BRAND_ID,
   type ActiveBrand,
 } from "./config";
+import {
+  normalizeHostname,
+  resolveKnownBrandCore,
+} from "./resolve-core.mjs";
 
-export function normalizeHostname(host: string | null): string {
-  const firstHost = host?.split(",", 1)[0]?.trim().toLowerCase() ?? "";
-
-  if (firstHost.startsWith("[")) {
-    const closingBracket = firstHost.indexOf("]");
-    return closingBracket === -1
-      ? firstHost
-      : firstHost.slice(1, closingBracket);
-  }
-
-  return firstHost.split(":", 1)[0]?.replace(/\.$/, "") ?? "";
-}
+export { normalizeHostname };
 
 export function resolveKnownBrand(hostname: string): ActiveBrand | null {
-  const normalizedHostname = normalizeHostname(hostname);
-
-  return (
-    Object.values(brandConfigs).find(
-      (brand) =>
-        brand.domain === normalizedHostname ||
-        brand.localHostnames.some(
-          (localHostname) => localHostname === normalizedHostname,
-        ),
-    ) ?? null
-  );
+  return resolveKnownBrandCore(hostname, brandConfigs) as ActiveBrand | null;
 }
 
 export function resolveBrand(hostname: string): ActiveBrand {

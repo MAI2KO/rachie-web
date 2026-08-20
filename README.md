@@ -19,6 +19,11 @@ Load either local hostname in a browser:
 Modern browsers resolve `*.localhost` to the loopback interface, so no hosts-file
 or production DNS change is required.
 
+The deployment-ready staging pair is `staging.r-a-c-h-i-e.com` and
+`peggie-staging.r-a-c-h-i-e.com`. See the
+[staging deployment guide](docs/staging-deployment.md) for variables, database
+roles, migrations, Railway settings, smoke tests, and rollback.
+
 ## Brand architecture
 
 - `brands/types.ts` defines the shared, strongly typed configuration contract.

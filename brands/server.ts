@@ -1,5 +1,9 @@
+import "server-only";
+
 import { headers } from "next/headers";
 import { cache } from "react";
+
+import { requestHostnameHeader, trustsRailwayProxy } from "@/server/request-proxy.mjs";
 
 import { normalizeHostname, resolveBrand } from "./resolve";
 
@@ -10,8 +14,10 @@ export interface BrandRequestContext {
 
 export const getBrandRequestContext = cache(async (): Promise<BrandRequestContext> => {
   const requestHeaders = await headers();
-  const hostHeader =
-    requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
+  const hostHeader = requestHostnameHeader(
+    requestHeaders,
+    trustsRailwayProxy(),
+  );
   const hostname = normalizeHostname(hostHeader);
 
   return {
