@@ -2,8 +2,8 @@ export const SERVICE_ORDER = Object.freeze(["construction", "research", "troop"]
 
 export function profileTerms(profile) {
   return profile === "kingshot"
-    ? { community: "Kingdom", fc: "Truegold", rfc: "Tempered Truegold", shards: "Truegold Dust", speedups: "Speed-ups" }
-    : { community: "State", fc: "Fire Crystals", rfc: "Refined Fire Crystals", shards: "Fire Crystal Shards", speedups: "Speed-ups" };
+    ? { community: "Kingdom", fc: "Truegold", rfc: "Tempered Truegold", shards: "Truegold Dust", speedups: "Speed-ups (days)" }
+    : { community: "State", fc: "Fire Crystals", rfc: "Refined Fire Crystals", shards: "Fire Crystal Shards", speedups: "Speed-ups (days)" };
 }
 
 export function requirementFields(profile, serviceCode, requirements) {
@@ -14,7 +14,9 @@ export function requirementFields(profile, serviceCode, requirements) {
     : serviceCode === "research"
       ? [["shards", terms.shards, config.shardsRequired], ["speedups", terms.speedups, config.speedupsRequired]]
       : [["speedups", terms.speedups, config.speedupsRequired]];
-  return candidates.filter(([, , enabled]) => enabled).map(([code, label]) => ({ code, label }));
+  return candidates
+    .filter(([, , enabled]) => enabled)
+    .map(([code, label]) => ({ code, label, ...(code === "speedups" ? { helpText: "Enter whole days only." } : {}) }));
 }
 
 export function sortSlots(slots) {
@@ -29,6 +31,28 @@ export function resolveBookingUiState(session, context, me, errorCode = /** @typ
   if (!context || !me) return errorCode ? "unavailable" : "loading-booking";
   if (me.registration?.status !== "registered") return "registration";
   return "dashboard";
+}
+
+export function shouldShowLogout(session) {
+  return session?.authenticated === true;
+}
+
+export function signedOutBookingState(session = { authenticated: false }) {
+  return {
+    session,
+    context: null,
+    me: null,
+    availability: null,
+    availabilityFailed: false,
+    selectedService: "construction",
+    selectedSlot: "",
+    requirements: {},
+    mode: null,
+    error: "",
+    errorCode: null,
+    success: "",
+    confirmation: null,
+  };
 }
 
 export function uiError(code, retryAfter) {

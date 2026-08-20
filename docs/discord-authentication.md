@@ -82,6 +82,14 @@ its SHA-256 hash. Sessions expire after 12 hours and logout records revocation
 before expiring the browser cookie. Invalid, expired, revoked, or unknown tokens
 produce an unauthenticated context.
 
+Booking membership authority expires sooner than the website session: reads accept
+the login-time guild proof for 30 minutes, while registration and booking mutations
+accept it for five minutes. Because Discord tokens are deliberately not persisted,
+normal session reads cannot refresh that proof. After five minutes the current UI
+must start OAuth again before another mutation; this is membership freshness, not
+website-session expiry. The security-preserving refresh recommendation is recorded
+in [authenticated-booking-context.md](authenticated-booking-context.md#membership-freshness).
+
 State is a separate random token stored in an HTTP-only callback-path cookie and
 as a profile-scoped database hash. The callback requires the query and cookie
 values to match and atomically consumes the unexpired database row. Selection and

@@ -67,7 +67,25 @@ bounding how long removed guild membership remains usable.
 
 Future booking mutations must call the exported mutation freshness assertion,
 which uses a stricter five-minute lease. It fails closed with
-`membership_refresh_required`. No mutation route exists yet.
+`membership_refresh_required`. Creation, registration, rescheduling, and
+cancellation all enforce this assertion. The 12-hour website session remains
+valid when this happens, but it cannot refresh the five-minute membership lease:
+`verified_at` is written only from the guild list returned during OAuth, and no
+Discord access or refresh token is retained. The browser is therefore sent
+through OAuth again after the mutation lease expires, even though reads continue
+to accept the same proof for 30 minutes.
+
+The recommended final policy is to preserve short mutation freshness but add a
+server-side membership revalidation path. Prefer a trusted, profile-scoped bot or
+membership-attestation service that checks the known Discord user against the
+selected guild and refreshes only that community's `verified_at`. It must clear or
+reject the selected community when membership is absent and must retain hostname
+profile isolation, CSRF, session binding, and mutation rate limits. If that service
+is unavailable, fail closed and fall back to OAuth. A second choice is encrypted,
+rotated, server-only OAuth refresh-token storage bounded to the website session;
+that is a larger secrets and revocation policy decision. Merely extending the
+five-minute lease would weaken removal responsiveness and is not the recommended
+fix.
 
 ## Rate Limiting
 

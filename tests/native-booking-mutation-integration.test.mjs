@@ -40,7 +40,7 @@ test("owned booking reschedule and cancellation are atomic under forced RLS", { 
       fixtures[profile] = { communityId, windowId, slots: [] };
       await withProfile(runtime, profile, async (c) => {
         await c.query("INSERT INTO booking_communities (game_profile,id,location_code,display_name,bookings_open) VALUES ($1,$2,$3,$4,true)", [profile, communityId, profile === "wos" ? "1001" : "2002", profile]);
-        await c.query("INSERT INTO booking_settings (game_profile,community_id,construction_fc_required) VALUES ($1,$2,true)", [profile, communityId]);
+        await c.query("INSERT INTO booking_settings (game_profile,community_id,construction_fc_required,construction_speedups_required) VALUES ($1,$2,true,true)", [profile, communityId]);
         await c.query("INSERT INTO booking_windows (game_profile,id,community_id,status,opens_at,closes_at,created_by_actor_type) VALUES ($1,$2,$3,'open',now()-interval '1 hour',now()+interval '1 day','system')", [profile, windowId, communityId]);
         await c.query("INSERT INTO booking_service_dates (game_profile,id,community_id,window_id,service_code,booking_date) VALUES ($1,$2,$3,$4,'construction','2026-08-21')", [profile, dateId, communityId, windowId]);
         for (let i = 0; i < 18; i++) { const slot = randomUUID(); fixtures[profile].slots.push(slot); await c.query("INSERT INTO appointment_slots (game_profile,id,community_id,window_id,service_date_id,service_code,booking_date,ordinal,display_time_label) VALUES ($1,$2,$3,$4,$5,'construction','2026-08-21',$6,$7)", [profile, slot, communityId, windowId, dateId, i, `${i}:00`]); }
@@ -48,16 +48,17 @@ test("owned booking reschedule and cancellation are atomic under forced RLS", { 
     }
     const repos = Object.fromEntries(["wos", "kingshot"].map((p) => [p, createProfileScopedBookingRepository(p, runtime)]));
     async function register(profile, user) { await createRegistrationService({ context: context(profile, fixtures[profile].communityId, user), repository: repos[profile] }).upsert({ playerId: user.replace(/\D/g, "") || "1", inGameName: user, alliance: "ABC" }, `register-${user}-0001`); }
-    async function create(profile, user, slotIndex, key = `create-${user}-0001`) { await register(profile, user); return createBookingCreationService({ context: context(profile, fixtures[profile].communityId, user), repository: repos[profile] }).create({ serviceCode: "construction", slotId: fixtures[profile].slots[slotIndex], requirements: { fc: 10 } }, key); }
+    async function create(profile, user, slotIndex, key = `create-${user}-0001`) { await register(profile, user); return createBookingCreationService({ context: context(profile, fixtures[profile].communityId, user), repository: repos[profile] }).create({ serviceCode: "construction", slotId: fixtures[profile].slots[slotIndex], requirements: { fc: 10, speedups: 7 } }, key); }
     const mutate = (profile, user) => createBookingMutationService({ context: context(profile, fixtures[profile].communityId, user), repository: repos[profile] });
-    const patch = (profile, index, fc = 10) => ({ slotId: fixtures[profile].slots[index], requirements: { fc } });
+    const patch = (profile, index, fc = 10, speedups = 7) => ({ slotId: fixtures[profile].slots[index], requirements: { fc, speedups } });
 
     await t.test("WOS and Kingshot preserve immutable lineage and current requirements", async () => {
       for (const [profile, user, from, to] of [["wos", "wos-11", 0, 1], ["kingshot", "king-21", 0, 1]]) {
         const original = await create(profile, user, from);
-        const result = await mutate(profile, user).reschedule(original.body.booking.bookingId, patch(profile, to, 12), `move-${user}-0001`);
+        const result = await mutate(profile, user).reschedule(original.body.booking.bookingId, patch(profile, to, 12, 14), `move-${user}-0001`);
         assert.equal(result.body.outcome, "rescheduled");
         assert.equal(result.body.booking.requirements[0].label, profile === "wos" ? "Fire Crystals" : "Truegold");
+        assert.deepEqual(result.body.booking.requirements.find((answer) => answer.code === "speedups"), { code: "speedups", label: "Speed-ups (days)", value: 14, unit: "days" });
         const rows = await withProfile(runtime, profile, (c) => c.query("SELECT id,status,slot_id,rescheduled_from_booking_id,player_id_snapshot FROM minister_bookings WHERE id=$1 OR id=$2 ORDER BY status", [original.body.booking.bookingId, result.body.booking.bookingId]));
         assert.equal(rows.rowCount, 2);
         assert.equal(rows.rows.find((r) => r.id === original.body.booking.bookingId).status, "replaced");

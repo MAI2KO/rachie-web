@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { validateIdempotencyKey } from "./registration-validation.mjs";
-import { validateRequirementAnswers, validateRescheduleChoice } from "./booking-creation-validation.mjs";
+import { bookingRequirementLabel, validateRequirementAnswers, validateRescheduleChoice } from "./booking-creation-validation.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
 const scopedKey = (context, key) => sha256(`${context.gameProfile}\0${context.community.id}\0${context.discordUser.id}\0${key}`);
@@ -24,7 +24,7 @@ function replayOrConflict(claim, operation, hash) {
   return { status: row.response_status, body: row.response_body, replayed: true };
 }
 const publicAnswer = (answer) => ({ code: answer.code, label: answer.displayLabel, value: answer.value, ...(answer.unit ? { unit: answer.unit } : {}) });
-const storedAnswers = (rows) => rows.map((row) => ({ code: row.requirement_code, label: row.display_label, value: Number(row.numeric_value), ...(row.unit ? { unit: row.unit } : {}) }));
+const storedAnswers = (rows, gameProfile) => rows.map((row) => ({ code: row.requirement_code, label: row.requirement_code === "speedups" ? bookingRequirementLabel(gameProfile, row.requirement_code) : row.display_label, value: Number(row.numeric_value), ...(row.unit ? { unit: row.unit } : {}) }));
 const sameAnswers = (left, right) => JSON.stringify([...left].sort((a, b) => a.code.localeCompare(b.code))) === JSON.stringify([...right].sort((a, b) => a.code.localeCompare(b.code)));
 const bookingPublic = (booking, serviceLabel, answers) => ({ bookingId: booking.id, serviceCode: booking.service_code, serviceLabel, date: booking.booking_date, displayTime: booking.display_time_label_snapshot, playerName: booking.in_game_name_snapshot, alliance: booking.alliance_snapshot, requirements: answers, status: booking.status });
 
@@ -65,7 +65,7 @@ export function createBookingMutationService({ context, repository, createId = r
           const answers = validateRequirementAnswers(context.gameProfile, booking.service_code, await session.findBookingSettings(context.community.id), choice.requirements);
           const publicAnswers = answers.map(publicAnswer);
           if (target.id === booking.slot_id) {
-            const currentAnswers = storedAnswers(await session.listBookingRequirementAnswers(booking.id));
+            const currentAnswers = storedAnswers(await session.listBookingRequirementAnswers(booking.id), context.gameProfile);
             if (sameAnswers(currentAnswers, publicAnswers)) {
               const body = { outcome: "unchanged", booking: bookingPublic(booking, booking.service_label, currentAnswers) };
               await session.completeBookingIdempotency(context.community.id, key, 200, body);

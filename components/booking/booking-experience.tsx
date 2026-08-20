@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActiveBrand } from "@/brands/config";
-import { makeAttemptKey, profileTerms, requirementFields, resolveBookingUiState, SERVICE_ORDER, sortSlots, uiError } from "./booking-ui-model.mjs";
+import { makeAttemptKey, profileTerms, requirementFields, resolveBookingUiState, SERVICE_ORDER, shouldShowLogout, signedOutBookingState, sortSlots, uiError } from "./booking-ui-model.mjs";
 
 type Community = { locationCode: string; displayName: string };
 type Session = { authenticated: boolean; gameProfile?: "wos" | "kingshot"; user?: { username: string; globalName: string | null }; communities?: Community[]; selectedCommunity?: Community | null; csrfToken?: string };
@@ -31,9 +31,9 @@ function Button({ children, secondary = false, ...props }: React.ButtonHTMLAttri
   return <button className={secondary ? "booking-button booking-button--secondary" : "booking-button"} {...props}>{children}</button>;
 }
 
-function RequirementInputs({ fields, values, disabled, onChange }: { fields: { code: string; label: string }[]; values: Record<string, string>; disabled: boolean; onChange: (code: string, value: string) => void }) {
+function RequirementInputs({ fields, values, disabled, onChange }: { fields: { code: string; label: string; helpText?: string }[]; values: Record<string, string>; disabled: boolean; onChange: (code: string, value: string) => void }) {
   if (!fields.length) return <p className="booking-note">No resource details are required for this service.</p>;
-  return <fieldset className="requirement-fields" disabled={disabled}><legend>Required resources</legend>{fields.map((field) => <label key={field.code}><span>{field.label}</span><input inputMode="numeric" min="1" max="999999" name={field.code} pattern="[0-9]+" required type="number" value={values[field.code] ?? ""} onChange={(event) => onChange(field.code, event.target.value)} /></label>)}</fieldset>;
+  return <fieldset className="requirement-fields" disabled={disabled}><legend>Required resources</legend>{fields.map((field) => { const helpId = field.helpText ? `requirement-${field.code}-help` : undefined; return <label key={field.code}><span>{field.label}</span><input aria-describedby={helpId} inputMode="numeric" min="1" max="999999" name={field.code} pattern="[0-9]+" required step="1" type="number" value={values[field.code] ?? ""} onChange={(event) => onChange(field.code, event.target.value)} />{field.helpText && <small className="requirement-help" id={helpId}>{field.helpText}</small>}</label>; })}</fieldset>;
 }
 
 function StatusNotice({ message, kind = "info", noticeRef }: { message: string; kind?: "info" | "error" | "success"; noticeRef?: React.RefObject<HTMLDivElement | null> }) {
@@ -53,6 +53,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   const [requirements, setRequirements] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<{ type: "reschedule" | "cancel"; booking: Booking } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState("");
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [success, setSuccess] = useState("");
@@ -137,6 +138,17 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
     catch (caught) { explainError(caught); } finally { setBusy(false); }
   }
 
+  async function logout() {
+    setLoggingOut(true); setError("");
+    try {
+      const response = await jsonRequest<Session>("/api/v1/auth/logout", { method: "POST", headers: { "x-csrf-token": session?.csrfToken ?? "" } });
+      const signedOut = signedOutBookingState(response);
+      setSession(signedOut.session); setContext(signedOut.context); setMe(signedOut.me); setAvailability(signedOut.availability); setAvailabilityFailed(signedOut.availabilityFailed);
+      setSelectedService(signedOut.selectedService); setSelectedSlot(signedOut.selectedSlot); setRequirements(signedOut.requirements); setMode(signedOut.mode);
+      setError(signedOut.error); setErrorCode(signedOut.errorCode); setSuccess(signedOut.success); setConfirmation(signedOut.confirmation); attempts.current.clear();
+    } catch (caught) { explainError(caught); } finally { setLoggingOut(false); }
+  }
+
   async function register(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError("");
     const data = new FormData(event.currentTarget);
@@ -177,7 +189,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
 
   if (!session) return <section className="booking-screen" aria-busy="true"><p className="booking-kicker">Booking console</p><h1>Loading your booking access</h1><div className="booking-loading" /></section>;
   return <section className="booking-screen" aria-labelledby="booking-title">
-    <header className="booking-heading"><div><p className="booking-kicker">{brand.game.name} appointments</p><h1 id="booking-title">Minister booking</h1></div>{session.authenticated && <span className="session-mark">Discord: {session.user?.globalName ?? session.user?.username}</span>}</header>
+    <header className="booking-heading"><div><p className="booking-kicker">{brand.game.name} appointments</p><h1 id="booking-title">Minister booking</h1></div>{shouldShowLogout(session) && <div className="session-actions"><span className="session-mark">Discord: {session.user?.globalName ?? session.user?.username}</span><Button disabled={loggingOut} onClick={() => void logout()} secondary type="button">{loggingOut ? "Logging out..." : "Log out"}</Button></div>}</header>
     {error && <StatusNotice kind="error" message={error} noticeRef={errorRef} />}
     {success && <StatusNotice kind="success" message={success} noticeRef={successRef} />}
     {confirmation && <section className="booking-confirmation" aria-labelledby="confirmation-title"><div><p className="booking-kicker">Confirmed</p><h2 id="confirmation-title">{confirmation.serviceLabel}</h2></div><dl><div><dt>Date</dt><dd>{confirmation.date}</dd></div><div><dt>Time</dt><dd>{confirmation.displayTime}</dd></div><div><dt>Player</dt><dd>{confirmation.playerName}</dd></div><div><dt>Alliance</dt><dd>{confirmation.alliance}</dd></div>{confirmation.requirements.map((answer) => <div key={answer.code}><dt>{answer.label}</dt><dd>{answer.value}{answer.unit ? ` ${answer.unit}` : ""}</dd></div>)}</dl></section>}

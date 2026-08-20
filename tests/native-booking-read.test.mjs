@@ -247,6 +247,10 @@ test("missing, revoked, unselected, and stale sessions fail closed", async () =>
     isMembershipFresh("2026-08-19T11:29:59.000Z", now, 30 * 60),
     false,
   );
+  assert.equal(
+    isMembershipFresh("2026-08-19T11:54:59.000Z", now, 30 * 60),
+    true,
+  );
   assert.throws(
     () =>
       assertFutureBookingMutationMembershipFresh(

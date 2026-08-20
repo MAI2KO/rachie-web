@@ -46,6 +46,25 @@ test("requirements are service-enabled, bounded, and profile-labelled", () => {
   assert.throws(() => validateRequirementAnswers("wos", "construction", settings, { fc: 1, rfc: 2, speedups: 3 }), (error) => error.code === "invalid_requirements");
 });
 
+test("speed-ups are whole days for both profiles", () => {
+  const settings = { troop_speedups_required: true };
+  for (const profile of ["wos", "kingshot"]) {
+    assert.deepEqual(validateRequirementAnswers(profile, "troop", settings, { speedups: 1 }), [
+      { code: "speedups", value: 1, displayLabel: "Speed-ups (days)", unit: "days" },
+    ]);
+    assert.deepEqual(validateRequirementAnswers(profile, "troop", settings, { speedups: "365" }), [
+      { code: "speedups", value: 365, displayLabel: "Speed-ups (days)", unit: "days" },
+    ]);
+  }
+  for (const value of [0, -1, 1.5, "1.5", "1 day", "1e2", "", null]) {
+    assert.throws(
+      () => validateRequirementAnswers("wos", "troop", settings, { speedups: value }),
+      (error) => error.code === "invalid_requirements" && /Speed-ups \(days\)/.test(error.fields.speedups),
+      `expected ${JSON.stringify(value)} to be rejected`,
+    );
+  }
+});
+
 test("API ignores hostile ownership fields and enforces CSRF, rate, and freshness", async () => {
   let captured;
   const successful = api({ createService() { return { async create(choice) { captured = choice; return { status: 201, body: { booking: { bookingId: "public" } }, replayed: false }; } }; } });

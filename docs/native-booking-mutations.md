@@ -17,7 +17,9 @@ PATCH accepts only a new `slotId` and current `requirements`. The target must be
 the original booking's service and window. Community bookings must be open, the
 window and service active, and the target slot available and unblocked. Requirement
 answers are revalidated against current settings, not the historical settings from
-the original booking.
+the original booking. In creation and rescheduling, `speedups` is a positive whole
+number of days (1 through 999,999), exposed as `Speed-ups (days)`; decimals, zero,
+negative values, and unit conversion from hours or minutes are not accepted.
 
 The immutable lineage column is `rescheduled_from_booking_id`; it means the current
 row replaces that prior row. After acquiring a per-booking transaction advisory

@@ -46,9 +46,13 @@ export function validateRescheduleChoice(value) {
 }
 
 const LABELS = Object.freeze({
-  wos: Object.freeze({ fc: "Fire Crystals", rfc: "Refined Fire Crystals", shards: "Fire Crystal Shards", speedups: "Speedups" }),
-  kingshot: Object.freeze({ fc: "Truegold", rfc: "Tempered Truegold", shards: "Truegold Dust", speedups: "Speedups" }),
+  wos: Object.freeze({ fc: "Fire Crystals", rfc: "Refined Fire Crystals", shards: "Fire Crystal Shards", speedups: "Speed-ups (days)" }),
+  kingshot: Object.freeze({ fc: "Truegold", rfc: "Tempered Truegold", shards: "Truegold Dust", speedups: "Speed-ups (days)" }),
 });
+
+export function bookingRequirementLabel(gameProfile, code) {
+  return LABELS[gameProfile]?.[code] ?? code;
+}
 
 function enabledCodes(serviceCode, settings) {
   if (serviceCode === "construction") return { fc: settings?.construction_fc_required, rfc: settings?.construction_rfc_required, speedups: settings?.construction_speedups_required };
@@ -68,15 +72,15 @@ export function validateRequirementAnswers(gameProfile, serviceCode, settings, s
     const value = supplied[code];
     const text = typeof value === "number" || typeof value === "string" ? String(value).trim() : "";
     if (!/^\d+$/.test(text)) {
-      fields[code] = `${LABELS[gameProfile][code]} must be a whole number.`;
+      fields[code] = `${bookingRequirementLabel(gameProfile, code)} must be a whole number.`;
       continue;
     }
     const numericValue = Number(text);
     if (!Number.isSafeInteger(numericValue) || numericValue < BOOKING_REQUIREMENT_LIMITS.minimum || numericValue > BOOKING_REQUIREMENT_LIMITS.maximum) {
-      fields[code] = `${LABELS[gameProfile][code]} must be between 1 and 999999.`;
+      fields[code] = `${bookingRequirementLabel(gameProfile, code)} must be between 1 and 999999.`;
       continue;
     }
-    answers.push({ code, value: numericValue, displayLabel: LABELS[gameProfile][code], unit: code === "speedups" ? "days" : null });
+    answers.push({ code, value: numericValue, displayLabel: bookingRequirementLabel(gameProfile, code), unit: code === "speedups" ? "days" : null });
   }
   if (Object.keys(fields).length) {
     throw new InvalidBookingRequestError("invalid_requirements", "Requirement answers are invalid.", fields);

@@ -57,7 +57,9 @@ The seed creates:
 - one open 30-day booking window per community;
 - active Construction, Research, and Troop services;
 - future service dates and six available slots per service;
-- construction FC/RFC, research shards/speedups, and troop speedups requirements.
+- construction FC/RFC, research shards/speedups, and troop speedups requirements;
+  all `speedups` fields are labelled **Speed-ups (days)** and accept positive whole
+  days only.
 
 Stop the container without deleting data:
 

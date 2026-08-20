@@ -70,8 +70,15 @@ Every enabled answer is required and must be a positive base-10 whole number fro
 1 through 999,999. Disabled, unrelated, and unknown answers are rejected.
 
 WOS uses Fire Crystals, Refined Fire Crystals, and Fire Crystal Shards. Kingshot
-uses Truegold, Tempered Truegold, and Truegold Dust. Speedups use a neutral label
-and the `days` unit.
+uses Truegold, Tempered Truegold, and Truegold Dust. For both profiles, the public
+label is `Speed-ups (days)`. A `speedups` value is the submitted positive integer
+number of whole days; hours and minutes are not accepted or converted. The bound
+remains 1 through 999,999.
+
+`booking_requirement_answers.numeric_value` remains numeric for all requirement
+codes. No schema migration is needed: the semantic unit of the stable `speedups`
+requirement code is `days`, and new rows also retain that value in the `unit`
+column.
 
 ## Atomic records
 

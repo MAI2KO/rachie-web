@@ -221,6 +221,8 @@ button:focus-visible,
 .booking-heading h1 { font-size: clamp(1.75rem, 7vw, 2.75rem); line-height: 1; }
 .booking-kicker { margin: 0 0 0.4rem; color: var(--brand-accent-strong); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
 .session-mark { color: var(--brand-text-muted); font-size: 0.8125rem; text-align: right; }
+.session-actions { display: flex; gap: 0.75rem; align-items: center; justify-content: flex-end; }
+.session-actions .booking-button { min-height: 2.35rem; padding: 0.4rem 0.75rem; font-size: 0.8125rem; white-space: nowrap; }
 
 .booking-gate,
 .registration-form {
@@ -261,6 +263,7 @@ button:focus-visible,
 .registration-form { display: grid; gap: 1rem; }
 .registration-form label,
 .requirement-fields label { display: grid; gap: 0.35rem; color: var(--brand-text-muted); font-size: 0.8125rem; font-weight: 700; }
+.requirement-help { font-weight: 500; }
 .registration-form input,
 .requirement-fields input {
   width: 100%; min-height: 2.75rem; padding: 0.6rem 0.7rem; border: 1px solid var(--brand-border); border-radius: 3px; background: var(--brand-surface); color: var(--brand-text); font: inherit;
@@ -335,8 +338,9 @@ button:focus-visible,
 
 @media (max-width: 39.99rem) {
   .site-main { padding-block: 2rem; }
-  .booking-heading { align-items: flex-start; }
-  .session-mark { max-width: 9rem; }
+  .booking-heading { align-items: flex-start; flex-direction: column; }
+  .session-actions { width: 100%; justify-content: space-between; }
+  .session-mark { min-width: 0; overflow-wrap: anywhere; text-align: left; }
   .booking-summary { display: grid; grid-template-columns: 1fr 1fr; }
   .booking-summary > div:nth-child(2) { grid-column: 1 / -1; grid-row: 2; padding-top: 0.75rem; border-top: 1px solid var(--brand-border); }
   .booking-card { align-items: flex-start; }

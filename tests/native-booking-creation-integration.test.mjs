@@ -57,7 +57,7 @@ test("native booking creation is atomic under restricted PostgreSQL RLS", { skip
       fixtures[profile] = { communityId, windowId, slots: [] };
       await withProfile(runtime, profile, async (client) => {
         await client.query(`INSERT INTO booking_communities (game_profile,id,location_code,display_name,bookings_open) VALUES ($1,$2,$3,$4,true)`, [profile, communityId, profile === "wos" ? "1001" : "2002", profile === "wos" ? "State 1001" : "Kingdom 2002"]);
-        await client.query(`INSERT INTO booking_settings (game_profile,community_id,construction_fc_required,construction_rfc_required,research_shards_required) VALUES ($1,$2,true,true,true)`, [profile, communityId]);
+        await client.query(`INSERT INTO booking_settings (game_profile,community_id,construction_fc_required,construction_rfc_required,construction_speedups_required,research_shards_required) VALUES ($1,$2,true,true,true,true)`, [profile, communityId]);
         await client.query(`INSERT INTO booking_windows (game_profile,id,community_id,status,opens_at,closes_at,created_by_actor_type) VALUES ($1,$2,$3,'open',now()-interval '1 hour',now()+interval '1 day','system')`, [profile, windowId, communityId]);
         await client.query(`INSERT INTO booking_service_dates (game_profile,id,community_id,window_id,service_code,booking_date) VALUES ($1,$2,$3,$4,'construction','2026-08-20')`, [profile, dateId, communityId, windowId]);
         for (let ordinal = 0; ordinal < 12; ordinal++) {
@@ -73,7 +73,7 @@ test("native booking creation is atomic under restricted PostgreSQL RLS", { skip
       await service.upsert({ playerId, inGameName: `Player ${userId}`, alliance: "ABC" }, `register-${userId}-0001`);
     }
     function bookingService(profile, userId) { return createBookingCreationService({ context: context(profile, fixtures[profile].communityId, userId), repository: repositories[profile] }); }
-    const choice = (profile, index, requirements = { fc: 10, rfc: 2 }) => ({ serviceCode: "construction", slotId: fixtures[profile].slots[index], requirements });
+    const choice = (profile, index, requirements = { fc: 10, rfc: 2, speedups: 7 }) => ({ serviceCode: "construction", slotId: fixtures[profile].slots[index], requirements });
 
     await t.test("WOS and Kingshot create profile-labelled snapshots, audit, and outbox", async () => {
       await register("wos", "user-101", "101");
@@ -82,15 +82,19 @@ test("native booking creation is atomic under restricted PostgreSQL RLS", { skip
       const kingshot = await bookingService("kingshot", "user-201").create(choice("kingshot", 0), "booking-user-201-0001");
       assert.equal(wos.body.booking.requirements[0].label, "Fire Crystals");
       assert.equal(kingshot.body.booking.requirements[0].label, "Truegold");
+      assert.deepEqual(wos.body.booking.requirements.find((answer) => answer.code === "speedups"), { code: "speedups", label: "Speed-ups (days)", value: 7, unit: "days" });
+      assert.deepEqual(kingshot.body.booking.requirements.find((answer) => answer.code === "speedups"), { code: "speedups", label: "Speed-ups (days)", value: 7, unit: "days" });
       assert.deepEqual(Object.keys(wos.body.booking), ["bookingId", "serviceCode", "serviceLabel", "date", "displayTime", "playerName", "alliance", "requirements", "status"]);
       const rows = await withProfile(runtime, "wos", async (client) => ({
         booking: await client.query("SELECT player_id_snapshot,in_game_name_snapshot,alliance_snapshot FROM minister_bookings WHERE id=$1", [wos.body.booking.bookingId]),
         audit: await client.query("SELECT event_type,source,actor_type FROM booking_change_events WHERE aggregate_id=$1", [wos.body.booking.bookingId]),
         outbox: await client.query("SELECT event_type,status FROM booking_outbox WHERE payload->>'bookingId'=$1", [wos.body.booking.bookingId]),
+        speedups: await client.query("SELECT numeric_value::int AS value,unit,display_label FROM booking_requirement_answers WHERE booking_id=$1 AND requirement_code='speedups'", [wos.body.booking.bookingId]),
       }));
       assert.equal(rows.booking.rows[0].player_id_snapshot, "101");
       assert.deepEqual(rows.audit.rows, [{ event_type: "booking_created", source: "website", actor_type: "discord_user" }]);
       assert.deepEqual(rows.outbox.rows, [{ event_type: "booking.created", status: "pending" }]);
+      assert.deepEqual(rows.speedups.rows, [{ value: 7, unit: "days", display_label: "Speed-ups (days)" }]);
       assert.equal((await withProfile(runtime, "wos", (client) => client.query("SELECT count(*)::int AS count FROM minister_bookings WHERE id=$1", [kingshot.body.booking.bookingId]))).rows[0].count, 0);
     });
 
