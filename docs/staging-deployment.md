@@ -302,9 +302,6 @@ Railway secrets into tickets, or include database URLs in screenshots.
   correctly refuses remote databases.
 - Decide whether legacy compatibility is needed; otherwise omit its variables and
   expect controlled 503s from those endpoints.
-- Verify `npm run build` in an unrestricted Node 22 CI/Railway builder. The local
-  managed test sandbox denied Turbopack's internal worker port, so it could not
-  provide a representative production-build result.
 - Complete the real-identity smoke checklist after staging exists.
 
 ## Platform references
