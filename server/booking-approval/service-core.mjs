@@ -9,6 +9,7 @@ import {
   BookingApprovalTransitionError,
   DEFAULT_PENDING_HOLD_SECONDS,
   GuestBookingRequestError,
+  guestBookingPage,
   hashGuestShareToken,
   managerAppointmentBoard,
   publicAppointmentBoard,
@@ -125,6 +126,7 @@ export function createGuestBookingRequestService({
           const at = now();
           const slot = await session.lockSlot(link.community_id, input.slotId);
           assertBookableSlot(slot, input, at);
+          await session.lockGuestPlayerService(link.community_id, input.serviceCode, input.playerId);
           for (const expired of await session.expirePendingForSlot(slot.id, at)) {
             await recordExpiry(session, {
               id: expired.id,
@@ -132,10 +134,23 @@ export function createGuestBookingRequestService({
               correlation_id: expired.correlation_id,
             }, at, createId);
           }
+          for (const expired of await session.expirePendingForPlayerService(
+            link.community_id, input.serviceCode, input.playerId, at,
+          )) {
+            await recordExpiry(session, expired, at, createId);
+          }
           if (await session.hasActiveApprovalHold(slot.id, at)
               || await session.hasActiveSlotBlock(slot.id)
               || await session.hasConfirmedBooking(slot.id)) {
             throw new GuestBookingRequestError("slot_unavailable", "The selected slot is no longer available.");
+          }
+          if (await session.hasActivePendingForPlayerService(
+            link.community_id, input.serviceCode, input.playerId, at,
+          )) {
+            throw new GuestBookingRequestError(
+              "pending_request_exists",
+              "This Player ID already has a pending request for this service.",
+            );
           }
 
           const settings = await session.findSettings(link.community_id);
@@ -203,6 +218,26 @@ export function createGuestBookingRequestService({
         }
         throw error;
       }
+    },
+  });
+}
+
+export function createGuestBookingPageService({ gameProfile, repository, now = () => new Date() }) {
+  if (repository.gameProfile !== gameProfile) throw new TypeError("Approval repository profile mismatch.");
+  return Object.freeze({
+    async read(rawToken) {
+      const tokenHash = hashGuestShareToken(rawToken);
+      return repository.withTransaction(async (session) => {
+        const link = await session.findActiveShareLink(tokenHash);
+        if (!link || link.community_status !== "active") {
+          throw new GuestBookingRequestError("invalid_share_link", "Guest booking link is invalid or unavailable.");
+        }
+        return guestBookingPage(
+          link,
+          await session.listGuestBookingRows(link.community_id, now()),
+          gameProfile,
+        );
+      });
     },
   });
 }

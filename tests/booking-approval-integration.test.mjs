@@ -13,6 +13,7 @@ import { createProfileScopedApprovalRepository } from "../server/booking-approva
 import {
   createBookingApprovalService,
   createBookingBoardReadService,
+  createGuestBookingPageService,
   createGuestBookingRequestService,
 } from "../server/booking-approval/service-core.mjs";
 import { loadMigrations, runMigrations } from "../server/database/migrations.mjs";
@@ -82,6 +83,38 @@ test("guest booking API consumes the dedicated bounded rate-limit policy", async
   assert.equal(captured.policy, RATE_LIMIT_POLICIES.guestBookingSubmission);
   assert.match(captured.subject, /^[0-9a-f]{64}:trusted-ip-subject$/);
   assert.doesNotMatch(captured.subject, new RegExp(tokens.wos));
+});
+
+test("guest booking API rate-limits anonymous reads without using the plaintext token as a subject", async () => {
+  let captured;
+  const api = createGuestBookingApi({
+    resolveRateLimitSubject: () => "trusted-ip-subject",
+    async consumeRateLimit(policy, subject) {
+      captured = { policy, subject };
+      return { allowed: false, retryAfterSeconds: 11 };
+    },
+    createPageService() { throw new Error("rate limit must run before reading the page"); },
+  });
+  const response = await api.read(new Request("https://example.test/guest"), tokens.wos);
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "11");
+  assert.equal(captured.policy, RATE_LIMIT_POLICIES.guestBookingRead);
+  assert.match(captured.subject, /^[0-9a-f]{64}:trusted-ip-subject$/);
+  assert.doesNotMatch(captured.subject, new RegExp(tokens.wos));
+});
+
+test("guest booking API reads anonymously and strips internal request IDs on submission", async () => {
+  const page = { community: { code: "9999", displayName: "Test" }, services: [] };
+  const api = createGuestBookingApi({
+    createPageService: () => ({ read: async () => page }),
+    createService: () => ({ create: async () => ({ status: 202, replayed: false, body: { request: { requestId: "secret-id", service: "construction", date: "2030-01-01", time: "10:00", status: "pending_approval", holdExpiresAt: "2030-01-01T10:30:00Z" } } }) }),
+    verifyOrigin: () => true, resolveRateLimitSubject: () => "client",
+    consumeRateLimit: async () => ({ allowed: true }),
+  });
+  assert.deepEqual((await (await api.read(new Request("https://example.test"), tokens.wos)).json()).page, page);
+  const response = await api.submit(new Request("https://example.test", { method: "POST", headers: { "idempotency-key": "guest-safe-api-0001" }, body: "{}" }), tokens.wos);
+  const body = await response.json();
+  assert.equal(response.status, 202); assert.doesNotMatch(JSON.stringify(body), /secret-id|requestId/);
 });
 
 test("migration 0005 preserves existing confirmed booking data and defaults communities to auto-approve", { skip: !databaseUrl && "TEST_DATABASE_URL is not configured" }, async () => {
@@ -299,6 +332,21 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(result.body.request.status, "pending_approval");
       assert.equal(new Date(result.body.request.holdExpiresAt).toISOString(), "2030-08-21T10:30:00.000Z");
       fixtures.wos.pendingRequestId = result.body.request.requestId;
+      const confirmed = await withProfile(runtime, "wos", (client) => client.query(
+        "SELECT count(*)::integer AS count FROM minister_bookings WHERE slot_id=$1",
+        [fixtures.wos.slots[0]],
+      ));
+      assert.equal(confirmed.rows[0].count, 0);
+
+      const guestPage = await createGuestBookingPageService({
+        gameProfile: "wos", repository: approvalRepositories.wos,
+        now: () => new Date("2030-08-21T10:05:00.000Z"),
+      }).read(tokens.wos);
+      assert.deepEqual(guestPage.community, { code: "9999", displayName: "wos Test Server" });
+      assert.deepEqual(guestPage.services[0].requirements, [
+        { code: "speedups", label: "Speed-ups (days)", unit: "days" },
+      ]);
+      assert.equal(guestPage.services[0].slots.find((slot) => slot.time === "08:00").state, "unavailable");
 
       const publicBoard = await boardService("wos", null, "2030-08-21T10:05:00.000Z").publicBoard();
       const pending = publicBoard.services.flatMap((service) => service.slots).find((slot) => slot.time === "08:00");
@@ -383,6 +431,22 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(outcomes.filter((outcome) => outcome.status === "rejected" && outcome.reason.code === "slot_unavailable").length, 1);
     });
 
+    await t.test("one Player ID can hold only one active request per community service", async () => {
+      await guestService("wos", "2030-08-21T15:00:00.000Z").create(
+        tokens.wos, guestInput(fixtures.wos.slots[12], 20), "guest-player-guard-a-0001",
+      );
+      await assert.rejects(
+        guestService("wos", "2030-08-21T15:01:00.000Z").create(
+          tokens.wos, guestInput(fixtures.wos.slots[13], 20), "guest-player-guard-b-0001",
+        ),
+        (error) => error.code === "pending_request_exists",
+      );
+      const afterExpiry = await guestService("wos", "2030-08-21T15:31:00.000Z").create(
+        tokens.wos, guestInput(fixtures.wos.slots[13], 20), "guest-player-guard-c-0001",
+      );
+      assert.equal(afterExpiry.body.request.status, "pending_approval");
+    });
+
     await t.test("an active guest hold prevents normal Discord booking", async () => {
       const pending = await guestService("wos").create(tokens.wos, guestInput(fixtures.wos.slots[4], 6), "guest-blocks-discord-0001");
       fixtures.wos.heldForRaceRequestId = pending.body.request.requestId;
@@ -462,6 +526,15 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal((await guestService("kingshot").create(
         tokens.kingshot, guestInput(fixtures.kingshot.slots[0], 11), "kingshot-guest-request-0001",
       )).body.request.status, "pending_approval");
+      assert.deepEqual((await createGuestBookingPageService({
+        gameProfile: "kingshot", repository: approvalRepositories.kingshot,
+      }).read(tokens.kingshot)).community, { code: "9999", displayName: "kingshot Test Server" });
+      await assert.rejects(
+        createGuestBookingPageService({
+          gameProfile: "kingshot", repository: approvalRepositories.kingshot,
+        }).read(tokens.wos),
+        (error) => error.code === "invalid_share_link",
+      );
       await assert.rejects(
         guestService("kingshot").create(tokens.wos, guestInput(fixtures.kingshot.slots[1], 12), "wrong-profile-token-0001"),
         (error) => error.code === "invalid_share_link",
@@ -490,6 +563,12 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       ));
       await assert.rejects(
         guestService("kingshot").create(tokens.kingshot, guestInput(fixtures.kingshot.slots[2], 14), "revoked-token-request-0001"),
+        (error) => error.code === "invalid_share_link",
+      );
+      await assert.rejects(
+        createGuestBookingPageService({
+          gameProfile: "kingshot", repository: approvalRepositories.kingshot,
+        }).read(tokens.kingshot),
         (error) => error.code === "invalid_share_link",
       );
       await assert.rejects(

@@ -1,5 +1,8 @@
 # Public State and Kingdom appointment board
 
+Non-Discord submission links are documented in
+[`guest-booking-links.md`](./guest-booking-links.md).
+
 Each active community has a public board which needs no Discord sign-in:
 
 - R.A.C.H.I.E: `/state/<state-code>` (for example, `/state/9999`)

@@ -14,6 +14,7 @@ const OPERATIONS = new Set([
   "booking_cancel_prepare",
   "booking_cancel",
   "guest_booking_submit",
+  "guest_booking_read",
 ]);
 
 function errorCategory(error, sqlState) {

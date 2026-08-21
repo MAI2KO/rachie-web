@@ -13,7 +13,10 @@ class ProfileScopedApprovalSession {
       `SELECT link.id, link.community_id, community.location_code,
               community.display_name, community.status AS community_status,
               community.bookings_open, settings.booking_approval_policy,
-              settings.pending_hold_duration_seconds
+              settings.pending_hold_duration_seconds,
+              settings.construction_fc_required,settings.construction_rfc_required,
+              settings.construction_speedups_required,settings.research_shards_required,
+              settings.research_speedups_required,settings.troop_speedups_required
        FROM booking_guest_share_links AS link
        JOIN booking_communities AS community
          ON community.game_profile = link.game_profile
@@ -135,6 +138,68 @@ class ProfileScopedApprovalSession {
          AND status='pending_approval' AND hold_expires_at <= $3
        RETURNING id,community_id,correlation_id`,
       [this.gameProfile, slotId, at],
+    );
+    return result.rows;
+  }
+
+  async expirePendingForPlayerService(communityId, serviceCode, playerId, at) {
+    const result = await this.client.query(
+      `UPDATE booking_approval_requests
+       SET status='expired',decided_at=$5,version=version+1,updated_at=$5
+       WHERE game_profile=$1 AND community_id=$2 AND service_code=$3
+         AND player_id_snapshot=$4 AND status='pending_approval'
+         AND hold_expires_at <= $5
+       RETURNING id,community_id,correlation_id`,
+      [this.gameProfile, communityId, serviceCode, playerId, at],
+    );
+    return result.rows;
+  }
+
+  async lockGuestPlayerService(communityId, serviceCode, playerId) {
+    await this.client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`guest-player:${this.gameProfile}:${communityId}:${serviceCode}:${playerId}`],
+    );
+  }
+
+  async hasActivePendingForPlayerService(communityId, serviceCode, playerId, at) {
+    const result = await this.client.query(
+      `SELECT EXISTS (SELECT 1 FROM booking_approval_requests
+       WHERE game_profile=$1 AND community_id=$2 AND service_code=$3
+         AND player_id_snapshot=$4 AND status='pending_approval'
+         AND hold_expires_at>$5) AS exists`,
+      [this.gameProfile, communityId, serviceCode, playerId, at],
+    );
+    return result.rows[0].exists;
+  }
+
+  async listGuestBookingRows(communityId, at) {
+    const result = await this.client.query(
+      `WITH current_window AS (
+         SELECT id FROM booking_windows
+         WHERE game_profile=$1 AND community_id=$2 AND status='open'
+           AND (opens_at IS NULL OR opens_at <= $3)
+           AND (closes_at IS NULL OR closes_at > $3)
+         ORDER BY created_at DESC,id DESC LIMIT 1
+       )
+       SELECT slot.id AS slot_id,slot.service_code,service.display_label AS service_label,
+              service.sort_order,slot.booking_date,slot.display_time_label,slot.ordinal,
+              EXISTS (SELECT 1 FROM minister_bookings AS booking
+                WHERE booking.game_profile=slot.game_profile AND booking.slot_id=slot.id
+                  AND booking.status='confirmed') AS is_confirmed,
+              EXISTS (SELECT 1 FROM booking_approval_requests AS pending
+                WHERE pending.game_profile=slot.game_profile AND pending.slot_id=slot.id
+                  AND pending.status='pending_approval' AND pending.hold_expires_at>$3) AS has_active_hold
+       FROM appointment_slots AS slot
+       JOIN current_window ON current_window.id=slot.window_id
+       JOIN minister_services AS service
+         ON service.game_profile=slot.game_profile AND service.service_code=slot.service_code
+       WHERE slot.game_profile=$1 AND slot.community_id=$2 AND slot.status='available'
+         AND NOT EXISTS (SELECT 1 FROM booking_slot_blocks AS block
+           WHERE block.game_profile=slot.game_profile AND block.slot_id=slot.id
+             AND block.cancelled_at IS NULL)
+       ORDER BY service.sort_order,slot.ordinal,slot.id`,
+      [this.gameProfile, communityId, at],
     );
     return result.rows;
   }

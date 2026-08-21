@@ -132,6 +132,37 @@ export function publicAppointmentBoard(community, rows) {
   });
 }
 
+export function guestBookingPage(link, rows, gameProfile) {
+  const services = [];
+  for (const row of rows) {
+    let service = services.find((candidate) => candidate.code === row.service_code);
+    if (!service) {
+      service = {
+        code: row.service_code,
+        name: row.service_label,
+        date: approvalDateOnly(row.booking_date),
+        requirements: enabledBookingRequirementDefinitions(gameProfile, row.service_code, link),
+        slots: [],
+      };
+      services.push(service);
+    }
+    service.slots.push(Object.freeze({
+      slotId: row.slot_id,
+      time: row.display_time_label,
+      state: row.is_confirmed || row.has_active_hold ? "unavailable" : "available",
+    }));
+  }
+  return Object.freeze({
+    community: Object.freeze({ code: link.location_code, displayName: link.display_name }),
+    holdDurationSeconds: link.pending_hold_duration_seconds,
+    services: Object.freeze(services.map((service) => Object.freeze({
+      ...service,
+      requirements: Object.freeze(service.requirements),
+      slots: Object.freeze(service.slots),
+    }))),
+  });
+}
+
 const operationalPlayer = (name, id, alliance) => Object.freeze({
   inGameName: name, playerId: id, alliance,
 });

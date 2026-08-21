@@ -400,6 +400,38 @@ button:focus-visible,
 .manager-activity ol { display: grid; gap: 0.75rem; padding-left: 1.25rem; }
 .manager-activity li time { display: block; color: var(--brand-text-muted); font-size: 0.75rem; }
 
+.guest-booking { max-width: 46rem; margin-inline: auto; }
+.guest-booking > header h1,
+.guest-success h1,
+.guest-link-unavailable h1 { margin: 0; }
+.guest-booking > header > p:last-child { color: var(--brand-text-muted); }
+.guest-booking form { display: grid; gap: 1.5rem; margin-top: 2rem; }
+.guest-booking fieldset { margin: 0; padding: 0; border: 0; }
+.guest-booking legend { margin-bottom: 0.75rem; font-weight: 800; }
+.guest-service-options,
+.guest-slot-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
+.guest-service-options button { min-height: 4rem; padding: 0.65rem; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--brand-surface); color: var(--brand-text); cursor: pointer; font: inherit; text-align: left; }
+.guest-service-options button[aria-pressed="true"] { border-color: var(--brand-accent-strong); outline: 3px solid color-mix(in srgb, var(--brand-accent) 25%, transparent); }
+.guest-service-options strong,
+.guest-service-options span { display: block; }
+.guest-service-options span { color: var(--brand-text-muted); font-size: 0.75rem; }
+.guest-slot-options label { position: relative; }
+.guest-slot-options input { position: absolute; opacity: 0; }
+.guest-slot-options span { display: grid; min-height: 3.25rem; padding: 0.5rem; border: 1px solid var(--brand-border); border-radius: 4px; place-content: center; background: var(--brand-surface); font-weight: 800; text-align: center; }
+.guest-slot-options small { display: block; color: var(--brand-text-muted); font-size: 0.625rem; font-weight: 500; }
+.guest-slot-options input:checked + span { border-color: var(--brand-accent-strong); background: var(--brand-accent-strong); color: var(--brand-accent-contrast); }
+.guest-slot-options input:checked + span small { color: inherit; }
+.guest-slot-options input:disabled + span { cursor: not-allowed; opacity: 0.5; }
+.guest-slot-options input:focus-visible + span { outline: 3px solid var(--brand-focus-ring); outline-offset: 2px; }
+.guest-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.guest-details legend { grid-column: 1 / -1; }
+.guest-details label { display: grid; gap: 0.3rem; color: var(--brand-text-muted); font-size: 0.8125rem; font-weight: 700; }
+.guest-details input { min-height: 3rem; padding: 0.65rem; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--brand-surface); color: var(--brand-text); font: inherit; }
+.guest-success { max-width: 36rem; margin-inline: auto; }
+.guest-success dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; padding: 1rem; background: var(--brand-surface); }
+.guest-success dt { color: var(--brand-text-muted); font-size: 0.75rem; font-weight: 800; text-transform: uppercase; }
+.guest-success dd { margin: 0; font-weight: 800; }
+
 @media (min-width: 64rem) {
   .appointment-panels { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: row; grid-auto-columns: auto; overflow-x: visible; }
 }
@@ -420,6 +452,9 @@ button:focus-visible,
   .appointment-board__heading { align-items: stretch; flex-direction: column; }
   .manager-mode-control { align-items: stretch; flex-direction: column; }
   .appointment-panels { grid-auto-columns: calc(100vw - 2.25rem); }
+  .guest-service-options { grid-template-columns: 1fr; }
+  .guest-slot-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .guest-details { grid-template-columns: 1fr; }
 }
 
 .site-footer {
