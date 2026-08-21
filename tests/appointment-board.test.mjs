@@ -226,6 +226,7 @@ test("live Discord verifier detects configured role and Administrator permission
 
 test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, and guarded Edit Mode", () => {
   const source = fs.readFileSync(new URL("../components/appointment-board/appointment-board.tsx", import.meta.url), "utf8");
+  const badge = fs.readFileSync(new URL("../components/appointment-board/alliance-badge.tsx", import.meta.url), "utf8");
   const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(source, /wos: \{ community: "State" \}/);
   assert.match(source, /kingshot: \{ community: "Kingdom" \}/);
@@ -234,8 +235,14 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(source, /Player ID/);
   assert.match(source, /<table className="manager-table">/);
   assert.match(source, /<tr className=\{`manager-row/);
-  assert.match(source, /manager-current-user-badge">YOURS</);
-  assert.match(source, /className="alliance-badge">\[\{value\}\]<\/span>/);
+  assert.match(source, /import \{ AllianceBadge \} from "\.\/alliance-badge"/);
+  assert.equal(source.match(/<AllianceBadge abbreviation=/g)?.length, 2);
+  assert.match(badge, /export type AllianceBadgeVariant = "solid"/);
+  assert.match(badge, /variant = "solid"/);
+  assert.match(badge, /\{abbreviation\}/);
+  assert.doesNotMatch(badge, /\[\{abbreviation\}\]/);
+  assert.doesNotMatch(source, /manager-current-user-badge|>YOURS<|slot\.player\.isCurrentUser \?/);
+  assert.match(source, /isCurrentUser: boolean/);
   assert.match(source, /public-confirmed-player/);
   assert.match(source, /onCopy\(value, `\$\{key\}:name`\)/);
   assert.match(source, /value=\{slot\.player\.inGameName\}/);
@@ -250,7 +257,8 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(css, /scroll-snap-type: inline mandatory/);
   assert.match(css, /grid-template-columns: repeat\(3/);
   assert.match(css, /copy-field--copied/);
-  assert.match(css, /\.alliance-badge \{[^}]*border: 1px solid currentColor/);
+  assert.match(css, /\.alliance-badge--solid \{[^}]*background: var\(--brand-accent-strong\)/);
+  assert.doesNotMatch(css, /\.manager-current-user-badge/);
   assert.match(css, /\.manager-table-scroll \{[^}]*overflow-x: auto/);
   assert.doesNotMatch(css, /\.manager-row[^}]*flex-direction: column/);
 });

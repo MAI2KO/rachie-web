@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { AllianceBadge } from "./alliance-badge";
+
 type PublicSlot = { time: string; state: "available" | "pending" | "confirmed"; playerName?: string; playerAlliance?: string };
 type PublicService = { name: string; date: string; slots: PublicSlot[] };
 export type PublicBoard = {
@@ -51,10 +53,6 @@ function publicSlotLabel(slot: PublicSlot) {
   return "Available";
 }
 
-function AllianceBadge({ value }: { value: string }) {
-  return <span aria-label={`Alliance ${value}`} className="alliance-badge">[{value}]</span>;
-}
-
 function PublicPanels({ services }: { services: PublicService[] }) {
   return (
     <div aria-label="Appointment services" className="appointment-panels">
@@ -69,7 +67,7 @@ function PublicPanels({ services }: { services: PublicService[] }) {
               <li className={`appointment-slot appointment-slot--${slot.state}`} key={slot.time}>
                 <time>{slot.time}</time>
                 {slot.state === "confirmed" && slot.playerName && slot.playerAlliance
-                  ? <span className="public-confirmed-player"><AllianceBadge value={slot.playerAlliance} /><span>{slot.playerName}</span></span>
+                  ? <span className="public-confirmed-player"><AllianceBadge abbreviation={slot.playerAlliance} /><span>{slot.playerName}</span></span>
                   : <span>{publicSlotLabel(slot)}</span>}
               </li>
             ))}
@@ -90,7 +88,7 @@ function CopyButton({ value, label, copied, onCopy, alliance = false }: {
       onClick={() => onCopy(value, label)}
       type="button"
     >
-      {alliance ? <AllianceBadge value={value} /> : <><span className="visually-hidden">{label}: </span><strong>{value}</strong></>}
+      {alliance ? <AllianceBadge abbreviation={value} /> : <><span className="visually-hidden">{label}: </span><strong>{value}</strong></>}
       {copied ? <small role="status">Copied</small> : null}
     </button>
   );
@@ -131,7 +129,6 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyReque
                   <th scope="row"><time>{slot.time}</time></th>
                   <td><CopyButton alliance copied={copiedKey === `${key}:alliance`} label="Alliance" onCopy={(value) => onCopy(value, `${key}:alliance`)} value={slot.player.alliance} /></td>
                   <td className="manager-player-cell">
-                    {slot.player.isCurrentUser ? <span aria-label="This booking belongs to the current user" className="manager-current-user-badge">YOURS</span> : null}
                     <CopyButton copied={copiedKey === `${key}:name`} label="Player name" onCopy={(value) => onCopy(value, `${key}:name`)} value={slot.player.inGameName} />
                     {slot.state === "pending" ? <span className="manager-state-badge">Pending</span> : null}
                   </td>

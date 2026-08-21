@@ -46,12 +46,11 @@ requirements do not create empty columns, and different services may therefore
 have different table shapes.
 
 Clicking an alliance badge, player name, or Player ID copies only that value. The most recently
-copied field has a green outline and accessible copied feedback. If the booking's
-canonical Discord owner is the signed-in manager, a visually separate filled
-`YOURS` marker appears beside the player-name control. It is independent of the
-outlined alliance badge, so an alliance named `YOU` remains `[YOU]` and does not
-imply current-user ownership. Only a server-produced boolean is sent for the marker,
-and `YOURS` is never included in copied text. There is no
+copied field has a green outline and accessible copied feedback. Alliance uses a
+compact filled pill containing only its stored abbreviation. The domain's
+`isCurrentUser` value remains independent of alliance identity but has no visible
+table marker in this phase, so an alliance named `YOU` is simply shown as `YOU` and
+does not imply current-user ownership. There is no
 long-press or bulk copy.
 
 On narrow screens the operator table scrolls horizontally inside its service
