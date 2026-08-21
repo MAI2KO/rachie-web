@@ -24,6 +24,8 @@ Never place these values in a browser variable, URL query, repository, or log.
 
 Migration `0006` adds a profile-scoped durable notification queue and replay nonces. The bot's claim call transactionally materializes supported `booking_outbox` events and claims due work with `FOR UPDATE SKIP LOCKED` and a lease. Stable uniqueness keys prevent two logical jobs. Send, retry, terminal failure, edit, and superseded reminder state survive restarts.
 
+Materialisation is deliberately lazy: guest submission writes `booking.approval.requested` to `booking_outbox` in the same transaction as the pending request. The authenticated bot claim endpoint first converts pending supported outbox events into `booking_discord_notifications`, marks those outbox events delivered, and then claims due notification rows. There is no separate bridge process to start. If the bot never polls, the authoritative outbox event remains pending; the absence of a notification row alone does not mean guest submission failed.
+
 - `booking.created` queues a confirmed-player DM and a reminder when the booking has a Discord user.
 - `booking.rescheduled` queues old/new details, supersedes the old reminder, and schedules the replacement reminder.
 - `booking.cancelled` queues the cancellation and suppresses an unsent reminder.
@@ -45,6 +47,8 @@ An Approve/Deny custom ID carries only an opaque request UUID and action. It is 
 The appointment instant is derived from the canonical slot (`starts_at`, or booking date plus local start time in the slot IANA timezone). One reminder per confirmed booking becomes due 30 minutes before that instant. It is not created for past appointments or bookings without a canonical Discord user. Reschedule/cancel state changes operate only on that profile's reminder rows.
 
 Every table uses forced RLS and every key, query, claim, nonce, and API request includes `game_profile`. A WOS bot ignores Kingshot work even if incorrectly returned by a mock or intermediary. Use the WOS hostname and secret only on R.A.C.H.I.E, and the Kingshot hostname and secret only on P.E.G.G.I.E.
+
+The website logs the first successfully authenticated claim per profile and non-zero claim counts. It records each authentication failure category once per process and uses only static operation/profile/category fields. Empty ten-second polls are not logged repeatedly, and signatures, nonces, secrets, headers, or private work payloads are never logged.
 
 ## Staged rollout and degraded operation
 

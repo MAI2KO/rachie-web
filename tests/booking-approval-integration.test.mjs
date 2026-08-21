@@ -18,6 +18,7 @@ import {
 } from "../server/booking-approval/service-core.mjs";
 import { loadMigrations, runMigrations } from "../server/database/migrations.mjs";
 import { runtimePrivilegeStatements } from "../server/database/runtime-privileges.mjs";
+import { createDiscordIntegrationRepository } from "../server/discord-integration/repository-core.mjs";
 import { createBookingCreationService } from "../server/native-booking/booking-creation-service-core.mjs";
 import { createBookingMutationService } from "../server/native-booking/booking-mutation-service-core.mjs";
 import { createProfileScopedBookingRepository } from "../server/native-booking/repository-core.mjs";
@@ -375,6 +376,21 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(managerSlot.player.playerId, "90000001");
       assert.equal(managerSlot.requirements[0].code, "speedups");
       assert.equal(managerBoard.activity[0].action, "submitted");
+
+      const beforePoll = await withProfile(runtime, "wos", (client) => client.query(`SELECT
+        (SELECT count(*)::int FROM booking_outbox WHERE event_type='booking.approval.requested' AND payload->>'requestId'=$1::text AND status='pending') AS pending_outbox,
+        (SELECT count(*)::int FROM booking_discord_notifications WHERE request_id=$1::uuid) AS notification_rows`,
+      [result.body.request.requestId]));
+      assert.deepEqual(beforePoll.rows[0], { pending_outbox: 1, notification_rows: 0 });
+      const claimed = await createDiscordIntegrationRepository("wos", runtime)
+        .withTransaction((session) => session.claim(10));
+      assert.ok(claimed.some((work) => work.type === "manager_discovery"
+        && work.requestId === result.body.request.requestId));
+      const afterPoll = await withProfile(runtime, "wos", (client) => client.query(`SELECT
+        (SELECT status FROM booking_outbox WHERE event_type='booking.approval.requested' AND payload->>'requestId'=$1::text) AS outbox_status,
+        (SELECT status FROM booking_discord_notifications WHERE request_id=$1::uuid AND notification_type='manager_discovery') AS notification_status`,
+      [result.body.request.requestId]));
+      assert.deepEqual(afterPoll.rows[0], { outbox_status: "delivered", notification_status: "claimed" });
     });
 
     await t.test("approval preserves guest alliance in the confirmed booking and manager row", async () => {
