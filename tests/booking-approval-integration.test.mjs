@@ -324,7 +324,7 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       return context;
     };
 
-    await t.test("guest creates a 30-minute pending hold with safe public and detailed admin representations", async () => {
+    await t.test("guest stores alliance in a 30-minute pending hold and manager views expose it safely", async () => {
       const result = await guestService("wos", "2030-08-21T10:00:00.000Z").create(
         tokens.wos, guestInput(fixtures.wos.slots[0], 1), "guest-pending-request-0001",
       );
@@ -332,6 +332,11 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(result.body.request.status, "pending_approval");
       assert.equal(new Date(result.body.request.holdExpiresAt).toISOString(), "2030-08-21T10:30:00.000Z");
       fixtures.wos.pendingRequestId = result.body.request.requestId;
+      const storedRequest = await withProfile(runtime, "wos", (client) => client.query(
+        "SELECT alliance_snapshot FROM booking_approval_requests WHERE id=$1",
+        [result.body.request.requestId],
+      ));
+      assert.deepEqual(storedRequest.rows, [{ alliance_snapshot: "GST" }]);
       const confirmed = await withProfile(runtime, "wos", (client) => client.query(
         "SELECT count(*)::integer AS count FROM minister_bookings WHERE slot_id=$1",
         [fixtures.wos.slots[0]],
@@ -355,22 +360,24 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(publicBoard.services[0].name, "Construction");
       assert.deepEqual(publicBoard.services[0].slots[0], { time: "08:00", state: "pending" });
       const serialized = JSON.stringify(pending);
-      assert.doesNotMatch(serialized, /Guest 1|90000001|speedups|discord|playerId|requestId/i);
+      assert.doesNotMatch(serialized, /Guest 1|90000001|GST|alliance|speedups|discord|playerId|requestId/i);
 
       const adminView = await boardService("wos", manager("wos", fixtures.wos.communityId)).adminRequest(result.body.request.requestId);
       assert.equal(adminView.player.inGameName, "Guest 1");
       assert.equal(adminView.player.playerId, "90000001");
+      assert.equal(adminView.player.alliance, "GST");
       assert.deepEqual(adminView.requirements, [{ code: "speedups", label: "Speed-ups (days)", value: 18, unit: "days" }]);
       assert.equal(adminView.audit[0].action, "submitted");
       const managerBoard = await boardService("wos", manager("wos", fixtures.wos.communityId)).managerBoard();
       const managerSlot = managerBoard.services[0].slots.find((slot) => slot.time === "08:00");
       assert.equal(managerSlot.player.inGameName, "Guest 1");
+      assert.equal(managerSlot.player.alliance, "GST");
       assert.equal(managerSlot.player.playerId, "90000001");
       assert.equal(managerSlot.requirements[0].code, "speedups");
       assert.equal(managerBoard.activity[0].action, "submitted");
     });
 
-    await t.test("approval atomically converts the hold to a confirmed booking and all message copies become update-pending", async () => {
+    await t.test("approval preserves guest alliance in the confirmed booking and manager row", async () => {
       await withProfile(runtime, "wos", (client) => client.query(
         `INSERT INTO booking_approval_discord_messages
            (game_profile,id,community_id,request_id,discord_guild_id,
@@ -384,13 +391,21 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(approved.outcome, "confirmed");
       const publicEntry = (await boardService("wos").publicBoard()).services.flatMap((service) => service.slots).find((slot) => slot.time === "08:00");
       assert.deepEqual(publicEntry, { time: "08:00", state: "confirmed", playerName: "Guest 1" });
-      assert.doesNotMatch(JSON.stringify(publicEntry), /90000001|speedups|discord/i);
+      assert.doesNotMatch(JSON.stringify(publicEntry), /90000001|GST|alliance|speedups|discord/i);
       const detail = await boardService("wos", manager("wos", fixtures.wos.communityId)).adminRequest(fixtures.wos.pendingRequestId);
       assert.equal(detail.status, "confirmed");
       assert.equal(detail.decision.discordUserId, "manager-1");
       assert.equal(detail.decision.displayName, "Mark");
       assert.equal(detail.audit.at(-1).previousState, "pending_approval");
       assert.equal(detail.audit.at(-1).resultingState, "confirmed");
+      const approvedBooking = await withProfile(runtime, "wos", (client) => client.query(
+        "SELECT alliance_snapshot FROM minister_bookings WHERE approval_request_id=$1",
+        [fixtures.wos.pendingRequestId],
+      ));
+      assert.deepEqual(approvedBooking.rows, [{ alliance_snapshot: "GST" }]);
+      const confirmedManagerSlot = (await boardService("wos", manager("wos", fixtures.wos.communityId)).managerBoard())
+        .services[0].slots.find((slot) => slot.time === "08:00");
+      assert.equal(confirmedManagerSlot.player.alliance, "GST");
       const messages = await withProfile(runtime, "wos", (client) => client.query(
         "SELECT delivery_status FROM booking_approval_discord_messages WHERE request_id=$1 ORDER BY discord_message_id",
         [fixtures.wos.pendingRequestId],
@@ -460,7 +475,7 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       );
     });
 
-    await t.test("a confirmed normal booking prevents a guest hold, while normal create/reschedule/cancel remain valid", async () => {
+    await t.test("WOS native booking lifecycle retains alliance in the confirmed manager row", async () => {
       const context = await register("wos", "discord-user-1002");
       const creator = createBookingCreationService({ context, repository: bookingRepositories.wos });
       const created = await creator.create(
@@ -480,6 +495,13 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(rescheduled.outcome ?? rescheduled.body.outcome, "rescheduled");
       const cancelled = await mutations.cancel(rescheduled.body.booking.bookingId, "discord-normal-cancel-0001");
       assert.equal(cancelled.body.booking.status, "cancelled");
+      const displayed = await creator.create(
+        { serviceCode: "construction", slotId: fixtures.wos.slots[6], requirements: { speedups: 8 } },
+        "discord-normal-manager-display-0001",
+      );
+      const managerSlot = (await boardService("wos", manager("wos", fixtures.wos.communityId)).managerBoard())
+        .services[0].slots.find((slot) => slot.bookingId === displayed.body.booking.bookingId);
+      assert.equal(managerSlot.player.alliance, "DSC");
     });
 
     async function pendingForRace(slotIndex, suffix, key) {
@@ -522,10 +544,25 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(detail.audit.filter((event) => ["approved", "expired"].includes(event.action)).length, 1);
     });
 
-    await t.test("share tokens and manager scope cannot cross profile or community", async () => {
-      assert.equal((await guestService("kingshot").create(
+    await t.test("Kingshot guest and native manager rows retain alliance while scope stays isolated", async () => {
+      const kingshotGuest = await guestService("kingshot").create(
         tokens.kingshot, guestInput(fixtures.kingshot.slots[0], 11), "kingshot-guest-request-0001",
-      )).body.request.status, "pending_approval");
+      );
+      assert.equal(kingshotGuest.body.request.status, "pending_approval");
+      assert.equal((await boardService("kingshot", manager("kingshot", fixtures.kingshot.communityId)).managerBoard())
+        .services[0].slots.find((slot) => slot.slotId === fixtures.kingshot.slots[0]).player.alliance, "GST");
+      await approvalService("kingshot").approve(kingshotGuest.body.request.requestId);
+      assert.equal((await boardService("kingshot", manager("kingshot", fixtures.kingshot.communityId)).managerBoard())
+        .services[0].slots.find((slot) => slot.slotId === fixtures.kingshot.slots[0]).player.alliance, "GST");
+      const kingshotContext = await register("kingshot", "discord-user-2001");
+      const kingshotNative = await createBookingCreationService({
+        context: kingshotContext, repository: bookingRepositories.kingshot,
+      }).create(
+        { serviceCode: "construction", slotId: fixtures.kingshot.slots[1], requirements: { speedups: 9 } },
+        "kingshot-native-manager-display-0001",
+      );
+      assert.equal((await boardService("kingshot", manager("kingshot", fixtures.kingshot.communityId)).managerBoard())
+        .services[0].slots.find((slot) => slot.bookingId === kingshotNative.body.booking.bookingId).player.alliance, "DSC");
       assert.deepEqual((await createGuestBookingPageService({
         gameProfile: "kingshot", repository: approvalRepositories.kingshot,
       }).read(tokens.kingshot)).community, { code: "9999", displayName: "kingshot Test Server" });

@@ -25,6 +25,7 @@ test("public board serializer exposes only the documented anonymous fields", () 
     ...row,
     confirmed_player_id: "12345678",
     discord_user_id: "123456789012345678",
+    confirmed_alliance: "SEC",
     requirements: [{ code: "speedups", value: 99 }],
     pending_request_id: "private-request",
   })));
@@ -35,7 +36,7 @@ test("public board serializer exposes only the documented anonymous fields", () 
     { time: "15:00", state: "confirmed", playerName: "Visible Player" },
   ]);
   const serialized = JSON.stringify(board);
-  assert.doesNotMatch(serialized, /12345678|123456789012345678|speedups|private-request|discord|requestId|bookingId/i);
+  assert.doesNotMatch(serialized, /12345678|123456789012345678|SEC|alliance|speedups|private-request|discord|requestId|bookingId/i);
 });
 
 test("manager board serializer includes operational fields and bounded human-readable activity", () => {
@@ -56,6 +57,7 @@ test("manager board serializer includes operational fields and bounded human-rea
     settings: { construction_speedups_required: true },
   });
   assert.equal(board.services[0].slots[0].player.playerId, "87654321");
+  assert.equal(board.services[0].slots[0].player.alliance, "GST");
   assert.equal(board.services[0].slots[0].player.isCurrentUser, true);
   assert.equal(board.services[0].slots[0].requirements[0].value, 12);
   assert.deepEqual(board.services[0].requirementColumns, [
@@ -94,6 +96,7 @@ test("manager requirement columns follow enabled, disabled, and service-specific
     { code: "troop", columns: [] },
   ]);
   assert.doesNotMatch(JSON.stringify(board.services[0].requirementColumns), /Refined Fire Crystals/);
+  assert.doesNotMatch(JSON.stringify(board.services.flatMap((service) => service.requirementColumns)), /alliance/i);
   assert.equal(board.services[2].requirementColumns.length, 0);
 });
 
@@ -199,12 +202,15 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(source, /wos: \{ community: "State" \}/);
   assert.match(source, /kingshot: \{ community: "Kingdom" \}/);
   assert.match(source, /Player name/);
+  assert.match(source, /<th scope="col">Alliance<\/th>[\s\S]*<th scope="col">Player ID<\/th>/);
   assert.match(source, /Player ID/);
   assert.match(source, /<table className="manager-table">/);
   assert.match(source, /<tr className=\{`manager-row/);
   assert.match(source, /manager-you-badge">YOU</);
   assert.match(source, /onCopy\(value, `\$\{key\}:name`\)/);
   assert.match(source, /value=\{slot\.player\.inGameName\}/);
+  assert.match(source, /value=\{slot\.player\.alliance\}/);
+  assert.match(source, /onCopy\(value, `\$\{key\}:alliance`\)/);
   assert.match(source, /service\.requirementColumns\.map/);
   assert.match(source, /Copy Mode/);
   assert.match(source, /Edit appointments/);

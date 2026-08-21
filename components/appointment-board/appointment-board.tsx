@@ -109,6 +109,7 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyReque
               <thead><tr>
                 <th scope="col">Time</th>
                 <th scope="col">Player</th>
+                <th scope="col">Alliance</th>
                 <th scope="col">Player ID</th>
                 {service.requirementColumns.map((column) => <th key={column.code} scope="col">{column.label}</th>)}
                 {editMode ? <th scope="col">Actions</th> : null}
@@ -118,7 +119,7 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyReque
                 if (!slot.player) {
                   return <tr className="manager-row manager-row--available" key={slot.slotId}>
                     <th scope="row"><time>{slot.time}</time></th>
-                    <td colSpan={2 + service.requirementColumns.length + (editMode ? 1 : 0)}>Available</td>
+                    <td colSpan={3 + service.requirementColumns.length + (editMode ? 1 : 0)}>Available</td>
                   </tr>;
                 }
                 return <tr className={`manager-row manager-row--${slot.state}`} key={slot.slotId}>
@@ -128,6 +129,7 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyReque
                     <CopyButton copied={copiedKey === `${key}:name`} label="Player name" onCopy={(value) => onCopy(value, `${key}:name`)} value={slot.player.inGameName} />
                     {slot.state === "pending" ? <span className="manager-state-badge">Pending</span> : null}
                   </td>
+                  <td><CopyButton copied={copiedKey === `${key}:alliance`} label="Alliance" onCopy={(value) => onCopy(value, `${key}:alliance`)} value={slot.player.alliance} /></td>
                   <td><CopyButton copied={copiedKey === `${key}:id`} label="Player ID" onCopy={(value) => onCopy(value, `${key}:id`)} value={slot.player.playerId} /></td>
                   {service.requirementColumns.map((column) => {
                     const answer = slot.requirements?.find((candidate) => candidate.code === column.code);
@@ -181,7 +183,8 @@ export function AppointmentBoard({ profile, initialBoard }: {
     try {
       await navigator.clipboard.writeText(value);
       setCopiedKey(key);
-      setNotice(`${key.endsWith(":id") ? "Player ID" : "Player name"} copied.`);
+      const label = key.endsWith(":id") ? "Player ID" : key.endsWith(":alliance") ? "Alliance" : "Player name";
+      setNotice(`${label} copied.`);
     } catch {
       setNotice("Copy failed. Select and copy the value manually.");
     }
