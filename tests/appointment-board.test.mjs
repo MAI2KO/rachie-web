@@ -44,17 +44,57 @@ test("manager board serializer includes operational fields and bounded human-rea
     booking_date: "2030-08-21", display_time_label: "14:00",
     pending_request_id: "request-1", pending_player_name: "Guest Player",
     pending_player_id: "87654321", pending_alliance: "GST",
+    pending_discord_user_id: "111111111111111111",
     pending_hold_expires_at: "2030-08-21T14:30:00Z",
     pending_requirements: [{ code: "speedups", label: "Speed-ups (days)", value: 12, unit: "days" }],
   }], [{
     action: "submitted", player_name: "Guest Player", acting_discord_display_name: null,
     previous_state: null, resulting_state: "pending_approval", created_at: "2030-08-21T14:00:00Z",
-  }]);
+  }], {
+    gameProfile: "wos",
+    currentDiscordUserId: "111111111111111111",
+    settings: { construction_speedups_required: true },
+  });
   assert.equal(board.services[0].slots[0].player.playerId, "87654321");
+  assert.equal(board.services[0].slots[0].player.isCurrentUser, true);
   assert.equal(board.services[0].slots[0].requirements[0].value, 12);
+  assert.deepEqual(board.services[0].requirementColumns, [
+    { code: "speedups", label: "Speed-ups (days)", unit: "days" },
+  ]);
+  assert.doesNotMatch(JSON.stringify(board), /111111111111111111/);
   assert.deepEqual(Object.keys(board.activity[0]).sort(), [
     "action", "createdAt", "managerDisplayName", "playerName", "previousState", "resultingState",
   ]);
+});
+
+test("manager requirement columns follow enabled, disabled, and service-specific configuration", () => {
+  const rows = [
+    { slot_id: "c", service_code: "construction", service_label: "Construction", booking_date: "2030-08-21", display_time_label: "10:00" },
+    { slot_id: "r", service_code: "research", service_label: "Research", booking_date: "2030-08-22", display_time_label: "10:00" },
+    { slot_id: "t", service_code: "troop", service_label: "Troop", booking_date: "2030-08-23", display_time_label: "10:00" },
+  ];
+  const board = managerAppointmentBoard(community, rows, [], {
+    gameProfile: "wos",
+    currentDiscordUserId: "manager",
+    settings: {
+      construction_fc_required: true,
+      construction_rfc_required: false,
+      construction_speedups_required: true,
+      research_shards_required: false,
+      research_speedups_required: true,
+      troop_speedups_required: false,
+    },
+  });
+  assert.deepEqual(board.services.map((service) => ({
+    code: service.code,
+    columns: service.requirementColumns.map((column) => column.code),
+  })), [
+    { code: "construction", columns: ["fc", "speedups"] },
+    { code: "research", columns: ["speedups"] },
+    { code: "troop", columns: [] },
+  ]);
+  assert.doesNotMatch(JSON.stringify(board.services[0].requirementColumns), /Refined Fire Crystals/);
+  assert.equal(board.services[2].requirementColumns.length, 0);
 });
 
 function repositoryFor({ target = community, guilds = [] } = {}) {
@@ -160,13 +200,21 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(source, /kingshot: \{ community: "Kingdom" \}/);
   assert.match(source, /Player name/);
   assert.match(source, /Player ID/);
+  assert.match(source, /<table className="manager-table">/);
+  assert.match(source, /<tr className=\{`manager-row/);
+  assert.match(source, /manager-you-badge">YOU</);
+  assert.match(source, /onCopy\(value, `\$\{key\}:name`\)/);
+  assert.match(source, /value=\{slot\.player\.inGameName\}/);
+  assert.match(source, /service\.requirementColumns\.map/);
   assert.match(source, /Copy Mode/);
   assert.match(source, /Edit appointments/);
-  assert.match(source, /editMode && slot\.state === "pending"/);
+  assert.match(source, /editMode \? <td>\{slot\.state === "pending"/);
   assert.match(css, /overflow-x: auto/);
   assert.match(css, /scroll-snap-type: inline mandatory/);
   assert.match(css, /grid-template-columns: repeat\(3/);
   assert.match(css, /copy-field--copied/);
+  assert.match(css, /\.manager-table-scroll \{[^}]*overflow-x: auto/);
+  assert.doesNotMatch(css, /\.manager-row[^}]*flex-direction: column/);
 });
 
 test("public State and Kingdom routes are profile-specific while API profile remains hostname-derived", () => {

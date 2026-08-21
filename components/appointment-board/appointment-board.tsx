@@ -13,13 +13,19 @@ type ManagerSlot = PublicSlot & {
   slotId: string;
   requestId?: string;
   bookingId?: string;
-  player?: { inGameName: string; playerId: string; alliance: string };
+  player?: { inGameName: string; playerId: string; alliance: string; isCurrentUser: boolean };
   requirements?: Requirement[];
   holdExpiresAt?: string;
 };
 type ManagerBoard = {
   community: PublicBoard["community"];
-  services: Array<{ code: string; name: string; date: string; slots: ManagerSlot[] }>;
+  services: Array<{
+    code: string;
+    name: string;
+    date: string;
+    requirementColumns: Array<{ code: string; label: string; unit?: string }>;
+    slots: ManagerSlot[];
+  }>;
   activity: Array<{
     action: string;
     playerName: string;
@@ -74,12 +80,13 @@ function CopyButton({ value, label, copied, onCopy }: {
   return (
     <button
       className={`copy-field${copied ? " copy-field--copied" : ""}`}
+      aria-label={`Copy ${label.toLowerCase()} ${value}`}
       onClick={() => onCopy(value, label)}
       type="button"
     >
-      <span>{label}</span>
+      <span className="visually-hidden">{label}: </span>
       <strong>{value}</strong>
-      {copied ? <small role="status">Copied</small> : <small>Click to copy</small>}
+      {copied ? <small role="status">Copied</small> : null}
     </button>
   );
 }
@@ -97,30 +104,43 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyReque
       {board.services.map((service) => (
         <section className="appointment-panel appointment-panel--manager" key={service.code}>
           <header><h2>{service.name}</h2><p>{readableDate(service.date)}</p></header>
-          <ol className="appointment-timeline">
-            {service.slots.map((slot) => {
-              const key = slot.requestId ?? slot.bookingId ?? slot.slotId;
-              return (
-                <li className={`manager-slot manager-slot--${slot.state}`} key={slot.slotId}>
-                  <div className="manager-slot__heading"><time>{slot.time}</time><span>{publicSlotLabel(slot)}</span></div>
-                  {slot.player ? <div className="manager-slot__player">
+          <div aria-label={`${service.name} operator appointments`} className="manager-table-scroll" role="region" tabIndex={0}>
+            <table className="manager-table">
+              <thead><tr>
+                <th scope="col">Time</th>
+                <th scope="col">Player</th>
+                <th scope="col">Player ID</th>
+                {service.requirementColumns.map((column) => <th key={column.code} scope="col">{column.label}</th>)}
+                {editMode ? <th scope="col">Actions</th> : null}
+              </tr></thead>
+              <tbody>{service.slots.map((slot) => {
+                const key = slot.requestId ?? slot.bookingId ?? slot.slotId;
+                if (!slot.player) {
+                  return <tr className="manager-row manager-row--available" key={slot.slotId}>
+                    <th scope="row"><time>{slot.time}</time></th>
+                    <td colSpan={2 + service.requirementColumns.length + (editMode ? 1 : 0)}>Available</td>
+                  </tr>;
+                }
+                return <tr className={`manager-row manager-row--${slot.state}`} key={slot.slotId}>
+                  <th scope="row"><time>{slot.time}</time></th>
+                  <td className="manager-player-cell">
+                    {slot.player.isCurrentUser ? <span className="manager-you-badge">YOU</span> : null}
                     <CopyButton copied={copiedKey === `${key}:name`} label="Player name" onCopy={(value) => onCopy(value, `${key}:name`)} value={slot.player.inGameName} />
-                    <CopyButton copied={copiedKey === `${key}:id`} label="Player ID" onCopy={(value) => onCopy(value, `${key}:id`)} value={slot.player.playerId} />
-                    <span>Alliance: {slot.player.alliance}</span>
-                  </div> : null}
-                  {slot.requirements?.length ? <dl className="manager-requirements">
-                    {slot.requirements.map((answer) => <div key={answer.code}>
-                      <dt>{answer.label}</dt><dd>{answer.value}{answer.unit ? ` ${answer.unit}` : ""}</dd>
-                    </div>)}
-                  </dl> : null}
-                  {editMode && slot.state === "pending" && slot.requestId ? <div className="manager-slot__actions">
+                    {slot.state === "pending" ? <span className="manager-state-badge">Pending</span> : null}
+                  </td>
+                  <td><CopyButton copied={copiedKey === `${key}:id`} label="Player ID" onCopy={(value) => onCopy(value, `${key}:id`)} value={slot.player.playerId} /></td>
+                  {service.requirementColumns.map((column) => {
+                    const answer = slot.requirements?.find((candidate) => candidate.code === column.code);
+                    return <td key={column.code}>{answer ? <>{answer.value}{answer.unit ? ` ${answer.unit}` : ""}</> : <span aria-label="No answer">—</span>}</td>;
+                  })}
+                  {editMode ? <td>{slot.state === "pending" && slot.requestId ? <div className="manager-row__actions">
                     <button className="booking-button" disabled={busyRequest === slot.requestId} onClick={() => onAction(slot.requestId!, "approve")} type="button">Approve</button>
                     <button className="booking-button booking-button--secondary" disabled={busyRequest === slot.requestId} onClick={() => onAction(slot.requestId!, "deny")} type="button">Deny</button>
-                  </div> : null}
-                </li>
-              );
-            })}
-          </ol>
+                  </div> : null}</td> : null}
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
         </section>
       ))}
     </div>

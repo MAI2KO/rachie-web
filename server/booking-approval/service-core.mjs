@@ -366,11 +366,14 @@ export function createBookingBoardReadService({
       return repository.withTransaction(async (session) => {
         const community = await session.findActiveCommunityById(communityId);
         if (!community) throw new BookingApprovalTransitionError("community_not_found", "Community was not found.");
-        const [rows, activity] = await Promise.all([
-          session.listManagerBoardRows(communityId, now()),
-          session.listRecentApprovalActivity(communityId, 50),
-        ]);
-        return managerAppointmentBoard(community, rows, activity);
+        const rows = await session.listManagerBoardRows(communityId, now());
+        const activity = await session.listRecentApprovalActivity(communityId, 50);
+        const settings = await session.findSettings(communityId);
+        return managerAppointmentBoard(community, rows, activity, {
+          gameProfile,
+          settings,
+          currentDiscordUserId: managerContext.discordUserId,
+        });
       });
     },
     async adminRequest(requestId) {

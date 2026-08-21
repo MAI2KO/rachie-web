@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import {
+  enabledBookingRequirementDefinitions,
   validateBookingChoice,
   validateRequirementAnswers,
 } from "../native-booking/booking-creation-validation.mjs";
@@ -142,7 +143,12 @@ const operationalRequirements = (answers) => Object.freeze((answers ?? []).map((
   ...(answer.unit ? { unit: answer.unit } : {}),
 })));
 
-export function managerAppointmentBoard(community, rows, activity) {
+export function managerAppointmentBoard(
+  community,
+  rows,
+  activity,
+  { gameProfile, settings, currentDiscordUserId } = {},
+) {
   const services = [];
   for (const row of rows) {
     let service = services.find((candidate) => candidate.code === row.service_code);
@@ -151,6 +157,11 @@ export function managerAppointmentBoard(community, rows, activity) {
         code: row.service_code,
         name: row.service_label,
         date: approvalDateOnly(row.booking_date),
+        requirementColumns: enabledBookingRequirementDefinitions(
+          gameProfile,
+          row.service_code,
+          settings,
+        ),
         slots: [],
       };
       services.push(service);
@@ -163,12 +174,20 @@ export function managerAppointmentBoard(community, rows, activity) {
       state: confirmed ? "confirmed" : pending ? "pending" : "available",
       ...(confirmed ? {
         bookingId: row.confirmed_booking_id,
-        player: operationalPlayer(row.confirmed_player_name, row.confirmed_player_id, row.confirmed_alliance),
+        player: Object.freeze({
+          ...operationalPlayer(row.confirmed_player_name, row.confirmed_player_id, row.confirmed_alliance),
+          isCurrentUser: Boolean(currentDiscordUserId)
+            && row.confirmed_discord_user_id === currentDiscordUserId,
+        }),
         requirements: operationalRequirements(row.confirmed_requirements),
       } : {}),
       ...(pending ? {
         requestId: row.pending_request_id,
-        player: operationalPlayer(row.pending_player_name, row.pending_player_id, row.pending_alliance),
+        player: Object.freeze({
+          ...operationalPlayer(row.pending_player_name, row.pending_player_id, row.pending_alliance),
+          isCurrentUser: Boolean(currentDiscordUserId)
+            && row.pending_discord_user_id === currentDiscordUserId,
+        }),
         requirements: operationalRequirements(row.pending_requirements),
         holdExpiresAt: row.pending_hold_expires_at,
       } : {}),

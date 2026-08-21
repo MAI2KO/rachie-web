@@ -63,6 +63,18 @@ button:focus-visible,
   color: var(--brand-accent-contrast);
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .shell-width {
   width: min(100% - 2rem, var(--shell-width));
   margin-inline: auto;
@@ -359,24 +371,30 @@ button:focus-visible,
 .appointment-slot--confirmed { border-left: 4px solid var(--brand-accent); }
 .manager-mode-control { display: flex; gap: 0.75rem; align-items: center; }
 .manager-mode-control > span { color: var(--brand-text-muted); font-size: 0.8125rem; font-weight: 800; text-transform: uppercase; }
-.manager-slot { display: grid; gap: 0.75rem; padding: 1rem; border-bottom: 1px solid var(--brand-border); }
-.manager-slot:last-child { border-bottom: 0; }
-.manager-slot__heading { display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; }
-.manager-slot__heading time { font-variant-numeric: tabular-nums; font-weight: 800; }
-.manager-slot__heading span { color: var(--brand-text-muted); font-size: 0.8125rem; font-weight: 750; text-transform: capitalize; }
-.manager-slot__player { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-.manager-slot__player > span { grid-column: 1 / -1; color: var(--brand-text-muted); font-size: 0.8125rem; }
-.copy-field { display: grid; gap: 0.1rem; min-width: 0; padding: 0.625rem; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--brand-surface-muted); color: var(--brand-text); cursor: copy; font: inherit; text-align: left; }
-.copy-field span,
-.copy-field small { color: var(--brand-text-muted); font-size: 0.6875rem; }
-.copy-field strong { overflow-wrap: anywhere; }
+.appointment-panel--manager { overflow: hidden; }
+.manager-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: auto; touch-action: pan-x pan-y; }
+.manager-table-scroll:focus-visible { outline: 3px solid var(--brand-focus-ring); outline-offset: -3px; }
+.manager-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.8125rem; white-space: nowrap; }
+.manager-table th,
+.manager-table td { height: 2.65rem; padding: 0.35rem 0.55rem; border-bottom: 1px solid var(--brand-border); text-align: left; vertical-align: middle; }
+.manager-table thead th { position: sticky; top: 0; z-index: 1; background: var(--brand-surface-muted); color: var(--brand-text-muted); font-size: 0.6875rem; font-weight: 800; letter-spacing: 0.025em; text-transform: uppercase; }
+.manager-table tbody tr:last-child > * { border-bottom: 0; }
+.manager-table tbody th { font-variant-numeric: tabular-nums; font-weight: 800; }
+.manager-row--confirmed > th { border-left: 3px solid var(--brand-accent); }
+.manager-row--available td { color: #166534; }
+.manager-player-cell { display: flex; gap: 0.35rem; align-items: center; }
+.manager-you-badge,
+.manager-state-badge { display: inline-flex; padding: 0.1rem 0.3rem; border: 1px solid currentColor; border-radius: 3px; font-size: 0.625rem; font-weight: 850; letter-spacing: 0.035em; line-height: 1.2; }
+.manager-you-badge { color: var(--brand-accent-strong); }
+.manager-state-badge { color: #92400e; }
+.copy-field { position: relative; display: inline-flex; gap: 0.35rem; min-height: 1.9rem; padding: 0.25rem 0.4rem; border: 1px solid transparent; border-radius: 3px; align-items: center; background: transparent; color: var(--brand-text); cursor: copy; font: inherit; text-align: left; }
+.copy-field:hover { border-color: var(--brand-border); background: var(--brand-surface-muted); }
+.copy-field small { color: #166534; font-size: 0.625rem; font-weight: 800; }
+.copy-field strong { font-weight: 750; }
 .copy-field--copied { border-color: #15803d; outline: 3px solid color-mix(in srgb, #15803d 28%, transparent); }
 .copy-field--copied small { color: #166534; font-weight: 800; }
-.manager-requirements { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem; margin: 0; }
-.manager-requirements > div { padding: 0.4rem; background: var(--brand-surface-muted); }
-.manager-requirements dt { color: var(--brand-text-muted); font-size: 0.6875rem; }
-.manager-requirements dd { margin: 0; font-weight: 700; }
-.manager-slot__actions { display: flex; gap: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--brand-border); }
+.manager-row__actions { display: flex; gap: 0.35rem; }
+.manager-row__actions .booking-button { min-height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
 .manager-activity { margin-top: 1.5rem; padding: 1rem; border: 1px solid var(--brand-border); background: var(--brand-surface); }
 .manager-activity summary { cursor: pointer; font-weight: 800; }
 .manager-activity ol { display: grid; gap: 0.75rem; padding-left: 1.25rem; }
@@ -402,8 +420,6 @@ button:focus-visible,
   .appointment-board__heading { align-items: stretch; flex-direction: column; }
   .manager-mode-control { align-items: stretch; flex-direction: column; }
   .appointment-panels { grid-auto-columns: calc(100vw - 2.25rem); }
-  .manager-slot__player,
-  .manager-requirements { grid-template-columns: 1fr; }
 }
 
 .site-footer {

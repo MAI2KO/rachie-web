@@ -60,6 +60,16 @@ function enabledCodes(serviceCode, settings) {
   return { speedups: settings?.troop_speedups_required };
 }
 
+export function enabledBookingRequirementDefinitions(gameProfile, serviceCode, settings) {
+  return Object.freeze(Object.entries(enabledCodes(serviceCode, settings))
+    .filter(([, required]) => required)
+    .map(([code]) => Object.freeze({
+      code,
+      label: bookingRequirementLabel(gameProfile, code),
+      ...(code === "speedups" ? { unit: "days" } : {}),
+    })));
+}
+
 export function validateRequirementAnswers(gameProfile, serviceCode, settings, supplied) {
   const enabled = enabledCodes(serviceCode, settings);
   const fields = {};

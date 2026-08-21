@@ -388,6 +388,7 @@ class ProfileScopedApprovalSession {
               booking.in_game_name_snapshot AS confirmed_player_name,
               booking.player_id_snapshot AS confirmed_player_id,
               booking.alliance_snapshot AS confirmed_alliance,
+              booking.discord_user_id AS confirmed_discord_user_id,
               COALESCE((SELECT jsonb_agg(jsonb_build_object(
                 'code',answer.requirement_code,'label',answer.display_label,
                 'value',answer.numeric_value,'unit',answer.unit
@@ -399,6 +400,7 @@ class ProfileScopedApprovalSession {
               pending.in_game_name_snapshot AS pending_player_name,
               pending.player_id_snapshot AS pending_player_id,
               pending.alliance_snapshot AS pending_alliance,
+              pending.discord_user_id AS pending_discord_user_id,
               pending.hold_expires_at AS pending_hold_expires_at,
               COALESCE((SELECT jsonb_agg(jsonb_build_object(
                 'code',answer.requirement_code,'label',answer.display_label,

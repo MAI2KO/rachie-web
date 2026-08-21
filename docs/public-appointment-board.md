@@ -34,7 +34,24 @@ The manager serializer may return in-game name, Player ID, alliance, requirement
 
 ## Copy Mode, Edit Mode, and audit
 
-The manager board starts in **Copy Mode**. Clicking a player name or Player ID copies only that value. The most recently copied field has a green outline and accessible copied feedback. There is no long-press or bulk copy.
+The manager board starts in **Copy Mode**. Each service uses a compact operator
+table with one appointment per row: time, player, Player ID, and only the
+requirement columns enabled for that service in `booking_settings`. Column
+definitions reuse the same requirement-code, profile-label, and unit metadata as
+booking validation; the React UI does not hard-code resource names. Disabled
+requirements do not create empty columns, and different services may therefore
+have different table shapes.
+
+Clicking a player name or Player ID copies only that value. The most recently
+copied field has a green outline and accessible copied feedback. If the booking's
+canonical Discord owner is the signed-in manager, a visually separate `YOU`
+badge appears beside the player-name control. Only a server-produced boolean is
+sent for this marker, and `YOU` is never included in copied text. There is no
+long-press or bulk copy.
+
+On narrow screens the operator table scrolls horizontally inside its service
+panel instead of stacking fields vertically. Normal scroll chaining is retained
+so a user can reach the table edge and continue swiping between service panels.
 
 Mutation controls appear only after **Edit appointments** is selected. This phase supports approve and deny through the existing atomic approval service. Both retain first-transition-wins concurrency, record the acting Discord user ID/display name, require same-origin CSRF validation, and use a dedicated rate limit.
 
