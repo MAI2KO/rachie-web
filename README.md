@@ -24,6 +24,12 @@ The deployment-ready staging pair is `staging.r-a-c-h-i-e.com` and
 [staging deployment guide](docs/staging-deployment.md) for variables, database
 roles, migrations, Railway settings, smoke tests, and rollback.
 
+Discord booking notifications and manager approval buttons use a narrow signed
+website/bot boundary with durable PostgreSQL work. See the
+[Discord booking integration guide](docs/discord-booking-integration.md) for
+profile secrets, required Server Members Intent, retries, reminders, rollout,
+and degraded operation.
+
 ## Brand architecture
 
 - `brands/types.ts` defines the shared, strongly typed configuration contract.

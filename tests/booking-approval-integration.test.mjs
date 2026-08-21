@@ -176,7 +176,7 @@ test("migration 0005 preserves existing confirmed booking data and defaults comm
       );
     });
 
-    assert.deepEqual((await runMigrations(pool, migrations)).applied, ["0005"]);
+    assert.deepEqual((await runMigrations(pool, migrations)).applied, ["0005", "0006"]);
     const preserved = await withProfile(pool, "wos", (client) => client.query(
       `SELECT booking.id,booking.status,booking.in_game_name_snapshot,
               booking.approval_request_id,settings.booking_approval_policy,

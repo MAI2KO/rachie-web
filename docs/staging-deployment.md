@@ -51,6 +51,8 @@ is server-only even when its value is not intrinsically secret.
 | `PEGGIE_DISCORD_OAUTH_CLIENT_SECRET` | Required | Yes | Kingshot | Local/staging/production | P.E.G.G.I.E OAuth secret. |
 | `PEGGIE_DISCORD_OAUTH_REDIRECT_URI` | Required | No | Kingshot | Local/staging/production | Exact callback for that environment. |
 | `PEGGIE_DISCORD_BOT_TOKEN` | Required | Yes | Kingshot | Local/staging/production | P.E.G.G.I.E bot token for stale membership checks; not an OAuth secret. |
+| `RACHIE_BOOKING_INTEGRATION_SECRET` | Required when WOS Discord delivery is enabled | Yes | WOS | Staging/production | At least 32 characters; must match only the R.A.C.H.I.E bot deployment. |
+| `PEGGIE_BOOKING_INTEGRATION_SECRET` | Required when Kingshot Discord delivery is enabled | Yes | Kingshot | Staging/production | At least 32 characters; must match only the P.E.G.G.I.E bot deployment. |
 | `RACHIE_LEGACY_BOOKING_URL` | Optional | Treat as secret | WOS | Any environment retaining compatibility | Apps Script deployment/capability URL. Missing disables only this proxy. |
 | `PEGGIE_LEGACY_BOOKING_URL` | Optional | Treat as secret | Kingshot | Any environment retaining compatibility | Apps Script deployment/capability URL. Missing disables only this proxy. |
 | `WOS_NATIVE_BOOKING_COMMUNITY_CODE` | Optional obsolete bridge | No | WOS | Local isolated tests only | Authenticated routes do not read it; omit from staging/production. |
@@ -125,8 +127,8 @@ an advisory lock and transactions.
 PostgreSQL 16 remains the original development and local Compose baseline. The
 Railway staging database target was compatibility-validated against a disposable
 local PostgreSQL 18.6 container using the real migration runner and the complete
-PostgreSQL-backed test suite. Migrations `0001`-`0005` applied successfully, a
-second run was a clean no-op, and all 135 tests passed, including forced RLS,
+PostgreSQL-backed test suite. Migrations `0001`-`0006` applied successfully, a
+second run was a clean no-op, and all 210 tests passed, including forced RLS,
 restricted roles, concurrency, advisory locks, dates/timestamps, authentication,
 rate limiting, and community bootstrap. No PostgreSQL 18 compatibility warning or
 application defect was found.
@@ -173,6 +175,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   website_oauth_states, website_discord_identities, website_auth_sessions,
   website_auth_session_communities, website_auth_session_selection,
   website_rate_limit_buckets
+TO rachie_peggie_runtime;
+
+-- The delivery queue is never deleted by runtime; replay nonces are never updated.
+GRANT SELECT, INSERT, UPDATE ON booking_discord_notifications
+TO rachie_peggie_runtime;
+GRANT SELECT, INSERT, DELETE ON booking_integration_nonces
 TO rachie_peggie_runtime;
 
 -- PostgreSQL row locks require UPDATE privilege even when application code
@@ -282,6 +290,7 @@ ledger insert is transactional.
 | `0003` | `rate_limit_foundation` | `8eed5ca979efd262ba7da3fb79b09b01ce68d4813e5865cd8dee3d0d8f09c189` |
 | `0004` | `native_booking_participant_guard` | `a928f0e9f7dcd0422bd10aa9413cb3583a8f89d803726822dc5c13d16681aac3` |
 | `0005` | `guest_booking_approval_foundation` | `61f564efef5ed38e778f3519292563bb3208521c7b0a00dc3134755bda7bd646` |
+| `0006` | `discord_booking_notifications` | `64768e0f779c740196b82e958ae47600c4f78c407da210d8e1be0f72c27d8130` |
 
 Reruns are safe through the ledger. Individual SQL files are not standalone
 idempotent and must never be manually rerun or edited after application.
@@ -292,7 +301,7 @@ Staging procedure:
 2. From the exact release commit, run `npm ci`.
 3. Run `npm run db:migrate` through the release job with its direct private
    migration-role `DATABASE_URL`, without echoing it.
-4. Confirm `app_schema_migrations` contains exactly `0001`–`0005` with the hashes
+4. Confirm `app_schema_migrations` contains exactly `0001`–`0006` with the hashes
    above.
 5. Apply runtime grants, then validate `rolsuper=false`, `rolbypassrls=false` and
    forced-RLS integration tests.
@@ -412,7 +421,7 @@ members from Discord.
 1. Provision isolated staging PostgreSQL and appropriate backups.
 2. Create migration and runtime roles with the SQL above.
 3. Create private URLs; set only runtime `DATABASE_URL` on the web service.
-4. Run `0001`–`0005` through the migration release job and verify the ledger.
+4. Run `0001`–`0006` through the migration release job and verify the ledger.
 5. Apply and verify runtime grants and forced RLS.
 6. Load reviewed staging community/guild/settings/window/service/date/slot data.
    First create each JSON file with `npm run db:bootstrap-config`; this local

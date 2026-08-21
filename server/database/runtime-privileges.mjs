@@ -35,6 +35,9 @@ export const RUNTIME_ROW_LOCK_COLUMNS = Object.freeze({
   booking_guest_share_links: "updated_at",
 });
 
+export const RUNTIME_DISCORD_NOTIFICATION_TABLE = "booking_discord_notifications";
+export const RUNTIME_INTEGRATION_NONCE_TABLE = "booking_integration_nonces";
+
 function quotedIdentifier(value) {
   if (typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
     throw new TypeError("Runtime database role name is invalid.");
@@ -47,6 +50,8 @@ export function runtimePrivilegeStatements(role, { includeRowLockPrivileges = tr
   return Object.freeze([
     `GRANT SELECT ON ${RUNTIME_READ_TABLES.join(", ")} TO ${grantee}`,
     `GRANT SELECT, INSERT, UPDATE, DELETE ON ${RUNTIME_WRITE_TABLES.join(", ")} TO ${grantee}`,
+    `GRANT SELECT, INSERT, UPDATE ON ${RUNTIME_DISCORD_NOTIFICATION_TABLE} TO ${grantee}`,
+    `GRANT SELECT, INSERT, DELETE ON ${RUNTIME_INTEGRATION_NONCE_TABLE} TO ${grantee}`,
     ...(includeRowLockPrivileges
       ? Object.entries(RUNTIME_ROW_LOCK_COLUMNS).map(([table, column]) => `GRANT UPDATE (${column}) ON ${table} TO ${grantee}`)
       : []),
