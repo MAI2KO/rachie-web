@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type PublicSlot = { time: string; state: "available" | "pending" | "confirmed"; playerName?: string };
+type PublicSlot = { time: string; state: "available" | "pending" | "confirmed"; playerName?: string; playerAlliance?: string };
 type PublicService = { name: string; date: string; slots: PublicSlot[] };
 export type PublicBoard = {
   community: { code: string; displayName: string };
@@ -46,9 +46,13 @@ const readableDate = (value: string) => new Intl.DateTimeFormat("en-GB", {
 }).format(new Date(`${value}T00:00:00Z`));
 
 function publicSlotLabel(slot: PublicSlot) {
-  if (slot.state === "confirmed") return slot.playerName ?? "Confirmed";
+  if (slot.state === "confirmed") return "Confirmed";
   if (slot.state === "pending") return "Pending";
   return "Available";
+}
+
+function AllianceBadge({ value }: { value: string }) {
+  return <span aria-label={`Alliance ${value}`} className="alliance-badge">[{value}]</span>;
 }
 
 function PublicPanels({ services }: { services: PublicService[] }) {
@@ -64,7 +68,9 @@ function PublicPanels({ services }: { services: PublicService[] }) {
             {service.slots.map((slot) => (
               <li className={`appointment-slot appointment-slot--${slot.state}`} key={slot.time}>
                 <time>{slot.time}</time>
-                <span>{publicSlotLabel(slot)}</span>
+                {slot.state === "confirmed" && slot.playerName && slot.playerAlliance
+                  ? <span className="public-confirmed-player"><AllianceBadge value={slot.playerAlliance} /><span>{slot.playerName}</span></span>
+                  : <span>{publicSlotLabel(slot)}</span>}
               </li>
             ))}
           </ol>
@@ -74,8 +80,8 @@ function PublicPanels({ services }: { services: PublicService[] }) {
   );
 }
 
-function CopyButton({ value, label, copied, onCopy }: {
-  value: string; label: string; copied: boolean; onCopy(value: string, label: string): void;
+function CopyButton({ value, label, copied, onCopy, alliance = false }: {
+  value: string; label: string; copied: boolean; alliance?: boolean; onCopy(value: string, label: string): void;
 }) {
   return (
     <button
@@ -84,8 +90,7 @@ function CopyButton({ value, label, copied, onCopy }: {
       onClick={() => onCopy(value, label)}
       type="button"
     >
-      <span className="visually-hidden">{label}: </span>
-      <strong>{value}</strong>
+      {alliance ? <AllianceBadge value={value} /> : <><span className="visually-hidden">{label}: </span><strong>{value}</strong></>}
       {copied ? <small role="status">Copied</small> : null}
     </button>
   );
@@ -108,8 +113,8 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyReque
             <table className="manager-table">
               <thead><tr>
                 <th scope="col">Time</th>
-                <th scope="col">Player</th>
                 <th scope="col">Alliance</th>
+                <th scope="col">Player</th>
                 <th scope="col">Player ID</th>
                 {service.requirementColumns.map((column) => <th key={column.code} scope="col">{column.label}</th>)}
                 {editMode ? <th scope="col">Actions</th> : null}
@@ -124,12 +129,12 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyReque
                 }
                 return <tr className={`manager-row manager-row--${slot.state}`} key={slot.slotId}>
                   <th scope="row"><time>{slot.time}</time></th>
+                  <td><CopyButton alliance copied={copiedKey === `${key}:alliance`} label="Alliance" onCopy={(value) => onCopy(value, `${key}:alliance`)} value={slot.player.alliance} /></td>
                   <td className="manager-player-cell">
-                    {slot.player.isCurrentUser ? <span className="manager-you-badge">YOU</span> : null}
+                    {slot.player.isCurrentUser ? <span aria-label="This booking belongs to the current user" className="manager-current-user-badge">YOURS</span> : null}
                     <CopyButton copied={copiedKey === `${key}:name`} label="Player name" onCopy={(value) => onCopy(value, `${key}:name`)} value={slot.player.inGameName} />
                     {slot.state === "pending" ? <span className="manager-state-badge">Pending</span> : null}
                   </td>
-                  <td><CopyButton copied={copiedKey === `${key}:alliance`} label="Alliance" onCopy={(value) => onCopy(value, `${key}:alliance`)} value={slot.player.alliance} /></td>
                   <td><CopyButton copied={copiedKey === `${key}:id`} label="Player ID" onCopy={(value) => onCopy(value, `${key}:id`)} value={slot.player.playerId} /></td>
                   {service.requirementColumns.map((column) => {
                     const answer = slot.requirements?.find((candidate) => candidate.code === column.code);

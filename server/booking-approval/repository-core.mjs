@@ -410,6 +410,7 @@ class ProfileScopedApprovalSession {
        SELECT slot.service_code,service.display_label AS service_label,service.sort_order,
               slot.booking_date,slot.display_time_label,slot.ordinal,
               (booking.id IS NOT NULL) AS is_confirmed,
+              booking.alliance_snapshot AS confirmed_alliance,
               booking.in_game_name_snapshot AS confirmed_player_name,
               (pending.id IS NOT NULL) AS has_active_hold
        FROM appointment_slots AS slot

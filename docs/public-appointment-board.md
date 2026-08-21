@@ -12,7 +12,7 @@ The hostname selects the game profile. A URL parameter or request body cannot sw
 
 ## Public field boundary
 
-The anonymous response has a dedicated public query and serializer. It contains only the State/Kingdom code and public display name, service names and configured dates, appointment times, and `Available`, `Pending`, or a confirmed in-game name.
+The anonymous response has a dedicated public query and serializer. It contains only the State/Kingdom code and public display name, service names and configured dates, appointment times, and `Available`, `Pending`, or a confirmed alliance abbreviation plus in-game name.
 
 An active unexpired guest hold appears as `Pending`. An expired hold appears as `Available` even before a worker transitions its retained request row. Denied and expired requests and cancelled or replaced bookings do not occupy a slot.
 
@@ -38,18 +38,20 @@ The manager serializer may return in-game name, Player ID, alliance, requirement
 ## Copy Mode, Edit Mode, and audit
 
 The manager board starts in **Copy Mode**. Each service uses a compact operator
-table with one appointment per row: time, player, Player ID, and only the
+table with one appointment per row: time, alliance badge, player, Player ID, and only the
 requirement columns enabled for that service in `booking_settings`. Column
 definitions reuse the same requirement-code, profile-label, and unit metadata as
 booking validation; the React UI does not hard-code resource names. Disabled
 requirements do not create empty columns, and different services may therefore
 have different table shapes.
 
-Clicking a player name or Player ID copies only that value. The most recently
+Clicking an alliance badge, player name, or Player ID copies only that value. The most recently
 copied field has a green outline and accessible copied feedback. If the booking's
-canonical Discord owner is the signed-in manager, a visually separate `YOU`
-badge appears beside the player-name control. Only a server-produced boolean is
-sent for this marker, and `YOU` is never included in copied text. There is no
+canonical Discord owner is the signed-in manager, a visually separate filled
+`YOURS` marker appears beside the player-name control. It is independent of the
+outlined alliance badge, so an alliance named `YOU` remains `[YOU]` and does not
+imply current-user ownership. Only a server-produced boolean is sent for the marker,
+and `YOURS` is never included in copied text. There is no
 long-press or bulk copy.
 
 On narrow screens the operator table scrolls horizontally inside its service

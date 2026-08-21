@@ -390,8 +390,8 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       const approved = await approvalService("wos", undefined, "2030-08-21T10:10:00.000Z").approve(fixtures.wos.pendingRequestId);
       assert.equal(approved.outcome, "confirmed");
       const publicEntry = (await boardService("wos").publicBoard()).services.flatMap((service) => service.slots).find((slot) => slot.time === "08:00");
-      assert.deepEqual(publicEntry, { time: "08:00", state: "confirmed", playerName: "Guest 1" });
-      assert.doesNotMatch(JSON.stringify(publicEntry), /90000001|GST|alliance|speedups|discord/i);
+      assert.deepEqual(publicEntry, { time: "08:00", state: "confirmed", playerAlliance: "GST", playerName: "Guest 1" });
+      assert.doesNotMatch(JSON.stringify(publicEntry), /90000001|speedups|discord|playerId|requestId|bookingId/i);
       const detail = await boardService("wos", manager("wos", fixtures.wos.communityId)).adminRequest(fixtures.wos.pendingRequestId);
       assert.equal(detail.status, "confirmed");
       assert.equal(detail.decision.discordUserId, "manager-1");
@@ -502,6 +502,12 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       const managerSlot = (await boardService("wos", manager("wos", fixtures.wos.communityId)).managerBoard())
         .services[0].slots.find((slot) => slot.bookingId === displayed.body.booking.bookingId);
       assert.equal(managerSlot.player.alliance, "DSC");
+      const publicSlot = (await boardService("wos").publicBoard()).services[0].slots
+        .find((slot) => slot.time === displayed.body.booking.displayTime);
+      assert.deepEqual(publicSlot, {
+        time: displayed.body.booking.displayTime, state: "confirmed",
+        playerAlliance: "DSC", playerName: "discord-user-1002",
+      });
     });
 
     async function pendingForRace(slotIndex, suffix, key) {
@@ -554,6 +560,11 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       await approvalService("kingshot").approve(kingshotGuest.body.request.requestId);
       assert.equal((await boardService("kingshot", manager("kingshot", fixtures.kingshot.communityId)).managerBoard())
         .services[0].slots.find((slot) => slot.slotId === fixtures.kingshot.slots[0]).player.alliance, "GST");
+      assert.deepEqual((await boardService("kingshot").publicBoard()).services[0].slots
+        .find((slot) => slot.time === kingshotGuest.body.request.time), {
+        time: kingshotGuest.body.request.time, state: "confirmed",
+        playerAlliance: "GST", playerName: "Guest 11",
+      });
       const kingshotContext = await register("kingshot", "discord-user-2001");
       const kingshotNative = await createBookingCreationService({
         context: kingshotContext, repository: bookingRepositories.kingshot,
@@ -563,6 +574,11 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       );
       assert.equal((await boardService("kingshot", manager("kingshot", fixtures.kingshot.communityId)).managerBoard())
         .services[0].slots.find((slot) => slot.bookingId === kingshotNative.body.booking.bookingId).player.alliance, "DSC");
+      assert.deepEqual((await boardService("kingshot").publicBoard()).services[0].slots
+        .find((slot) => slot.time === kingshotNative.body.booking.displayTime), {
+        time: kingshotNative.body.booking.displayTime, state: "confirmed",
+        playerAlliance: "DSC", playerName: "discord-user-2001",
+      });
       assert.deepEqual((await createGuestBookingPageService({
         gameProfile: "kingshot", repository: approvalRepositories.kingshot,
       }).read(tokens.kingshot)).community, { code: "9999", displayName: "kingshot Test Server" });

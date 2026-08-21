@@ -118,9 +118,9 @@ The public board serializer constructs a new object containing only:
 - date;
 - display time;
 - `available`, `pending`, or `booked`;
-- confirmed in-game player name only when booked.
+- confirmed alliance abbreviation and in-game player name only when booked.
 
-Pending player names, Player IDs, Discord IDs, requirements, speed-ups, request
+Pending player names and alliances, Player IDs, Discord IDs, requirements, speed-ups, request
 IDs, slot IDs, and audit data are never present, including as hidden JSON
 properties. This is a server serialization boundary, not frontend filtering.
 

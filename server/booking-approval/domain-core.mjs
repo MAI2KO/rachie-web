@@ -110,7 +110,10 @@ export function publicBoardEntry(row) {
   return Object.freeze({
     time: row.display_time_label,
     state: booked ? "confirmed" : pending ? "pending" : "available",
-    ...(booked ? { playerName: row.confirmed_player_name } : {}),
+    ...(booked ? {
+      playerAlliance: row.confirmed_alliance,
+      playerName: row.confirmed_player_name,
+    } : {}),
   });
 }
 

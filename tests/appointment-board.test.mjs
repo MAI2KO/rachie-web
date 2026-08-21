@@ -17,7 +17,7 @@ const community = { id: "community-wos", location_code: "9999", display_name: "T
 const publicRows = [
   { service_code: "construction", service_label: "Construction", booking_date: "2030-08-21", display_time_label: "14:00", is_confirmed: false, has_active_hold: false },
   { service_code: "construction", service_label: "Construction", booking_date: "2030-08-21", display_time_label: "14:30", is_confirmed: false, has_active_hold: true },
-  { service_code: "construction", service_label: "Construction", booking_date: "2030-08-21", display_time_label: "15:00", is_confirmed: true, has_active_hold: false, confirmed_player_name: "Visible Player" },
+  { service_code: "construction", service_label: "Construction", booking_date: "2030-08-21", display_time_label: "15:00", is_confirmed: true, has_active_hold: false, confirmed_alliance: "VIS", confirmed_player_name: "Visible Player" },
 ];
 
 test("public board serializer exposes only the documented anonymous fields", () => {
@@ -25,7 +25,8 @@ test("public board serializer exposes only the documented anonymous fields", () 
     ...row,
     confirmed_player_id: "12345678",
     discord_user_id: "123456789012345678",
-    confirmed_alliance: "SEC",
+    pending_alliance: "SEC",
+    pending_player_name: "Private Pending Player",
     requirements: [{ code: "speedups", value: 99 }],
     pending_request_id: "private-request",
   })));
@@ -33,10 +34,11 @@ test("public board serializer exposes only the documented anonymous fields", () 
   assert.deepEqual(board.services[0].slots, [
     { time: "14:00", state: "available" },
     { time: "14:30", state: "pending" },
-    { time: "15:00", state: "confirmed", playerName: "Visible Player" },
+    { time: "15:00", state: "confirmed", playerAlliance: "VIS", playerName: "Visible Player" },
   ]);
   const serialized = JSON.stringify(board);
-  assert.doesNotMatch(serialized, /12345678|123456789012345678|SEC|alliance|speedups|private-request|discord|requestId|bookingId/i);
+  assert.doesNotMatch(serialized, /12345678|123456789012345678|SEC|Private Pending Player|speedups|private-request|discord|requestId|bookingId/i);
+  assert.match(serialized, /"playerAlliance":"VIS"/);
 });
 
 test("manager board serializer includes operational fields and bounded human-readable activity", () => {
@@ -98,6 +100,32 @@ test("manager requirement columns follow enabled, disabled, and service-specific
   assert.doesNotMatch(JSON.stringify(board.services[0].requirementColumns), /Refined Fire Crystals/);
   assert.doesNotMatch(JSON.stringify(board.services.flatMap((service) => service.requirementColumns)), /alliance/i);
   assert.equal(board.services[2].requirementColumns.length, 0);
+});
+
+test("alliance named YOU remains separate from current-user status", () => {
+  const rows = [
+    {
+      slot_id: "not-current", service_code: "construction", service_label: "Construction",
+      booking_date: "2030-08-21", display_time_label: "10:00", confirmed_booking_id: "booking-1",
+      confirmed_player_name: "Alliance Member", confirmed_player_id: "1", confirmed_alliance: "YOU",
+      confirmed_discord_user_id: "someone-else", confirmed_requirements: [],
+    },
+    {
+      slot_id: "current", service_code: "construction", service_label: "Construction",
+      booking_date: "2030-08-21", display_time_label: "10:30", confirmed_booking_id: "booking-2",
+      confirmed_player_name: "Current Manager", confirmed_player_id: "2", confirmed_alliance: "ABC",
+      confirmed_discord_user_id: "manager", confirmed_requirements: [],
+    },
+  ];
+  const board = managerAppointmentBoard(community, rows, [], {
+    gameProfile: "wos", currentDiscordUserId: "manager", settings: {},
+  });
+  assert.deepEqual(board.services[0].slots.map((slot) => ({
+    alliance: slot.player.alliance, isCurrentUser: slot.player.isCurrentUser,
+  })), [
+    { alliance: "YOU", isCurrentUser: false },
+    { alliance: "ABC", isCurrentUser: true },
+  ]);
 });
 
 function repositoryFor({ target = community, guilds = [] } = {}) {
@@ -202,14 +230,17 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(source, /wos: \{ community: "State" \}/);
   assert.match(source, /kingshot: \{ community: "Kingdom" \}/);
   assert.match(source, /Player name/);
-  assert.match(source, /<th scope="col">Alliance<\/th>[\s\S]*<th scope="col">Player ID<\/th>/);
+  assert.match(source, /<th scope="col">Time<\/th>[\s\S]*<th scope="col">Alliance<\/th>[\s\S]*<th scope="col">Player<\/th>[\s\S]*<th scope="col">Player ID<\/th>[\s\S]*service\.requirementColumns\.map/);
   assert.match(source, /Player ID/);
   assert.match(source, /<table className="manager-table">/);
   assert.match(source, /<tr className=\{`manager-row/);
-  assert.match(source, /manager-you-badge">YOU</);
+  assert.match(source, /manager-current-user-badge">YOURS</);
+  assert.match(source, /className="alliance-badge">\[\{value\}\]<\/span>/);
+  assert.match(source, /public-confirmed-player/);
   assert.match(source, /onCopy\(value, `\$\{key\}:name`\)/);
   assert.match(source, /value=\{slot\.player\.inGameName\}/);
   assert.match(source, /value=\{slot\.player\.alliance\}/);
+  assert.match(source, /<CopyButton alliance/);
   assert.match(source, /onCopy\(value, `\$\{key\}:alliance`\)/);
   assert.match(source, /service\.requirementColumns\.map/);
   assert.match(source, /Copy Mode/);
@@ -219,6 +250,7 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(css, /scroll-snap-type: inline mandatory/);
   assert.match(css, /grid-template-columns: repeat\(3/);
   assert.match(css, /copy-field--copied/);
+  assert.match(css, /\.alliance-badge \{[^}]*border: 1px solid currentColor/);
   assert.match(css, /\.manager-table-scroll \{[^}]*overflow-x: auto/);
   assert.doesNotMatch(css, /\.manager-row[^}]*flex-direction: column/);
 });
