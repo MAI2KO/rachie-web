@@ -8,6 +8,7 @@ import { RATE_LIMIT_POLICIES } from "@/server/rate-limit/policies.mjs";
 import { createBookingCreationApi } from "./booking-creation-api-core.mjs";
 import { createNativeBookingRepository } from "./repository";
 import { createNativeBookingCreationService } from "./booking-creation-service";
+import { logNativeBookingFailure } from "./operation-diagnostics.mjs";
 
 const api = createBookingCreationApi({
   resolveAuthenticatedContext: resolveAuthenticatedBookingMutationRequestContext,
@@ -15,6 +16,7 @@ const api = createBookingCreationApi({
   verifyCsrf: verifyAuthenticatedMutationCsrf,
   createRepository: createNativeBookingRepository,
   createService: createNativeBookingCreationService,
+  logUnexpectedError: logNativeBookingFailure,
   consumeMutationRateLimit(gameProfile: "wos" | "kingshot", subject: string) {
     const limiter = createServerRateLimiter(gameProfile);
     if (!limiter) throw new Error("Rate limiting is unavailable.");

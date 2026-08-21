@@ -173,8 +173,58 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   website_rate_limit_buckets
 TO rachie_peggie_runtime;
 
+-- PostgreSQL row locks require UPDATE privilege even when application code
+-- only selects and locks the row. Grant one low-authority metadata column,
+-- not table-wide UPDATE on these operator-owned configuration tables.
+GRANT UPDATE (updated_at) ON booking_communities
+TO rachie_peggie_runtime;
+GRANT UPDATE (updated_at) ON appointment_slots
+TO rachie_peggie_runtime;
+
 REVOKE ALL ON app_schema_migrations FROM rachie_peggie_runtime;
 ```
+
+### Runtime booking-write privilege audit
+
+PostgreSQL requires `SELECT` plus `UPDATE` privilege on at least one column of a
+table targeted by `SELECT ... FOR UPDATE`, even when the query never issues an
+`UPDATE`. Native creation first locks `booking_communities`; it later locks the
+chosen `appointment_slots` row with `FOR UPDATE OF slot`. With the former
+SELECT-only staging grant, the first query fails with SQLSTATE `42501`
+(`permission denied for table booking_communities`). Granting only the community
+lock privilege exposes the same `42501` at the appointment-slot lock.
+
+Column-level `UPDATE (updated_at)` is sufficient for both row locks on
+PostgreSQL 18.6. It is preferable to table-wide `UPDATE`: the runtime still
+cannot change `booking_communities.bookings_open` or
+`appointment_slots.status`. The lock queries do not update `updated_at`; the
+grant is solely the narrow PostgreSQL authorization needed to acquire the row
+lock. Keep these grants paired with the lock methods when reviewing future
+schema or repository changes.
+
+| Runtime path | Tables and operations | Required grant |
+| --- | --- | --- |
+| Authenticated context | Session `last_seen_at` update; identity, selected-community and community reads | Existing read/write-table grants |
+| Membership refresh/loss | Session-community update or delete joined to session reads | Existing read/write-table grants |
+| Mutation rate limit | Expired-row delete and insert-on-conflict update | Existing read/write-table grant |
+| Community serialization | `booking_communities ... FOR UPDATE` | `SELECT` plus `UPDATE (updated_at)` |
+| Idempotency | Insert, conflict read and completion update | Existing read/write-table grant |
+| Participant serialization | `booking_participants ... FOR UPDATE` | Existing table `SELECT, UPDATE` |
+| Slot serialization | Joined slot/window/service read with `FOR UPDATE OF slot` | Slot `SELECT, UPDATE (updated_at)`; window/service `SELECT` |
+| Availability checks | Slot blocks, existing bookings and settings | Existing `SELECT` grants |
+| Create | Booking, requirement-answer, audit and outbox inserts | Existing read/write-table grants |
+| Reschedule | Booking/participant locks, booking update+insert, answer/audit/outbox inserts | Existing grants plus both narrow lock grants |
+| Cancellation | Booking/participant locks, booking update, audit/outbox inserts | Existing grants plus community lock grant |
+
+`FOR NO KEY UPDATE`, `FOR SHARE`, and `FOR KEY SHARE` have the same PostgreSQL
+`UPDATE`-privilege requirement. The current repository uses only `FOR UPDATE`.
+Advisory transaction locks require no table privilege. Foreign-key enforcement
+and UUID generation add no sequence grant; the current schema has no sequences.
+
+Unexpected native booking `503` paths emit one bounded JSON diagnostic with a
+static operation name, internal category, validated SQLSTATE when present, and
+a syntactically bounded `X-Request-ID` when supplied. They never log SQL, error
+messages/stacks, URLs, credentials, cookies, session tokens, or request payloads.
 
 The current schema has no sequences; UUIDs come from the application. If a future
 migration adds sequences, grant only named `USAGE, SELECT` privileges needed by
@@ -184,7 +234,20 @@ defaults. Verify the runtime connection reports both booleans false:
 ```sql
 SELECT current_user, rolsuper, rolbypassrls
 FROM pg_roles WHERE rolname = current_user;
+
+SELECT
+  has_table_privilege(current_user, 'booking_communities', 'UPDATE')
+    AS community_table_update,
+  has_column_privilege(current_user, 'booking_communities', 'updated_at', 'UPDATE')
+    AS community_row_lock,
+  has_table_privilege(current_user, 'appointment_slots', 'UPDATE')
+    AS slot_table_update,
+  has_column_privilege(current_user, 'appointment_slots', 'updated_at', 'UPDATE')
+    AS slot_row_lock;
 ```
+
+The expected privilege result is `false, true, false, true`: no table-wide
+configuration update, with only the two narrow row-lock grants.
 
 The migration URL must never be present in the web service environment.
 
