@@ -24,7 +24,10 @@ function contextError(error, dependencies, operation, request) {
   if (error instanceof BookingAuthenticationRequiredError) return errorResponse(401, "Authentication is required.", "authentication_required");
   if (error instanceof BookingMembershipRefreshRequiredError) return errorResponse(401, "Discord membership must be refreshed by signing in again.", "membership_refresh_required");
   if (error instanceof BookingCommunityMembershipLostError) return errorResponse(409, "Your Discord membership in the selected community could not be confirmed.", "community_membership_lost");
-  if (error instanceof BookingMembershipVerificationUnavailableError) return errorResponse(503, "Discord membership could not be verified right now.", "membership_verification_unavailable", {}, error.retryAfterSeconds === null ? {} : { "Retry-After": String(error.retryAfterSeconds) });
+  if (error instanceof BookingMembershipVerificationUnavailableError) {
+    unexpected(dependencies, operation, error, request);
+    return errorResponse(503, "Discord membership could not be verified right now.", "membership_verification_unavailable", {}, error.retryAfterSeconds === null ? {} : { "Retry-After": String(error.retryAfterSeconds) });
+  }
   if (error instanceof BookingCommunitySelectionRequiredError) return errorResponse(409, "A verified booking community must be selected.", "community_selection_required");
   unexpected(dependencies, operation, error, request);
   return errorResponse(503, "Booking service is unavailable.", "service_unavailable");

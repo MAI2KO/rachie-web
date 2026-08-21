@@ -225,6 +225,11 @@ Unexpected native booking `503` paths emit one bounded JSON diagnostic with a
 static operation name, internal category, validated SQLSTATE when present, and
 a syntactically bounded `X-Request-ID` when supplied. They never log SQL, error
 messages/stacks, URLs, credentials, cookies, session tokens, or request payloads.
+Discord membership verification outages use the distinct bounded category
+`discord_membership_verification_unavailable` and the API code
+`membership_verification_unavailable`, so they are distinguishable from generic
+application or database `503`s without logging Discord response bodies or bot
+credentials.
 
 The current schema has no sequences; UUIDs come from the application. If a future
 migration adds sequences, grant only named `USAGE, SELECT` privileges needed by
@@ -312,6 +317,82 @@ Secret review findings:
 
 Treat legacy Apps Script URLs as secrets. Never log environment objects, export
 Railway secrets into tickets, or include database URLs in screenshots.
+
+### Staging membership-refresh smoke test
+
+`website_auth_session_communities.verified_at` is the existing membership
+freshness evidence. Authenticated reads accept it for 30 minutes; future booking
+mutations accept it for five minutes. The operator command below changes only
+that timestamp for the specified user's active sessions, setting it to exactly
+one hour before the transaction time. It does not add or remove membership,
+change a session, or contact Discord.
+
+Use the direct migration/operator `DATABASE_URL`. The command checks migration
+ledger access and explicitly refuses the website runtime role even though the
+runtime application legitimately updates this timestamp after a successful
+Discord check.
+
+```bash
+npm run db:stale-membership -- \
+  --profile wos \
+  --community 9999 \
+  --discord-user-id 123456789012345678
+```
+
+Use `--profile kingshot` for P.E.G.G.I.E. Community code and user lookup are
+always scoped to that profile. The command requires an existing identity, active
+session, and stored community-membership row. Its output contains the number of
+active session records changed and the stale timestamp, but no session hashes or
+database credentials.
+
+Positive refresh test:
+
+1. Confirm the test user is currently in the profile's mapped Discord test
+   server, is signed in to the website, and has the booking page open. Leave that
+   page open for the next steps; reloading first exercises the separate
+   30-minute read lease rather than the mutation refresh path.
+2. Run `db:stale-membership` for that profile, community, and Discord user ID.
+3. Without reloading or signing in again, perform a protected booking mutation:
+   create, reschedule, or cancel.
+4. The mutation should transparently verify membership with Discord and succeed.
+5. Verify that the matching `website_auth_session_communities.verified_at` is
+   newer than the one-hour-old value printed by the command. The repository
+   refresh writes `now()` only to that session/community relationship.
+
+For a read-only verification that does not expose session hashes, run this as
+the migration/operator role after substituting the three public identifiers:
+
+```sql
+SELECT max(evidence.verified_at) AS newest_membership_verification
+FROM website_auth_session_communities AS evidence
+JOIN website_auth_sessions AS session
+  ON session.game_profile = evidence.game_profile
+ AND session.token_hash = evidence.session_token_hash
+JOIN booking_communities AS community
+  ON community.game_profile = evidence.game_profile
+ AND community.id = evidence.community_id
+WHERE evidence.game_profile = 'wos'
+  AND community.location_code = '9999'
+  AND session.discord_user_id = '123456789012345678';
+```
+
+Negative membership-loss test:
+
+1. With the protected booking page already open, manually remove the test
+   Discord user from the test guild. This repository provides no command and
+   performs no Discord membership changes.
+2. Run `db:stale-membership` again if the stored evidence has become fresh.
+3. Without reloading, attempt a protected booking mutation. The server must
+   check Discord, remove only the now-invalid stored session/community
+   relationship, and return `community_membership_lost`; it must not trust the
+   stale evidence.
+4. Rejoin the user to the guild, then sign in again or refresh authentication as
+   appropriate so a new verified relationship can be stored.
+
+Bot removal, missing bot guild access, Discord authentication errors, rate
+limits, timeouts, and malformed responses instead fail closed as
+`membership_verification_unavailable`. Do not automate kicking or removing test
+members from Discord.
 
 ## Ordered staging checklist
 

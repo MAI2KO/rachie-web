@@ -5,6 +5,7 @@ import {
   logNativeBookingFailure,
   nativeBookingFailureDiagnostic,
 } from "../server/native-booking/operation-diagnostics.mjs";
+import { BookingMembershipVerificationUnavailableError } from "../server/auth/authenticated-booking-context-core.mjs";
 
 test("native booking diagnostics retain only bounded operation, SQLSTATE, category, and request ID", () => {
   const error = Object.assign(new Error("password=secret DATABASE_URL=postgresql://sensitive"), {
@@ -42,4 +43,25 @@ test("native booking diagnostics reject unbounded identifiers and raw error code
     operation: "unknown",
     category: "internal_error",
   });
+});
+
+test("membership verification outages have a distinct secret-free diagnostic category", () => {
+  const diagnostic = nativeBookingFailureDiagnostic({
+    operation: "booking_reschedule_membership",
+    error: new BookingMembershipVerificationUnavailableError(7),
+    request: new Request("https://example.test", {
+      headers: {
+        authorization: "Bot secret-token",
+        cookie: "session=secret-session",
+        "x-request-id": "membership-refresh-123",
+      },
+    }),
+  });
+  assert.deepEqual(diagnostic, {
+    event: "native_booking_operation_failed",
+    operation: "booking_reschedule_membership",
+    category: "discord_membership_verification_unavailable",
+    requestId: "membership-refresh-123",
+  });
+  assert.doesNotMatch(JSON.stringify(diagnostic), /secret|token|cookie|authorization/i);
 });

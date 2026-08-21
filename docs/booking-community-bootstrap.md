@@ -112,6 +112,17 @@ first appointment day. Automatic scheduled opening is not implemented yet;
 until that separate feature is designed and approved, an operator must run this
 manual command at the chosen time.
 
+To deliberately exercise the server-side Discord membership refresh path in
+staging, make an existing user's stored membership timestamp one hour old:
+
+```bash
+npm run db:stale-membership -- --profile wos --community 9999 --discord-user-id 123456789012345678
+```
+
+This operator/test command changes only existing membership freshness evidence.
+It cannot add or remove Discord membership and refuses the website runtime role.
+See the staging deployment guide for the positive and negative smoke-test steps.
+
 ## Role, dry run, and remote safeguards
 
 Creating the JSON is the only step covered by the wizard. Later, when a database

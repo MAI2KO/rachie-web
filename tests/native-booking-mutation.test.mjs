@@ -59,12 +59,17 @@ test("membership loss and verifier failure are controlled mutation errors", asyn
   assert.equal(lost.status, 409);
   assert.equal((await lost.json()).code, "community_membership_lost");
 
+  const diagnostics = [];
   const unavailable = await api({
     async refreshAuthenticatedMembership() { throw new BookingMembershipVerificationUnavailableError(6); },
+    logUnexpectedError(value) { diagnostics.push(value); },
   }).cancel(request("DELETE"), bookingId);
   assert.equal(unavailable.status, 503);
   assert.equal(unavailable.headers.get("retry-after"), "6");
   assert.equal((await unavailable.json()).code, "membership_verification_unavailable");
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].operation, "booking_cancel_membership");
+  assert.equal(diagnostics[0].error.name, "BookingMembershipVerificationUnavailableError");
 });
 
 test("mutation API maps ownership, active-state, idempotency, and failures safely", async () => {

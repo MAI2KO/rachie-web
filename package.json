@@ -15,6 +15,7 @@
     "db:bootstrap": "node --env-file-if-exists=.env.local scripts/bootstrap-booking-community.mjs",
     "db:bootstrap-config": "node scripts/bootstrap-booking-community-config.mjs",
     "db:booking-window": "node --env-file-if-exists=.env.local scripts/booking-window.mjs",
+    "db:stale-membership": "node --env-file-if-exists=.env.local scripts/stale-membership.mjs",
     "db:seed": "node --env-file-if-exists=.env.local scripts/seed-development.mjs",
     "start": "next start",
     "lint": "eslint",

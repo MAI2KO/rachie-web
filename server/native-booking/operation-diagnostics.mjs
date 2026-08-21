@@ -15,7 +15,10 @@ const OPERATIONS = new Set([
   "booking_cancel",
 ]);
 
-function errorCategory(sqlState) {
+function errorCategory(error, sqlState) {
+  if (error?.name === "BookingMembershipVerificationUnavailableError") {
+    return "discord_membership_verification_unavailable";
+  }
   if (sqlState === "42501") return "database_privilege";
   if (sqlState?.startsWith("23")) return "database_constraint";
   if (sqlState?.startsWith("40")) return "database_transaction";
@@ -34,7 +37,7 @@ export function nativeBookingFailureDiagnostic({ operation, error, request }) {
   return Object.freeze({
     event: "native_booking_operation_failed",
     operation: OPERATIONS.has(operation) ? operation : "unknown",
-    category: errorCategory(sqlState),
+    category: errorCategory(error, sqlState),
     ...(sqlState ? { sqlState } : {}),
     ...(requestId ? { requestId } : {}),
   });
