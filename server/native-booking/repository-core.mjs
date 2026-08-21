@@ -330,6 +330,18 @@ class ProfileScopedBookingSession {
     return result.rows[0].exists;
   }
 
+  async hasActiveApprovalHoldForSlot(slotId, at) {
+    const result = await this.client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM booking_approval_requests
+         WHERE game_profile = $1 AND slot_id = $2
+           AND status = 'pending_approval' AND hold_expires_at > $3
+       ) AS exists`,
+      [this.gameProfile, slotId, at],
+    );
+    return result.rows[0].exists;
+  }
+
   async hasConfirmedBookingForParticipantService(communityId, windowId, serviceCode, participantId) {
     const result = await this.client.query(
       `SELECT EXISTS (
@@ -489,6 +501,14 @@ class ProfileScopedBookingSession {
            WHERE block.game_profile = slot.game_profile
              AND block.slot_id = slot.id
              AND block.cancelled_at IS NULL
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM booking_approval_requests AS request
+           WHERE request.game_profile = slot.game_profile
+             AND request.slot_id = slot.id
+             AND request.status = 'pending_approval'
+             AND request.hold_expires_at > now()
          )
        ORDER BY slot.ordinal, slot.id`,
       [this.gameProfile, communityId, windowId, serviceCode],

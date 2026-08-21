@@ -26,4 +26,19 @@ export const RATE_LIMIT_POLICIES = Object.freeze({
     limit: 10,
     windowSeconds: 60,
   }),
+  guestBookingRead: Object.freeze({
+    code: "guest_booking_read",
+    limit: 120,
+    windowSeconds: 60,
+  }),
+  guestBookingSubmission: Object.freeze({
+    code: "guest_booking_submission",
+    limit: 5,
+    windowSeconds: 600,
+  }),
+  managerBookingMutation: Object.freeze({
+    code: "manager_booking_mutation",
+    limit: 20,
+    windowSeconds: 60,
+  }),
 });

@@ -7,6 +7,7 @@ export const RUNTIME_READ_TABLES = Object.freeze([
   "booking_service_dates",
   "appointment_slots",
   "booking_slot_blocks",
+  "booking_guest_share_links",
 ]);
 
 export const RUNTIME_WRITE_TABLES = Object.freeze([
@@ -16,6 +17,10 @@ export const RUNTIME_WRITE_TABLES = Object.freeze([
   "booking_requirement_answers",
   "booking_change_events",
   "booking_outbox",
+  "booking_approval_requests",
+  "booking_approval_request_answers",
+  "booking_approval_events",
+  "booking_approval_discord_messages",
   "website_oauth_states",
   "website_discord_identities",
   "website_auth_sessions",
@@ -27,6 +32,7 @@ export const RUNTIME_WRITE_TABLES = Object.freeze([
 export const RUNTIME_ROW_LOCK_COLUMNS = Object.freeze({
   booking_communities: "updated_at",
   appointment_slots: "updated_at",
+  booking_guest_share_links: "updated_at",
 });
 
 function quotedIdentifier(value) {

@@ -61,7 +61,10 @@ export function createBookingMutationService({ context, repository, createId = r
           if (!target || target.window_id !== booking.window_id || target.service_code !== booking.service_code) throw new BookingMutationError("invalid_slot", "Invalid appointment slot.");
           const at = now();
           if (target.window_status !== "open" || (target.opens_at && new Date(target.opens_at) > at) || (target.closes_at && new Date(target.closes_at) <= at)) throw new BookingMutationError("booking_window_unavailable", "The booking window is unavailable.");
-          if (!target.service_active || target.slot_status !== "available" || await session.hasActiveSlotBlock(target.id) || await session.hasConfirmedBookingForSlotExcluding(target.id, booking.id)) throw new BookingMutationError("slot_unavailable", "The selected slot is no longer available.");
+          if (!target.service_active || target.slot_status !== "available"
+              || await session.hasActiveSlotBlock(target.id)
+              || await session.hasActiveApprovalHoldForSlot(target.id, at)
+              || await session.hasConfirmedBookingForSlotExcluding(target.id, booking.id)) throw new BookingMutationError("slot_unavailable", "The selected slot is no longer available.");
           const answers = validateRequirementAnswers(context.gameProfile, booking.service_code, await session.findBookingSettings(context.community.id), choice.requirements);
           const publicAnswers = answers.map(publicAnswer);
           if (target.id === booking.slot_id) {

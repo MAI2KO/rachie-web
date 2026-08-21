@@ -3,11 +3,15 @@ import "server-only";
 import { getAuthSessionSecret } from "./config";
 import { AUTH_SESSION_COOKIE, parseCookie } from "./cookies.mjs";
 import { hashOpaqueToken, safelyEqual, verifyCsrfToken } from "./crypto.mjs";
-import type { TrustedAuthenticatedBookingContext } from "./authenticated-booking-context";
+interface TrustedMutationSessionContext {
+  readonly hostname: string;
+  readonly gameProfile: "wos" | "kingshot";
+  readonly session: { readonly tokenHash: string };
+}
 
 export function verifyAuthenticatedMutationCsrf(
   request: Request,
-  context: TrustedAuthenticatedBookingContext,
+  context: TrustedMutationSessionContext,
 ): boolean {
   const sessionToken = parseCookie(request, AUTH_SESSION_COOKIE);
   const secret = getAuthSessionSecret();

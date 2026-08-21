@@ -58,7 +58,10 @@ export function createBookingCreationService({ context, repository, createId = r
           if (!slot.service_active) throw new BookingCreationError("invalid_service", "The selected service is unavailable.");
           const at = now();
           if (slot.window_status !== "open" || (slot.opens_at && new Date(slot.opens_at) > at) || (slot.closes_at && new Date(slot.closes_at) <= at)) throw new BookingCreationError("booking_window_unavailable", "The booking window is unavailable.");
-          if (slot.slot_status !== "available" || await session.hasActiveSlotBlock(slot.id) || await session.hasConfirmedBookingForSlot(slot.id)) throw new BookingCreationError("slot_unavailable", "The selected slot is no longer available.");
+          if (slot.slot_status !== "available"
+              || await session.hasActiveSlotBlock(slot.id)
+              || await session.hasActiveApprovalHoldForSlot(slot.id, at)
+              || await session.hasConfirmedBookingForSlot(slot.id)) throw new BookingCreationError("slot_unavailable", "The selected slot is no longer available.");
           if (await session.hasConfirmedBookingForParticipantService(context.community.id, slot.window_id, choice.serviceCode, participant.id)) throw new BookingCreationError("booking_already_exists", "A booking already exists for this service and window.");
           const settings = await session.findBookingSettings(context.community.id);
           const answers = validateRequirementAnswers(context.gameProfile, choice.serviceCode, settings, choice.requirements);

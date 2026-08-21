@@ -125,7 +125,7 @@ an advisory lock and transactions.
 PostgreSQL 16 remains the original development and local Compose baseline. The
 Railway staging database target was compatibility-validated against a disposable
 local PostgreSQL 18.6 container using the real migration runner and the complete
-PostgreSQL-backed test suite. Migrations `0001`-`0004` applied successfully, a
+PostgreSQL-backed test suite. Migrations `0001`-`0005` applied successfully, a
 second run was a clean no-op, and all 135 tests passed, including forced RLS,
 restricted roles, concurrency, advisory locks, dates/timestamps, authentication,
 rate limiting, and community bootstrap. No PostgreSQL 18 compatibility warning or
@@ -162,12 +162,14 @@ owner:
 GRANT SELECT ON
   booking_communities, booking_discord_guilds, booking_settings,
   booking_windows, minister_services, booking_service_dates,
-  appointment_slots, booking_slot_blocks
+  appointment_slots, booking_slot_blocks, booking_guest_share_links
 TO rachie_peggie_runtime;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   booking_idempotency_keys, booking_participants, minister_bookings,
   booking_requirement_answers, booking_change_events, booking_outbox,
+  booking_approval_requests, booking_approval_request_answers,
+  booking_approval_events, booking_approval_discord_messages,
   website_oauth_states, website_discord_identities, website_auth_sessions,
   website_auth_session_communities, website_auth_session_selection,
   website_rate_limit_buckets
@@ -179,6 +181,8 @@ TO rachie_peggie_runtime;
 GRANT UPDATE (updated_at) ON booking_communities
 TO rachie_peggie_runtime;
 GRANT UPDATE (updated_at) ON appointment_slots
+TO rachie_peggie_runtime;
+GRANT UPDATE (updated_at) ON booking_guest_share_links
 TO rachie_peggie_runtime;
 
 REVOKE ALL ON app_schema_migrations FROM rachie_peggie_runtime;
@@ -215,6 +219,9 @@ schema or repository changes.
 | Create | Booking, requirement-answer, audit and outbox inserts | Existing read/write-table grants |
 | Reschedule | Booking/participant locks, booking update+insert, answer/audit/outbox inserts | Existing grants plus both narrow lock grants |
 | Cancellation | Booking/participant locks, booking update, audit/outbox inserts | Existing grants plus community lock grant |
+| Guest link resolution | Active hashed-link read with `FOR SHARE OF link` | Link `SELECT` plus `UPDATE (updated_at)` |
+| Guest pending request | Request/answer/audit/outbox inserts and expired-hold updates | Approval-table read/write grants plus community/slot lock grants |
+| Approval/denial/expiry | Request and slot locks, request/booking/answer/audit/outbox updates | Existing booking grants plus approval-table grants |
 
 `FOR NO KEY UPDATE`, `FOR SHARE`, and `FOR KEY SHARE` have the same PostgreSQL
 `UPDATE`-privilege requirement. The current repository uses only `FOR UPDATE`.
@@ -248,11 +255,16 @@ SELECT
   has_table_privilege(current_user, 'appointment_slots', 'UPDATE')
     AS slot_table_update,
   has_column_privilege(current_user, 'appointment_slots', 'updated_at', 'UPDATE')
-    AS slot_row_lock;
+    AS slot_row_lock,
+  has_table_privilege(current_user, 'booking_guest_share_links', 'UPDATE')
+    AS share_link_table_update,
+  has_column_privilege(current_user, 'booking_guest_share_links', 'updated_at', 'UPDATE')
+    AS share_link_row_lock;
 ```
 
-The expected privilege result is `false, true, false, true`: no table-wide
-configuration update, with only the two narrow row-lock grants.
+The expected privilege result is `false, true, false, true, false, true`: no
+table-wide configuration/share-link update, with only the three narrow row-lock
+grants.
 
 The migration URL must never be present in the web service environment.
 
@@ -269,6 +281,7 @@ ledger insert is transactional.
 | `0002` | `discord_auth_foundation` | `38fddac496e2cd908ef7497842c15b5ff9b7a7ae3d31dd75a24a3578d49797f8` |
 | `0003` | `rate_limit_foundation` | `8eed5ca979efd262ba7da3fb79b09b01ce68d4813e5865cd8dee3d0d8f09c189` |
 | `0004` | `native_booking_participant_guard` | `a928f0e9f7dcd0422bd10aa9413cb3583a8f89d803726822dc5c13d16681aac3` |
+| `0005` | `guest_booking_approval_foundation` | `61f564efef5ed38e778f3519292563bb3208521c7b0a00dc3134755bda7bd646` |
 
 Reruns are safe through the ledger. Individual SQL files are not standalone
 idempotent and must never be manually rerun or edited after application.
@@ -279,7 +292,7 @@ Staging procedure:
 2. From the exact release commit, run `npm ci`.
 3. Run `npm run db:migrate` through the release job with its direct private
    migration-role `DATABASE_URL`, without echoing it.
-4. Confirm `app_schema_migrations` contains exactly `0001`–`0004` with the hashes
+4. Confirm `app_schema_migrations` contains exactly `0001`–`0005` with the hashes
    above.
 5. Apply runtime grants, then validate `rolsuper=false`, `rolbypassrls=false` and
    forced-RLS integration tests.
@@ -399,7 +412,7 @@ members from Discord.
 1. Provision isolated staging PostgreSQL and appropriate backups.
 2. Create migration and runtime roles with the SQL above.
 3. Create private URLs; set only runtime `DATABASE_URL` on the web service.
-4. Run `0001`–`0004` through the migration release job and verify the ledger.
+4. Run `0001`–`0005` through the migration release job and verify the ledger.
 5. Apply and verify runtime grants and forced RLS.
 6. Load reviewed staging community/guild/settings/window/service/date/slot data.
    First create each JSON file with `npm run db:bootstrap-config`; this local

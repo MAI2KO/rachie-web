@@ -1,0 +1,219 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+type PublicSlot = { time: string; state: "available" | "pending" | "confirmed"; playerName?: string };
+type PublicService = { name: string; date: string; slots: PublicSlot[] };
+export type PublicBoard = {
+  community: { code: string; displayName: string };
+  services: PublicService[];
+};
+type Requirement = { code: string; label: string; value: number; unit?: string };
+type ManagerSlot = PublicSlot & {
+  slotId: string;
+  requestId?: string;
+  bookingId?: string;
+  player?: { inGameName: string; playerId: string; alliance: string };
+  requirements?: Requirement[];
+  holdExpiresAt?: string;
+};
+type ManagerBoard = {
+  community: PublicBoard["community"];
+  services: Array<{ code: string; name: string; date: string; slots: ManagerSlot[] }>;
+  activity: Array<{
+    action: string;
+    playerName: string;
+    managerDisplayName: string | null;
+    previousState: string | null;
+    resultingState: string;
+    createdAt: string;
+  }>;
+};
+
+const terms = {
+  wos: { community: "State" },
+  kingshot: { community: "Kingdom" },
+} as const;
+
+const readableDate = (value: string) => new Intl.DateTimeFormat("en-GB", {
+  day: "numeric", month: "long", timeZone: "UTC",
+}).format(new Date(`${value}T00:00:00Z`));
+
+function publicSlotLabel(slot: PublicSlot) {
+  if (slot.state === "confirmed") return slot.playerName ?? "Confirmed";
+  if (slot.state === "pending") return "Pending";
+  return "Available";
+}
+
+function PublicPanels({ services }: { services: PublicService[] }) {
+  return (
+    <div aria-label="Appointment services" className="appointment-panels">
+      {services.map((service) => (
+        <section className="appointment-panel" key={`${service.name}:${service.date}`}>
+          <header>
+            <h2>{service.name}</h2>
+            <p>{readableDate(service.date)}</p>
+          </header>
+          <ol className="appointment-timeline">
+            {service.slots.map((slot) => (
+              <li className={`appointment-slot appointment-slot--${slot.state}`} key={slot.time}>
+                <time>{slot.time}</time>
+                <span>{publicSlotLabel(slot)}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function CopyButton({ value, label, copied, onCopy }: {
+  value: string; label: string; copied: boolean; onCopy(value: string, label: string): void;
+}) {
+  return (
+    <button
+      className={`copy-field${copied ? " copy-field--copied" : ""}`}
+      onClick={() => onCopy(value, label)}
+      type="button"
+    >
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {copied ? <small role="status">Copied</small> : <small>Click to copy</small>}
+    </button>
+  );
+}
+
+function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyRequest }: {
+  board: ManagerBoard;
+  editMode: boolean;
+  copiedKey: string;
+  onCopy(value: string, key: string): void;
+  onAction(requestId: string, action: "approve" | "deny"): void;
+  busyRequest: string;
+}) {
+  return (
+    <div aria-label="Manager appointment services" className="appointment-panels">
+      {board.services.map((service) => (
+        <section className="appointment-panel appointment-panel--manager" key={service.code}>
+          <header><h2>{service.name}</h2><p>{readableDate(service.date)}</p></header>
+          <ol className="appointment-timeline">
+            {service.slots.map((slot) => {
+              const key = slot.requestId ?? slot.bookingId ?? slot.slotId;
+              return (
+                <li className={`manager-slot manager-slot--${slot.state}`} key={slot.slotId}>
+                  <div className="manager-slot__heading"><time>{slot.time}</time><span>{publicSlotLabel(slot)}</span></div>
+                  {slot.player ? <div className="manager-slot__player">
+                    <CopyButton copied={copiedKey === `${key}:name`} label="Player name" onCopy={(value) => onCopy(value, `${key}:name`)} value={slot.player.inGameName} />
+                    <CopyButton copied={copiedKey === `${key}:id`} label="Player ID" onCopy={(value) => onCopy(value, `${key}:id`)} value={slot.player.playerId} />
+                    <span>Alliance: {slot.player.alliance}</span>
+                  </div> : null}
+                  {slot.requirements?.length ? <dl className="manager-requirements">
+                    {slot.requirements.map((answer) => <div key={answer.code}>
+                      <dt>{answer.label}</dt><dd>{answer.value}{answer.unit ? ` ${answer.unit}` : ""}</dd>
+                    </div>)}
+                  </dl> : null}
+                  {editMode && slot.state === "pending" && slot.requestId ? <div className="manager-slot__actions">
+                    <button className="booking-button" disabled={busyRequest === slot.requestId} onClick={() => onAction(slot.requestId!, "approve")} type="button">Approve</button>
+                    <button className="booking-button booking-button--secondary" disabled={busyRequest === slot.requestId} onClick={() => onAction(slot.requestId!, "deny")} type="button">Deny</button>
+                  </div> : null}
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+export function AppointmentBoard({ profile, initialBoard }: {
+  profile: "wos" | "kingshot";
+  initialBoard: PublicBoard;
+}) {
+  const [managerBoard, setManagerBoard] = useState<ManagerBoard | null>(null);
+  const [csrfToken, setCsrfToken] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [copiedKey, setCopiedKey] = useState("");
+  const [busyRequest, setBusyRequest] = useState("");
+  const [notice, setNotice] = useState("");
+  const endpoint = `/api/v1/appointment-board/${encodeURIComponent(initialBoard.community.code)}/manager`;
+
+  const loadManagerBoard = useCallback(async () => {
+    const [sessionResponse, boardResponse] = await Promise.all([
+      fetch("/api/v1/auth/session", { cache: "no-store" }),
+      fetch(endpoint, { cache: "no-store" }),
+    ]);
+    if (!boardResponse.ok) return;
+    const [sessionPayload, boardPayload] = await Promise.all([sessionResponse.json(), boardResponse.json()]);
+    if (sessionPayload.authenticated && typeof sessionPayload.csrfToken === "string") {
+      setCsrfToken(sessionPayload.csrfToken);
+    }
+    if (boardPayload.ok) setManagerBoard(boardPayload.board);
+  }, [endpoint]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadManagerBoard(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadManagerBoard]);
+
+  async function copy(value: string, key: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      setNotice(`${key.endsWith(":id") ? "Player ID" : "Player name"} copied.`);
+    } catch {
+      setNotice("Copy failed. Select and copy the value manually.");
+    }
+  }
+
+  async function approvalAction(requestId: string, action: "approve" | "deny") {
+    setBusyRequest(requestId);
+    setNotice("");
+    try {
+      const response = await fetch(`${endpoint.replace(/\/manager$/, "")}/requests/${encodeURIComponent(requestId)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+        body: JSON.stringify({ action }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "The action could not be completed.");
+      setNotice(action === "approve" ? "Appointment approved." : "Request denied.");
+      await loadManagerBoard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The action could not be completed.");
+    } finally {
+      setBusyRequest("");
+    }
+  }
+
+  const communityTerm = terms[profile].community;
+  return (
+    <article className="appointment-board">
+      <header className="appointment-board__heading">
+        <div><p className="booking-kicker">{communityTerm} {initialBoard.community.code}</p><h1>{initialBoard.community.displayName}</h1></div>
+        {managerBoard ? <div className="manager-mode-control">
+          <span>{editMode ? "Edit Mode" : "Copy Mode"}</span>
+          <button className="booking-button booking-button--secondary" onClick={() => setEditMode((value) => !value)} type="button">
+            {editMode ? "Return to Copy Mode" : "Edit appointments"}
+          </button>
+        </div> : null}
+      </header>
+      {notice ? <p aria-live="polite" className="booking-notice">{notice}</p> : null}
+      {managerBoard
+        ? <ManagerPanels board={managerBoard} busyRequest={busyRequest} copiedKey={copiedKey} editMode={editMode} onAction={approvalAction} onCopy={copy} />
+        : <PublicPanels services={initialBoard.services} />}
+      {managerBoard ? <details className="manager-activity">
+        <summary>Recent manager activity</summary>
+        {managerBoard.activity.length ? <ol>
+          {managerBoard.activity.map((event, index) => <li key={`${event.createdAt}:${index}`}>
+            <strong>{event.action}</strong> · {event.playerName}
+            {event.managerDisplayName ? ` · ${event.managerDisplayName}` : ""}
+            {event.previousState ? ` · ${event.previousState} → ${event.resultingState}` : ` · ${event.resultingState}`}
+            <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time>
+          </li>)}
+        </ol> : <p>No activity yet.</p>}
+      </details> : null}
+    </article>
+  );
+}
