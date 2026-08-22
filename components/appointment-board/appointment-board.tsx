@@ -13,6 +13,7 @@ export type PublicBoard = {
 type Requirement = { code: string; label: string; value: number; unit?: string };
 type ManagerSlot = PublicSlot & {
   slotId: string;
+  date: string;
   requestId?: string;
   bookingId?: string;
   player?: { inGameName: string; playerId: string; alliance: string; isCurrentUser: boolean };
@@ -34,6 +35,8 @@ type ManagerBoard = {
     managerDisplayName: string | null;
     previousState: string | null;
     resultingState: string;
+    previousTime?: string;
+    newTime?: string;
     createdAt: string;
   }>;
 };
@@ -51,6 +54,12 @@ function publicSlotLabel(slot: PublicSlot) {
   if (slot.state === "confirmed") return "Confirmed";
   if (slot.state === "pending") return "Pending";
   return "Available";
+}
+
+function activityLabel(action: string) {
+  if (action === "manager_booking_rescheduled") return "Booking rescheduled";
+  if (action === "manager_booking_cancelled") return "Booking cancelled";
+  return action;
 }
 
 function PublicPanels({ services }: { services: PublicService[] }) {
@@ -94,13 +103,22 @@ function CopyButton({ value, label, copied, onCopy, alliance = false }: {
   );
 }
 
-function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyRequest }: {
+function ManagerPanels({ board, editMode, copiedKey, onCopy, onApprovalAction,
+  onBookingAction, busyRequest, busyBooking, cancellingBooking, reschedulingBooking,
+  rescheduleSlot, onCancelChoice, onRescheduleChoice }: {
   board: ManagerBoard;
   editMode: boolean;
   copiedKey: string;
   onCopy(value: string, key: string): void;
-  onAction(requestId: string, action: "approve" | "deny"): void;
+  onApprovalAction(requestId: string, action: "approve" | "deny"): void;
+  onBookingAction(bookingId: string, action: "reschedule" | "cancel", slotId?: string): void;
   busyRequest: string;
+  busyBooking: string;
+  cancellingBooking: string;
+  reschedulingBooking: string;
+  rescheduleSlot: string;
+  onCancelChoice(bookingId: string): void;
+  onRescheduleChoice(bookingId: string, slotId?: string): void;
 }) {
   return (
     <div aria-label="Manager appointment services" className="appointment-panels">
@@ -138,8 +156,26 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onAction, busyReque
                     return <td key={column.code}>{answer ? <>{answer.value}{answer.unit ? ` ${answer.unit}` : ""}</> : <span aria-label="No answer">—</span>}</td>;
                   })}
                   {editMode ? <td>{slot.state === "pending" && slot.requestId ? <div className="manager-row__actions">
-                    <button className="booking-button" disabled={busyRequest === slot.requestId} onClick={() => onAction(slot.requestId!, "approve")} type="button">Approve</button>
-                    <button className="booking-button booking-button--secondary" disabled={busyRequest === slot.requestId} onClick={() => onAction(slot.requestId!, "deny")} type="button">Deny</button>
+                    <button className="booking-button" disabled={busyRequest === slot.requestId} onClick={() => onApprovalAction(slot.requestId!, "approve")} type="button">Approve</button>
+                    <button className="booking-button booking-button--secondary" disabled={busyRequest === slot.requestId} onClick={() => onApprovalAction(slot.requestId!, "deny")} type="button">Deny</button>
+                  </div> : slot.state === "confirmed" && slot.bookingId ? <div className="manager-row__actions">
+                    {reschedulingBooking === slot.bookingId ? <>
+                      <label className="visually-hidden" htmlFor={`reschedule-${slot.bookingId}`}>New appointment time</label>
+                      <select id={`reschedule-${slot.bookingId}`} onChange={(event) => onRescheduleChoice(slot.bookingId!, event.target.value)} value={rescheduleSlot}>
+                        <option value="">Select time</option>
+                        {service.slots.filter((candidate) => candidate.state === "available" && candidate.date === slot.date)
+                          .map((candidate) => <option key={candidate.slotId} value={candidate.slotId}>{candidate.time}</option>)}
+                      </select>
+                      <button className="booking-button" disabled={!rescheduleSlot || busyBooking === slot.bookingId} onClick={() => onBookingAction(slot.bookingId!, "reschedule", rescheduleSlot)} type="button">Confirm move</button>
+                      <button className="booking-button booking-button--secondary" onClick={() => onRescheduleChoice("")} type="button">Back</button>
+                    </> : cancellingBooking === slot.bookingId ? <>
+                      <span>Cancel this appointment?</span>
+                      <button className="booking-button" disabled={busyBooking === slot.bookingId} onClick={() => onBookingAction(slot.bookingId!, "cancel")} type="button">Confirm cancel</button>
+                      <button className="booking-button booking-button--secondary" onClick={() => onCancelChoice("")} type="button">Keep</button>
+                    </> : <>
+                      <button className="booking-button" onClick={() => onRescheduleChoice(slot.bookingId!)} type="button">Reschedule</button>
+                      <button className="booking-button booking-button--secondary" onClick={() => onCancelChoice(slot.bookingId!)} type="button">Cancel</button>
+                    </>}
                   </div> : null}</td> : null}
                 </tr>;
               })}</tbody>
@@ -160,6 +196,10 @@ export function AppointmentBoard({ profile, initialBoard }: {
   const [editMode, setEditMode] = useState(false);
   const [copiedKey, setCopiedKey] = useState("");
   const [busyRequest, setBusyRequest] = useState("");
+  const [busyBooking, setBusyBooking] = useState("");
+  const [cancellingBooking, setCancellingBooking] = useState("");
+  const [reschedulingBooking, setReschedulingBooking] = useState("");
+  const [rescheduleSlot, setRescheduleSlot] = useState("");
   const [notice, setNotice] = useState("");
   const endpoint = `/api/v1/appointment-board/${encodeURIComponent(initialBoard.community.code)}/manager`;
 
@@ -212,6 +252,45 @@ export function AppointmentBoard({ profile, initialBoard }: {
     }
   }
 
+  function cancelChoice(bookingId: string) {
+    setCancellingBooking(bookingId);
+    setReschedulingBooking("");
+    setRescheduleSlot("");
+  }
+
+  function rescheduleChoice(bookingId: string, slotId = "") {
+    setReschedulingBooking(bookingId);
+    setRescheduleSlot(slotId);
+    setCancellingBooking("");
+  }
+
+  async function bookingAction(bookingId: string, action: "reschedule" | "cancel", slotId?: string) {
+    setBusyBooking(bookingId);
+    setNotice("");
+    try {
+      const response = await fetch(`${endpoint.replace(/\/manager$/, "")}/bookings/${encodeURIComponent(bookingId)}`, {
+        method: action === "cancel" ? "DELETE" : "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": csrfToken,
+          "idempotency-key": crypto.randomUUID(),
+        },
+        ...(action === "reschedule" ? { body: JSON.stringify({ slotId }) } : {}),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "The appointment could not be changed.");
+      setNotice(action === "cancel" ? "Appointment cancelled." : "Appointment rescheduled.");
+      setCancellingBooking("");
+      setReschedulingBooking("");
+      setRescheduleSlot("");
+      await loadManagerBoard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The appointment could not be changed.");
+    } finally {
+      setBusyBooking("");
+    }
+  }
+
   const communityTerm = terms[profile].community;
   return (
     <article className="appointment-board">
@@ -226,15 +305,20 @@ export function AppointmentBoard({ profile, initialBoard }: {
       </header>
       {notice ? <p aria-live="polite" className="booking-notice">{notice}</p> : null}
       {managerBoard
-        ? <ManagerPanels board={managerBoard} busyRequest={busyRequest} copiedKey={copiedKey} editMode={editMode} onAction={approvalAction} onCopy={copy} />
+        ? <ManagerPanels board={managerBoard} busyBooking={busyBooking} busyRequest={busyRequest}
+          cancellingBooking={cancellingBooking} copiedKey={copiedKey} editMode={editMode}
+          onApprovalAction={approvalAction} onBookingAction={bookingAction} onCancelChoice={cancelChoice}
+          onCopy={copy} onRescheduleChoice={rescheduleChoice} rescheduleSlot={rescheduleSlot}
+          reschedulingBooking={reschedulingBooking} />
         : <PublicPanels services={initialBoard.services} />}
       {managerBoard ? <details className="manager-activity">
         <summary>Recent manager activity</summary>
         {managerBoard.activity.length ? <ol>
           {managerBoard.activity.map((event, index) => <li key={`${event.createdAt}:${index}`}>
-            <strong>{event.action}</strong> · {event.playerName}
-            {event.managerDisplayName ? ` · ${event.managerDisplayName}` : ""}
+            <strong>{activityLabel(event.action)}</strong> · {event.playerName}
+            {event.managerDisplayName ? ` by ${event.managerDisplayName}` : ""}
             {event.previousState ? ` · ${event.previousState} → ${event.resultingState}` : ` · ${event.resultingState}`}
+            {event.previousTime ? ` · ${event.previousTime}${event.newTime ? ` → ${event.newTime}` : ""}` : ""}
             <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time>
           </li>)}
         </ol> : <p>No activity yet.</p>}

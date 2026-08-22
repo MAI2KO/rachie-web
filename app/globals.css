@@ -394,8 +394,9 @@ button:focus-visible,
 .copy-field strong { font-weight: 750; }
 .copy-field--copied { border-color: #15803d; outline: 3px solid color-mix(in srgb, #15803d 28%, transparent); }
 .copy-field--copied small { color: #166534; font-weight: 800; }
-.manager-row__actions { display: flex; gap: 0.35rem; }
+.manager-row__actions { display: flex; align-items: center; gap: 0.35rem; }
 .manager-row__actions .booking-button { min-height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+.manager-row__actions select { min-height: 2rem; border: 1px solid var(--brand-border); border-radius: 0.45rem; background: var(--brand-surface); color: var(--brand-text); }
 .manager-activity { margin-top: 1.5rem; padding: 1rem; border: 1px solid var(--brand-border); background: var(--brand-surface); }
 .manager-activity summary { cursor: pointer; font-weight: 800; }
 .manager-activity ol { display: grid; gap: 0.75rem; padding-left: 1.25rem; }

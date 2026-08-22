@@ -13,12 +13,19 @@ import { verifyAuthenticatedMutationCsrf } from "@/server/auth/mutation-csrf";
 import { createServerRateLimiter } from "@/server/rate-limit/limiter";
 import { RATE_LIMIT_POLICIES } from "@/server/rate-limit/policies.mjs";
 import { resolveNativeBookingRequestContext } from "@/server/native-booking/request-context";
+import { createNativeBookingRepository } from "@/server/native-booking/repository";
+import {
+  BookingMutationError,
+  BookingMutationIdempotencyConflictError,
+} from "@/server/native-booking/booking-mutation-service-core.mjs";
+import { InvalidIdempotencyKeyError } from "@/server/native-booking/registration-validation.mjs";
 import {
   createCommunityManagerAuthorizer,
   ManagerAccessDeniedError,
   ManagerVerificationUnavailableError,
   validateCommunityCode,
 } from "./manager-authorization-core.mjs";
+import { createManagerBookingMutationService } from "./manager-booking-mutation-core.mjs";
 
 const headers = { "Cache-Control": "no-store" };
 const json = (body: unknown, status = 200, extraHeaders: HeadersInit = {}) =>
@@ -66,6 +73,17 @@ function managerError(error: unknown) {
   if (error instanceof BookingApprovalTransitionError) {
     const status = error.code === "request_not_found" ? 404
       : ["invalid_transition", "slot_unavailable"].includes(error.code) ? 409 : 403;
+    return json({ ok: false, error: error.message, code: error.code }, status);
+  }
+  if (error instanceof InvalidIdempotencyKeyError) {
+    return json({ ok: false, error: error.message, code: "idempotency_key_invalid" }, 400);
+  }
+  if (error instanceof BookingMutationIdempotencyConflictError) {
+    return json({ ok: false, error: error.message, code: error.code }, 409);
+  }
+  if (error instanceof BookingMutationError) {
+    const status = error.code === "booking_not_found" ? 404
+      : error.code === "invalid_slot" ? 400 : 409;
     return json({ ok: false, error: error.message, code: error.code }, status);
   }
   return json({ ok: false, error: "Appointment management is unavailable.", code: "unavailable" }, 503);
@@ -148,4 +166,59 @@ export async function handleManagerApprovalMutation(
   } catch (error) {
     return managerError(error);
   }
+}
+
+export async function handleManagerBookingMutation(
+  request: Request,
+  communityCode: string,
+  bookingId: string,
+  action: "reschedule" | "cancel",
+) {
+  try {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bookingId)) {
+      return json({ ok: false, error: "Booking was not found.", code: "booking_not_found" }, 404);
+    }
+    const scope = await managerScope(request, communityCode);
+    if (!verifyAuthenticatedMutationCsrf(request, scope.discordSession)) {
+      return json({ ok: false, error: "The request could not be verified.", code: "csrf_invalid" }, 403);
+    }
+    const limiter = createServerRateLimiter(scope.discordSession.gameProfile);
+    if (!limiter) throw new Error("Rate limiting is unavailable.");
+    const limited = await limiter.consume(
+      RATE_LIMIT_POLICIES.managerBookingMutation,
+      `${scope.discordSession.session.tokenHash}:${scope.managerContext.authorizedCommunityId}`,
+    );
+    if (!limited.allowed) {
+      return json(
+        { ok: false, error: "Too many manager actions.", code: "rate_limited" },
+        429,
+        { "Retry-After": String(limited.retryAfterSeconds) },
+      );
+    }
+    const idempotencyKey = request.headers.get("idempotency-key");
+    const repository = createNativeBookingRepository(scope.discordSession.gameProfile);
+    if (!repository) throw new Error("Appointment management database is unavailable.");
+    const service = createManagerBookingMutationService({
+      gameProfile: scope.discordSession.gameProfile,
+      communityId: scope.managerContext.authorizedCommunityId,
+      managerContext: scope.managerContext,
+      repository,
+    });
+    const result = action === "cancel"
+      ? await service.cancel(bookingId, idempotencyKey)
+      : await service.reschedule(bookingId, await managerRescheduleSlot(request), idempotencyKey);
+    return json(result.body, result.status, result.replayed ? { "Idempotency-Replayed": "true" } : {});
+  } catch (error) {
+    return managerError(error);
+  }
+}
+
+async function managerRescheduleSlot(request: Request) {
+  let body: unknown;
+  try { body = await request.json(); } catch { body = null; }
+  if (!body || typeof body !== "object" || Array.isArray(body)
+      || Object.keys(body).some((key) => key !== "slotId")) {
+    throw new BookingMutationError("invalid_slot", "Invalid appointment slot.");
+  }
+  return (body as { slotId?: unknown }).slotId;
 }

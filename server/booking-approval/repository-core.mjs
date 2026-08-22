@@ -497,14 +497,33 @@ class ProfileScopedApprovalSession {
 
   async listRecentApprovalActivity(communityId, limit) {
     const result = await this.client.query(
-      `SELECT event.action,request.in_game_name_snapshot AS player_name,
-              event.acting_discord_display_name,event.previous_state,
-              event.resulting_state,event.created_at
-       FROM booking_approval_events AS event
-       JOIN booking_approval_requests AS request
-         ON request.game_profile=event.game_profile AND request.id=event.request_id
-       WHERE event.game_profile=$1 AND event.community_id=$2
-       ORDER BY event.created_at DESC,event.id DESC
+      `SELECT activity.* FROM (
+         SELECT event.id,event.action,request.in_game_name_snapshot AS player_name,
+                event.acting_discord_display_name,event.previous_state,
+                event.resulting_state,NULL::text AS previous_time,NULL::text AS new_time,
+                event.created_at
+         FROM booking_approval_events AS event
+         JOIN booking_approval_requests AS request
+           ON request.game_profile=event.game_profile AND request.id=event.request_id
+         WHERE event.game_profile=$1 AND event.community_id=$2
+         UNION ALL
+         SELECT event.id,event.event_type AS action,
+                booking.in_game_name_snapshot AS player_name,
+                event.after_data->>'actorDisplayName' AS acting_discord_display_name,
+                event.before_data->>'status' AS previous_state,
+                CASE event.event_type
+                  WHEN 'manager_booking_rescheduled' THEN 'rescheduled'
+                  ELSE 'cancelled'
+                END AS resulting_state,
+                event.before_data->>'displayTime' AS previous_time,
+                event.after_data->>'displayTime' AS new_time,event.created_at
+         FROM booking_change_events AS event
+         JOIN minister_bookings AS booking
+           ON booking.game_profile=event.game_profile AND booking.id=event.aggregate_id
+         WHERE event.game_profile=$1 AND event.community_id=$2
+           AND event.event_type IN ('manager_booking_rescheduled','manager_booking_cancelled')
+       ) AS activity
+       ORDER BY activity.created_at DESC,activity.id DESC
        LIMIT $3`,
       [this.gameProfile, communityId, limit],
     );

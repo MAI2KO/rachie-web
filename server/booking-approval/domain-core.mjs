@@ -151,6 +151,7 @@ export function guestBookingPage(link, rows, gameProfile) {
     }
     service.slots.push(Object.freeze({
       slotId: row.slot_id,
+      date: approvalDateOnly(row.booking_date),
       time: row.display_time_label,
       state: row.is_confirmed || row.has_active_hold ? "unavailable" : "available",
     }));
@@ -238,6 +239,8 @@ export function managerAppointmentBoard(
       managerDisplayName: event.acting_discord_display_name,
       previousState: event.previous_state,
       resultingState: event.resulting_state,
+      ...(event.previous_time ? { previousTime: event.previous_time } : {}),
+      ...(event.new_time ? { newTime: event.new_time } : {}),
       createdAt: event.created_at,
     }))),
   });

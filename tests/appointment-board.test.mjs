@@ -253,6 +253,14 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(source, /Copy Mode/);
   assert.match(source, /Edit appointments/);
   assert.match(source, /editMode \? <td>\{slot\.state === "pending"/);
+  assert.match(source, /slot\.state === "confirmed" && slot\.bookingId/);
+  assert.match(source, />Reschedule<\/button>/);
+  assert.match(source, />Cancel<\/button>/);
+  assert.match(source, />Confirm cancel<\/button>/);
+  assert.match(source, />Confirm move<\/button>/);
+  assert.match(source, /candidate\.state === "available" && candidate\.date === slot\.date/);
+  assert.match(source, /method: action === "cancel" \? "DELETE" : "PATCH"/);
+  assert.match(source, /"idempotency-key": crypto\.randomUUID\(\)/);
   assert.match(css, /overflow-x: auto/);
   assert.match(css, /scroll-snap-type: inline mandatory/);
   assert.match(css, /grid-template-columns: repeat\(3/);

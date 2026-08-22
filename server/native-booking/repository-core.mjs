@@ -183,6 +183,20 @@ class ProfileScopedBookingSession {
     return result.rows[0] ?? null;
   }
 
+  async lockCommunityBooking(communityId, bookingId) {
+    const result = await this.client.query(
+      `SELECT booking.*, service.display_label AS service_label
+       FROM minister_bookings AS booking
+       JOIN minister_services AS service
+         ON service.game_profile=booking.game_profile
+        AND service.service_code=booking.service_code
+       WHERE booking.game_profile=$1 AND booking.community_id=$2 AND booking.id=$3
+       FOR UPDATE OF booking`,
+      [this.gameProfile, communityId, bookingId],
+    );
+    return result.rows[0] ?? null;
+  }
+
   async lockBookingMutation(bookingId) {
     await this.client.query(
       "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -241,6 +255,47 @@ class ProfileScopedBookingSession {
     return result.rows[0] ?? null;
   }
 
+  async replaceBookingAsManager(input) {
+    const result = await this.client.query(
+      `WITH replaced AS (
+         UPDATE minister_bookings
+         SET status='replaced', cancellation_reason='rescheduled',
+             cancelled_at=now(), cancelled_by_actor_type='admin',
+             cancelled_by_actor_id=$10, version=version+1, updated_at=now()
+         WHERE game_profile=$1 AND id=$2 AND community_id=$3 AND status='confirmed'
+         RETURNING *
+       )
+       INSERT INTO minister_bookings
+         (game_profile,id,community_id,window_id,service_date_id,service_code,
+          booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
+          in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
+          source,actor_type,actor_id,idempotency_key,correlation_id,
+          rescheduled_from_booking_id,approval_request_id)
+       SELECT $1,$4,$3,replaced.window_id,$5,replaced.service_code,$6,$7,
+              replaced.participant_id,replaced.discord_user_id,replaced.player_id_snapshot,
+              replaced.in_game_name_snapshot,replaced.alliance_snapshot,$8,
+              'website','admin',$10,$9,$11,$2,replaced.approval_request_id
+       FROM replaced
+       RETURNING id,service_code,booking_date,display_time_label_snapshot,
+                 in_game_name_snapshot,alliance_snapshot,status,discord_user_id`,
+      [this.gameProfile, input.oldBookingId, input.communityId, input.newBookingId,
+       input.serviceDateId, input.bookingDate, input.slotId, input.displayTime,
+       input.idempotencyKey, input.actorId, input.correlationId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async copyBookingRequirementAnswers(sourceBookingId, targetBookingId) {
+    await this.client.query(
+      `INSERT INTO booking_requirement_answers
+         (game_profile,booking_id,requirement_code,raw_value,numeric_value,unit,display_label)
+       SELECT game_profile,$3,requirement_code,raw_value,numeric_value,unit,display_label
+       FROM booking_requirement_answers
+       WHERE game_profile=$1 AND booking_id=$2`,
+      [this.gameProfile, sourceBookingId, targetBookingId],
+    );
+  }
+
   async cancelOwnedBooking({ communityId, participantId, bookingId, actorId }) {
     const result = await this.client.query(
       `UPDATE minister_bookings
@@ -251,6 +306,19 @@ class ProfileScopedBookingSession {
          AND id=$4 AND status='confirmed'
        RETURNING id,service_code,booking_date,display_time_label_snapshot,status`,
       [this.gameProfile, communityId, participantId, bookingId, actorId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async cancelBookingAsManager({ communityId, bookingId, actorId }) {
+    const result = await this.client.query(
+      `UPDATE minister_bookings
+       SET status='cancelled', cancellation_reason='cancelled_by_manager',
+           cancelled_at=now(), cancelled_by_actor_type='admin',
+           cancelled_by_actor_id=$4, version=version+1, updated_at=now()
+       WHERE game_profile=$1 AND community_id=$2 AND id=$3 AND status='confirmed'
+       RETURNING id,service_code,booking_date,display_time_label_snapshot,status,discord_user_id`,
+      [this.gameProfile, communityId, bookingId, actorId],
     );
     return result.rows[0] ?? null;
   }
