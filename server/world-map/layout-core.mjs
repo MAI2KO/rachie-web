@@ -4,6 +4,10 @@ export const WORLD_MAP_COLUMN_GAP = 72;
 export const WORLD_MAP_ROW_GAP = 64;
 export const WORLD_MAP_MIN_ZOOM = 0.24;
 export const WORLD_MAP_MAX_ZOOM = 2.4;
+export const WORLD_MAP_DRAG_THRESHOLD = 5;
+export const WORLD_MAP_PAN_MARGIN_RATIO = 0.16;
+export const WORLD_MAP_MIN_EDGE_MARGIN = 48;
+export const WORLD_MAP_MAX_EDGE_MARGIN = 160;
 
 function compareCommunityCodes(left, right) {
   const leftNumeric = /^\d+$/.test(left.code);
@@ -81,17 +85,61 @@ export function initialWorldMapCamera(bounds, viewport) {
   };
 }
 
+function axisPanBounds(contentMin, contentMax, viewportPixels, zoom) {
+  const visibleWorld = viewportPixels / zoom;
+  const edgeMarginPixels = Math.min(
+    WORLD_MAP_MAX_EDGE_MARGIN,
+    Math.max(WORLD_MAP_MIN_EDGE_MARGIN, viewportPixels * WORLD_MAP_PAN_MARGIN_RATIO),
+  );
+  const edgeMarginWorld = edgeMarginPixels / zoom;
+  const largeMapMin = contentMin + visibleWorld / 2 - edgeMarginWorld;
+  const largeMapMax = contentMax - visibleWorld / 2 + edgeMarginWorld;
+  if (largeMapMin <= largeMapMax) {
+    return { min: largeMapMin, max: largeMapMax };
+  }
+
+  const recoverablePixels = Math.min(
+    edgeMarginPixels,
+    Math.max(WORLD_MAP_MIN_EDGE_MARGIN, viewportPixels * 0.4),
+  );
+  const recoverableWorld = recoverablePixels / zoom;
+  return {
+    min: contentMin - visibleWorld / 2 + recoverableWorld,
+    max: contentMax + visibleWorld / 2 - recoverableWorld,
+  };
+}
+
+export function worldMapPanBounds(bounds, viewport, zoom) {
+  if (!bounds.width || !bounds.height || !viewport.width || !viewport.height) {
+    return { minX: -Infinity, maxX: Infinity, minY: -Infinity, maxY: Infinity };
+  }
+  const x = axisPanBounds(bounds.minX, bounds.maxX, viewport.width, zoom);
+  const y = axisPanBounds(bounds.minY, bounds.maxY, viewport.height, zoom);
+  return { minX: x.min, maxX: x.max, minY: y.min, maxY: y.max };
+}
+
 export function clampWorldMapCamera(camera, bounds, viewport) {
   if (!bounds.width || !bounds.height) return camera;
-  const visibleWidth = viewport.width / camera.zoom;
-  const visibleHeight = viewport.height / camera.zoom;
-  const x = visibleWidth >= bounds.width + 160
-    ? (bounds.minX + bounds.maxX) / 2
-    : Math.min(bounds.maxX, Math.max(bounds.minX, camera.x));
-  const y = visibleHeight >= bounds.height + 160
-    ? (bounds.minY + bounds.maxY) / 2
-    : Math.min(bounds.maxY, Math.max(bounds.minY, camera.y));
+  const panBounds = worldMapPanBounds(bounds, viewport, camera.zoom);
+  const x = Math.min(panBounds.maxX, Math.max(panBounds.minX, camera.x));
+  const y = Math.min(panBounds.maxY, Math.max(panBounds.minY, camera.y));
   return { ...camera, x, y };
+}
+
+export function pointerMovedBeyondDragThreshold(origin, current) {
+  return Math.hypot(current.x - origin.x, current.y - origin.y) > WORLD_MAP_DRAG_THRESHOLD;
+}
+
+export function panWorldMapCamera(camera, previous, current, bounds, viewport) {
+  return clampWorldMapCamera({
+    ...camera,
+    x: camera.x - (current.x - previous.x) / camera.zoom,
+    y: camera.y - (current.y - previous.y) / camera.zoom,
+  }, bounds, viewport);
+}
+
+export function pointerNavigationTarget({ wasSinglePointer, dragged, node }) {
+  return wasSinglePointer && !dragged && node ? node.href : null;
 }
 
 export function screenToWorld(point, camera, viewport) {

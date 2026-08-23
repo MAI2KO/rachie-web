@@ -21,6 +21,9 @@ import {
   findWorldMapCommunity,
   hitTestWorldMap,
   initialWorldMapCamera,
+  panWorldMapCamera,
+  pointerMovedBeyondDragThreshold,
+  pointerNavigationTarget,
   screenToWorld,
   WORLD_MAP_NODE_HEIGHT,
   WORLD_MAP_NODE_WIDTH,
@@ -230,12 +233,16 @@ export function WorldMap({
     const dx = next.x - previous.x;
     const dy = next.y - previous.y;
     const origin = pointerOriginsRef.current.get(event.pointerId) ?? previous;
-    if (Math.hypot(next.x - origin.x, next.y - origin.y) > 5) draggedRef.current = true;
-    updateCamera((current) => ({
-      ...current,
-      x: current.x - dx / current.zoom,
-      y: current.y - dy / current.zoom,
-    }));
+    if (pointerMovedBeyondDragThreshold(origin, next)) draggedRef.current = true;
+    if (dx || dy) {
+      setCamera((current) => panWorldMapCamera(
+        current,
+        previous,
+        next,
+        layout.bounds,
+        viewport,
+      ));
+    }
   }
 
   function finishPointer(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -245,10 +252,13 @@ export function WorldMap({
     pointerOriginsRef.current.delete(event.pointerId);
     if (pointersRef.current.size < 2) gestureRef.current = null;
     if (pointersRef.current.size === 0) setDragging(false);
-    if (wasSinglePointer && !draggedRef.current) {
-      const node = hitTestWorldMap(layout.nodes, point, cameraRef.current, viewport) as LayoutNode | null;
-      if (node) router.push(node.href);
-    }
+    const node = hitTestWorldMap(layout.nodes, point, cameraRef.current, viewport) as LayoutNode | null;
+    const target = pointerNavigationTarget({
+      wasSinglePointer,
+      dragged: draggedRef.current,
+      node,
+    });
+    if (target) router.push(target);
   }
 
   function cancelPointer(event: ReactPointerEvent<HTMLCanvasElement>) {

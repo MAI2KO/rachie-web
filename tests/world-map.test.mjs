@@ -15,6 +15,11 @@ import {
   findWorldMapCommunity,
   hitTestWorldMap,
   initialWorldMapCamera,
+  panWorldMapCamera,
+  pointerMovedBeyondDragThreshold,
+  pointerNavigationTarget,
+  screenToWorld,
+  worldMapPanBounds,
   WORLD_MAP_MAX_ZOOM,
   WORLD_MAP_MIN_ZOOM,
 } from "../server/world-map/layout-core.mjs";
@@ -111,19 +116,83 @@ test("deterministic compact grid and neighbour connections scale to a large set"
   assert.deepEqual({ row: first.nodes[50].row, column: first.nodes[50].column }, { row: 1, column: 0 });
 });
 
-test("one and several communities receive intentional fitted cameras with bounded pan and zoom", () => {
+test("one-node initial fit stays centred while bounded empty-space pan remains visible", () => {
   const one = buildWorldMapLayout([{ code: "9999", displayName: "Test", href: "/state/9999" }]);
-  const oneCamera = initialWorldMapCamera(one.bounds, { width: 1000, height: 600 });
+  const viewport = { width: 1000, height: 600 };
+  const oneCamera = initialWorldMapCamera(one.bounds, viewport);
   assert.equal(oneCamera.zoom, 1);
   assert.deepEqual({ x: oneCamera.x, y: oneCamera.y }, { x: 0, y: 0 });
+
+  const panned = panWorldMapCamera(oneCamera, { x: 500, y: 300 }, { x: 800, y: 500 },
+    one.bounds, viewport);
+  assert.deepEqual(panned, { x: -300, y: -200, zoom: 1 });
+  const bounded = clampWorldMapCamera({ x: 99_999, y: -99_999, zoom: 1 }, one.bounds, viewport);
+  assert.deepEqual(bounded, { x: 428, y: -250, zoom: 1 });
+  const visibleEdge = screenToWorld({ x: 160, y: 504 }, bounded, viewport);
+  assert.equal(visibleEdge.x, one.bounds.maxX);
+  assert.equal(visibleEdge.y, one.bounds.minY);
+});
+
+test("small maps pan usefully while large maps retain a modest edge margin", () => {
+  const small = buildWorldMapLayout(Array.from({ length: 4 }, (_, index) => ({
+    code: String(1000 + index), displayName: `Small ${index}`, href: `/state/${1000 + index}`,
+  })));
+  const viewport = { width: 1000, height: 600 };
+  const initial = initialWorldMapCamera(small.bounds, viewport);
+  const panned = panWorldMapCamera(initial, { x: 500, y: 300 }, { x: 700, y: 400 },
+    small.bounds, viewport);
+  assert.notEqual(panned.x, initial.x);
+  assert.notEqual(panned.y, initial.y);
+
+  const large = buildWorldMapLayout(Array.from({ length: 2500 }, (_, index) => ({
+    code: String(index + 1), displayName: `Large ${index}`, href: `/state/${index + 1}`,
+  })));
+  const bounds = worldMapPanBounds(large.bounds, viewport, 1);
+  assert.ok(bounds.minX > large.bounds.minX);
+  assert.ok(bounds.maxX < large.bounds.maxX);
+  const clamped = clampWorldMapCamera({ x: -99_999, y: 99_999, zoom: 1 }, large.bounds, viewport);
+  assert.equal(clamped.x, bounds.minX);
+  assert.equal(clamped.y, bounds.maxY);
+});
+
+test("zoom recalculates pan bounds while fit and zoom limits remain stable", () => {
+  const one = buildWorldMapLayout([{ code: "9999", displayName: "Test", href: "/state/9999" }]);
+  const viewport = { width: 1000, height: 600 };
+  const zoomedOut = worldMapPanBounds(one.bounds, viewport, 0.5);
+  const zoomedIn = worldMapPanBounds(one.bounds, viewport, 2);
+  assert.ok(zoomedOut.minX < zoomedIn.minX);
+  assert.ok(zoomedOut.maxX > zoomedIn.maxX);
+  assert.equal(clampWorldMapCamera({ x: 9999, y: 0, zoom: 2 }, one.bounds, viewport).x,
+    zoomedIn.maxX);
+
   const several = buildWorldMapLayout(publicWorldMapCommunities("wos", rows));
   const fitted = initialWorldMapCamera(several.bounds, { width: 420, height: 300 });
+  assert.equal(fitted.x, (several.bounds.minX + several.bounds.maxX) / 2);
+  assert.equal(fitted.y, (several.bounds.minY + several.bounds.maxY) / 2);
   assert.ok(fitted.zoom >= WORLD_MAP_MIN_ZOOM && fitted.zoom <= 1);
   assert.equal(clampZoom(0.001), WORLD_MAP_MIN_ZOOM);
   assert.equal(clampZoom(99), WORLD_MAP_MAX_ZOOM);
-  const clamped = clampWorldMapCamera({ x: -99999, y: 99999, zoom: 1 }, several.bounds,
-    { width: 200, height: 150 });
-  assert.ok(clamped.x >= several.bounds.minX && clamped.y <= several.bounds.maxY);
+});
+
+test("pointer down/move/up distinguishes drag from node click navigation", () => {
+  const one = buildWorldMapLayout([{ code: "9999", displayName: "Test", href: "/state/9999" }]);
+  const viewport = { width: 1000, height: 600 };
+  const camera = initialWorldMapCamera(one.bounds, viewport);
+  const pointerDown = { x: 500, y: 300 };
+  const pointerMove = { x: 530, y: 320 };
+  const dragged = pointerMovedBeyondDragThreshold(pointerDown, pointerMove);
+  const movedCamera = panWorldMapCamera(camera, pointerDown, pointerMove, one.bounds, viewport);
+  assert.equal(dragged, true);
+  assert.notDeepEqual(movedCamera, camera);
+  assert.equal(pointerNavigationTarget({ wasSinglePointer: true, dragged, node: one.nodes[0] }), null);
+
+  const tapEnd = { x: 503, y: 302 };
+  const tapDragged = pointerMovedBeyondDragThreshold(pointerDown, tapEnd);
+  const tappedNode = hitTestWorldMap(one.nodes, tapEnd, camera, viewport);
+  assert.equal(tapDragged, false);
+  assert.equal(pointerNavigationTarget({ wasSinglePointer: true, dragged: tapDragged, node: tappedNode }),
+    "/state/9999");
+  assert.equal(pointerNavigationTarget({ wasSinglePointer: false, dragged: false, node: tappedNode }), null);
 });
 
 test("State and Kingdom search locates exact registered codes and node hit testing opens public boards", () => {
@@ -144,7 +213,11 @@ test("world-map UI provides profile terminology, empty states, Pointer Events, s
   assert.match(source, /profile === "kingshot" \? "Kingdom" : "State"/);
   assert.match(source, /No \{noun\}s are registered yet\./);
   assert.match(source, /onPointerDown=\{onPointerDown\}/);
+  assert.match(source, /onPointerMove=\{onPointerMove\}/);
+  assert.match(source, /onPointerUp=\{finishPointer\}/);
   assert.match(source, /pointersRef\.current\.size === 2/);
+  assert.match(source, /pointerMovedBeyondDragThreshold\(origin, next\)/);
+  assert.match(source, /pointerNavigationTarget/);
   assert.match(source, /role="search"/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /Browse all registered \{noun\}s/);
