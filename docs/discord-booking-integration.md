@@ -1,5 +1,11 @@
 # Discord booking integration
 
+## Player appointment times
+
+Player confirmation, manual approval, reschedule, cancellation, and 30-minute reminder work items include the canonical appointment instant derived from the booked `appointment_slots` row. Reschedules include both the replaced and replacement instants. PostgreSQL `timestamptz` remains the source of truth; no display conversion changes appointment or reminder scheduling.
+
+The bot presents the familiar UTC date/time and a Discord-native `<t:UNIX:F>` value. Discord renders that tag in each recipient's configured locale and timezone, including daylight-saving changes. The platform therefore does not infer a timezone, store fixed offsets, or require a player timezone preference. Invalid or absent legacy timing data produces a bounded `Your time: unavailable` line rather than malformed Discord markup.
+
 PostgreSQL and the website booking domain remain authoritative. The website decides which Discord notification exists and stores durable work; each profile-specific bot only discovers current managers, delivers or edits Discord DMs, handles button interactions, and reports bounded outcomes over HTTPS. The bot receives no website database credentials and contains no duplicate approval SQL.
 
 ## Trust boundary and authentication

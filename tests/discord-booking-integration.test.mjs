@@ -233,6 +233,8 @@ test("durable Discord work is profile-isolated, deduplicated, retryable and remi
         .find(item => item.type === "player_rescheduled");
       assert.equal(reschedule.previousTime, "14:30");
       assert.equal(reschedule.time, "15:00");
+      assert.equal(new Date(reschedule.previousAppointmentAt).toISOString(), "2030-08-21T14:30:00.000Z");
+      assert.equal(new Date(reschedule.appointmentAt).toISOString(), "2030-08-21T15:00:00.000Z");
       let reminders = await withProfile(pool, "wos", client => client.query(
         "SELECT booking_id,status FROM booking_discord_notifications WHERE notification_type='appointment_reminder' ORDER BY created_at"));
       assert.deepEqual(reminders.rows.map(row => row.status), ["superseded", "pending"]);
@@ -246,6 +248,7 @@ test("durable Discord work is profile-isolated, deduplicated, retryable and remi
       const cancellation = (await repository.withTransaction(session => session.claim(10)))
         .find(item => item.type === "player_cancelled");
       assert.equal(cancellation.time, "15:00");
+      assert.equal(new Date(cancellation.appointmentAt).toISOString(), "2030-08-21T15:00:00.000Z");
       reminders = await withProfile(pool, "wos", client => client.query(
         "SELECT status FROM booking_discord_notifications WHERE notification_type='appointment_reminder' ORDER BY created_at"));
       assert.deepEqual(reminders.rows.map(row => row.status), ["superseded", "superseded"]);

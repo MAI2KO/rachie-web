@@ -198,14 +198,20 @@ async function workPayload(client, profile, row) {
     `SELECT booking.id AS "bookingId",booking.in_game_name_snapshot AS "playerName",
             booking.alliance_snapshot AS alliance,booking.booking_date AS date,
             booking.display_time_label_snapshot AS time,booking.status,
+            COALESCE(slot.starts_at,
+              (slot.booking_date + slot.local_start_time) AT TIME ZONE slot.time_zone) AS "appointmentAt",
             service.display_label AS "serviceLabel",community.location_code AS "communityCode",
             community.display_name AS "communityName",request.decided_by_display_name AS "decidedByDisplayName",
-            old.booking_date AS "previousDate",old.display_time_label_snapshot AS "previousTime"
+            old.booking_date AS "previousDate",old.display_time_label_snapshot AS "previousTime",
+            COALESCE(old_slot.starts_at,
+              (old_slot.booking_date + old_slot.local_start_time) AT TIME ZONE old_slot.time_zone) AS "previousAppointmentAt"
        FROM minister_bookings AS booking
        JOIN booking_communities AS community ON community.game_profile=booking.game_profile AND community.id=booking.community_id
        JOIN minister_services AS service ON service.game_profile=booking.game_profile AND service.service_code=booking.service_code
+       JOIN appointment_slots AS slot ON slot.game_profile=booking.game_profile AND slot.id=booking.slot_id
        LEFT JOIN booking_approval_requests AS request ON request.game_profile=booking.game_profile AND request.confirmed_booking_id=booking.id
        LEFT JOIN minister_bookings AS old ON old.game_profile=booking.game_profile AND old.id=$3
+       LEFT JOIN appointment_slots AS old_slot ON old_slot.game_profile=old.game_profile AND old_slot.id=old.slot_id
       WHERE booking.game_profile=$1 AND booking.id=$2`, [profile, row.booking_id, row.related_booking_id],
   );
   return { ...base, ...result.rows[0] };
