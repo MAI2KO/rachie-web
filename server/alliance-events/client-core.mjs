@@ -20,6 +20,19 @@ export function publicAllianceEventsModel(payload, expectedProfile, expectedCode
       || payload.alliances.length > 1000) {
     throw new AllianceEventsUnavailableError();
   }
+  const guildModel = publicAllianceEventsGuildModel(payload, expectedProfile);
+  return Object.freeze({
+    profile: expectedProfile,
+    communityCode: expectedCode,
+    alliances: guildModel.alliances,
+  });
+}
+
+export function publicAllianceEventsGuildModel(payload, expectedProfile) {
+  if (!payload || payload.ok !== true || payload.profile !== expectedProfile
+      || !Array.isArray(payload.alliances) || payload.alliances.length > 1000) {
+    throw new AllianceEventsUnavailableError();
+  }
   const alliances = payload.alliances.map((rawAlliance) => {
     const name = boundedText(rawAlliance?.name, 100);
     const abbreviation = rawAlliance?.abbreviation === null
@@ -51,42 +64,55 @@ export function publicAllianceEventsModel(payload, expectedProfile, expectedCode
   });
   return Object.freeze({
     profile: expectedProfile,
-    communityCode: expectedCode,
     alliances: Object.freeze(alliances),
   });
+}
+
+function compareAlliance(left, right) {
+  return left.name.localeCompare(right.name, "en", { sensitivity: "base" });
 }
 
 export function createAllianceEventsClient({ config, fetchImplementation = fetch,
   now = Date.now, createNonce = undefined, cache = new Map(), cacheTtlMs = 30_000 }) {
   if (!config || !PROFILE_SET.has(config.profile)) throw new AllianceEventsUnavailableError();
   return Object.freeze({
-    async read(communityCode) {
+    async read(communityCode, guildIds) {
+      if (!Array.isArray(guildIds) || guildIds.length > 1000
+          || guildIds.some((guildId) => !/^\d{15,22}$/.test(String(guildId)))) {
+        throw new AllianceEventsUnavailableError();
+      }
       const cacheKey = `${config.profile}:${communityCode}`;
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > now()) return cached.value;
-      const path = `/internal/v1/public-alliance-events/${encodeURIComponent(communityCode)}`;
-      let response;
+      let models;
       try {
-        response = await fetchImplementation(`${config.baseUrl}${path}`, {
-          method: "GET",
-          headers: allianceEventsRequestHeaders({
-            secret: config.secret,
-            profile: config.profile,
+        models = await Promise.all(guildIds.map(async (guildId) => {
+          const path = `/internal/v1/public-alliance-events/guild/${guildId}`;
+          const response = await fetchImplementation(`${config.baseUrl}${path}`, {
             method: "GET",
-            path,
-            now,
-            ...(createNonce ? { createNonce } : {}),
-          }),
-          cache: "no-store",
-          signal: AbortSignal.timeout(5000),
-        });
+            headers: allianceEventsRequestHeaders({
+              secret: config.secret,
+              profile: config.profile,
+              method: "GET",
+              path,
+              now,
+              ...(createNonce ? { createNonce } : {}),
+            }),
+            cache: "no-store",
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!response.ok) throw new AllianceEventsUnavailableError();
+          return publicAllianceEventsGuildModel(await response.json(), config.profile);
+        }));
       } catch {
         throw new AllianceEventsUnavailableError();
       }
-      if (!response.ok) throw new AllianceEventsUnavailableError();
-      let payload;
-      try { payload = await response.json(); } catch { throw new AllianceEventsUnavailableError(); }
-      const value = publicAllianceEventsModel(payload, config.profile, communityCode);
+      const value = publicAllianceEventsModel({
+        ok: true,
+        profile: config.profile,
+        communityCode,
+        alliances: models.flatMap((model) => model.alliances).sort(compareAlliance),
+      }, config.profile, communityCode);
       cache.set(cacheKey, { value, expiresAt: now() + cacheTtlMs });
       if (cache.size > 200) cache.delete(cache.keys().next().value);
       return value;

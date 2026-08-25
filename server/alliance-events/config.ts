@@ -30,7 +30,8 @@ export function getAllianceEventsIntegrationConfig(
   try {
     const parsed = new URL(rawUrl);
     safeUrl = parsed.protocol === "https:"
-      || (parsed.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname));
+      || (parsed.protocol === "http:" && (["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)
+        || parsed.hostname.endsWith(".railway.internal")));
   } catch {}
   return safeUrl && secret.length >= 32
     ? Object.freeze({ profile, baseUrl: rawUrl, secret })
