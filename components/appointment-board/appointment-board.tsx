@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AllianceBadge } from "./alliance-badge";
+import { CommunitySectionNavigation } from "@/components/community-section-navigation";
 
 type PublicSlot = { time: string; state: "available" | "pending" | "confirmed"; playerName?: string; playerAlliance?: string };
 type PublicService = { name: string; date: string; slots: PublicSlot[] };
@@ -303,6 +304,7 @@ export function AppointmentBoard({ profile, initialBoard }: {
           </button>
         </div> : null}
       </header>
+      <CommunitySectionNavigation communityCode={initialBoard.community.code} current="appointments" profile={profile} />
       {notice ? <p aria-live="polite" className="booking-notice">{notice}</p> : null}
       {managerBoard
         ? <ManagerPanels board={managerBoard} busyBooking={busyBooking} busyRequest={busyRequest}
