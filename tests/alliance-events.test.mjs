@@ -135,10 +135,28 @@ test("State and Kingdom share navigation and render UTC plus browser-local time 
   const kingdom = fs.readFileSync(new URL("../app/kingdom/[communityCode]/events/page.tsx", import.meta.url), "utf8");
   const topEvents = fs.readFileSync(new URL("../app/events/page.tsx", import.meta.url), "utf8");
   assert.match(nav, /Appointments/); assert.match(nav, /Alliance Events/);
-  assert.match(ui, /Kingdom/); assert.match(ui, /State/); assert.match(ui, /UTC:/); assert.match(ui, /occurrence\.group/);
+  assert.match(ui, /Kingdom/); assert.match(ui, /State/); assert.match(ui, /UTC/); assert.match(ui, /occurrence\.group/);
   assert.match(local, /Intl\.DateTimeFormat/); assert.match(local, /timeZoneName/);
   assert.match(state, /requiredProfile="wos"/); assert.match(kingdom, /requiredProfile="kingshot"/);
   assert.doesNotMatch(topEvents, /AllianceEvents|alliance-events/);
+});
+
+test("Alliance Events presentation is compact, group-led, and keeps later occurrences secondary", () => {
+  const ui = fs.readFileSync(new URL("../components/alliance-events/alliance-events.tsx", import.meta.url), "utf8");
+  const local = fs.readFileSync(new URL("../components/alliance-events/browser-local-time.tsx", import.meta.url), "utf8");
+  const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(ui, /<h3>\{alliance\.name\}<\/h3>/);
+  assert.match(ui, /<h4>\{event\.name\}<\/h4>/);
+  assert.match(ui, /alliance-event-groups/);
+  assert.match(ui, /<dt>\{occurrence\.group\}<\/dt>/);
+  assert.match(ui, /event\.recurrence\.summary/);
+  assert.match(ui, /Upcoming:/);
+  assert.match(ui, /event\.upcoming\.slice\(0, 1\)/);
+  assert.doesNotMatch(ui, /event\.upcoming\.map/);
+  assert.doesNotMatch(ui, /First date|advance reminder|final reminder|publish_to_state|roundup settings/i);
+  assert.match(local, /Your local time/);
+  assert.match(css, /\.alliance-event-list \{ display: grid; \}/);
+  assert.match(css, /\.alliance-event \+ \.alliance-event \{ border-top:/);
 });
 
 test("auth request contains no secret and supports large public models", () => {
