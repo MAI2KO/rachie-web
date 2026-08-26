@@ -81,6 +81,10 @@ export async function handleBookingAdminMutation(request: Request, communityCode
     }
     let body: unknown;
     try { body = await request.json(); } catch { body = null; }
+    if (body && typeof body === "object" && !Array.isArray(body)
+        && (body as { section?: unknown }).section === "guestLink") {
+      return json({ ok: true, ...(await authorized.service.updateGuestLink(body)) });
+    }
     return json({ ok: true, configuration: await authorized.service.update(body) });
   } catch (error) {
     return bookingAdminError(error);

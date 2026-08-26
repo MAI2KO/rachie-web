@@ -17,6 +17,13 @@ Create makes one opaque 256-bit token. Rotate revokes the active link atomically
 
 Treat the URL as a submission capability: share it only in the intended in-game community and rotate it if disclosed unexpectedly. It grants no login or manager access.
 
+Authorised community managers can perform the same lifecycle operations in
+Booking Admin. Generate and Rotate return a plaintext URL to that browser once;
+only its hash is persisted. After a refresh, an active link can be revoked or
+rotated but cannot be reconstructed or copied. The website runtime role needs
+the narrow guest-link grants documented in `staging-deployment.md`; it does not
+need migration-role access.
+
 ## Player flow
 
 The route is `/book/<opaque-token>`. The hostname selects WOS or Kingshot, and the token must resolve inside that same forced-RLS profile. Invalid, expired, revoked, and cross-profile tokens receive the same safe unavailable response.

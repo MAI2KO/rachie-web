@@ -19,6 +19,9 @@ type BookingAdminConfiguration = {
     readonly bookingsEnabled: boolean;
   };
   readonly services: readonly Service[];
+  readonly guestLink: {
+    readonly status: "active" | "inactive" | "revoked";
+  };
   readonly automaticCycle: {
     readonly status: "draft" | "open" | "closed";
     readonly opensAt: string;
@@ -89,6 +92,7 @@ export function BookingAdmin({ initialConfiguration }: {
   const [csrfToken, setCsrfToken] = useState("");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
+  const [newGuestUrl, setNewGuestUrl] = useState("");
   const noun = configuration.profile === "kingshot" ? "Kingdom" : "State";
   const endpoint = `/api/v1/booking-admin/${encodeURIComponent(configuration.community.code)}`;
 
@@ -130,6 +134,44 @@ export function BookingAdmin({ initialConfiguration }: {
     }
   }
 
+  async function changeGuestLink(action: "generate" | "rotate" | "revoke") {
+    setBusy(`guest:${action}`);
+    setNotice("");
+    setNewGuestUrl("");
+    try {
+      const response = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+        body: JSON.stringify({ section: "guestLink", action }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.configuration) {
+        throw new Error(payload.error ?? "The guest link could not be changed.");
+      }
+      setConfiguration(payload.configuration);
+      if (typeof payload.guestLinkPath === "string") {
+        setNewGuestUrl(new URL(payload.guestLinkPath, window.location.origin).toString());
+      }
+      setNotice(action === "revoke" ? "Guest link revoked."
+        : action === "rotate" ? "Guest link rotated. Copy the new link now."
+          : "Guest link generated. Copy it now.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The guest link could not be changed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function copyGuestLink() {
+    if (!newGuestUrl) return;
+    try {
+      await navigator.clipboard.writeText(newGuestUrl);
+      setNotice("Guest link copied.");
+    } catch {
+      setNotice("The link could not be copied automatically. Select and copy it below.");
+    }
+  }
+
   const controlsDisabled = !csrfToken;
   return <article className="booking-admin">
     <header>
@@ -151,6 +193,32 @@ export function BookingAdmin({ initialConfiguration }: {
           onChange={() => void changeSetting("booking", {
             section: "booking", enabled: !configuration.community.bookingsEnabled,
           }, `Participant booking ${configuration.community.bookingsEnabled ? "disabled" : "enabled"}.`)} />
+      </div>
+    </section>
+
+    <section className="booking-admin-section" aria-labelledby="booking-admin-guest-link">
+      <div><h2 id="booking-admin-guest-link">Guest booking link</h2>
+        <p>Allows in-game players to request a booking without Discord. Requests still require manager approval.</p></div>
+      <div className="booking-admin-guest-link">
+        <p><strong>Status:</strong> {configuration.guestLink.status === "active" ? "Active"
+          : configuration.guestLink.status === "revoked" ? "Revoked" : "No active link"}</p>
+        <p className="booking-admin-guest-explanation">For security, only a hash is stored. An existing link cannot be
+          recovered or copied; rotate it to receive a new link.</p>
+        <div className="booking-admin-actions">
+          {configuration.guestLink.status === "active"
+            ? <>
+              <button disabled={controlsDisabled || Boolean(busy)} onClick={() => void changeGuestLink("rotate")}
+                type="button">Rotate</button>
+              <button disabled={controlsDisabled || Boolean(busy)} onClick={() => void changeGuestLink("revoke")}
+                type="button">Revoke</button>
+            </>
+            : <button disabled={controlsDisabled || Boolean(busy)} onClick={() => void changeGuestLink("generate")}
+              type="button">Generate</button>}
+          <button disabled={!newGuestUrl || Boolean(busy)} onClick={() => void copyGuestLink()} type="button">Copy</button>
+        </div>
+        {newGuestUrl ? <label className="booking-admin-new-link">New link — shown for this page only
+          <input onFocus={(event) => event.currentTarget.select()} readOnly value={newGuestUrl} />
+        </label> : null}
       </div>
     </section>
 

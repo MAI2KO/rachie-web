@@ -210,7 +210,7 @@ test("registration validation canonicalizes strong native fields", () => {
     }),
     { playerId: "123456", inGameName: "Player Name", alliance: "A1Z" },
   );
-  for (const value of ["", "12x", "1".repeat(21)]) {
+  for (const value of ["", "12x", "1".repeat(33)]) {
     assert.throws(
       () => validateRegistrationInput(registration({ playerId: value })),
       InvalidRegistrationError,

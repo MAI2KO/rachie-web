@@ -48,6 +48,27 @@ class ProfileScopedBookingSession {
     return result.rows[0] ?? null;
   }
 
+  async linkDiscordGuild({ discordGuildId, communityId, discordGuildName, actorId }) {
+    const existing = await this.client.query(
+      `SELECT community_id FROM booking_discord_guilds
+        WHERE game_profile=$1 AND discord_guild_id=$2 FOR UPDATE`,
+      [this.gameProfile, discordGuildId],
+    );
+    if (existing.rows[0] && existing.rows[0].community_id !== communityId) {
+      return { status: "conflict" };
+    }
+    await this.client.query(
+      `INSERT INTO booking_discord_guilds
+         (game_profile,discord_guild_id,community_id,discord_guild_name,linked_by_actor_id)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (game_profile,discord_guild_id) DO UPDATE
+         SET discord_guild_name=EXCLUDED.discord_guild_name,
+             linked_by_actor_id=EXCLUDED.linked_by_actor_id,updated_at=now()`,
+      [this.gameProfile, discordGuildId, communityId, discordGuildName, actorId],
+    );
+    return { status: existing.rowCount ? "updated" : "created" };
+  }
+
   async findIdempotencyRecord(communityId, idempotencyKey) {
     const result = await this.client.query(
       `SELECT game_profile, community_id, idempotency_key, operation,

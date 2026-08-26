@@ -66,6 +66,10 @@ export function runtimePrivilegeStatements(role, { includeRowLockPrivileges = tr
     `GRANT SELECT, INSERT, UPDATE ON ${RUNTIME_DISCORD_NOTIFICATION_TABLE} TO ${grantee}`,
     `GRANT SELECT, INSERT, DELETE ON ${RUNTIME_INTEGRATION_NONCE_TABLE} TO ${grantee}`,
     `GRANT INSERT, UPDATE ON booking_community_services TO ${grantee}`,
+    `GRANT INSERT ON booking_discord_guilds TO ${grantee}`,
+    `GRANT UPDATE (discord_guild_name, linked_by_actor_id, updated_at) ON booking_discord_guilds TO ${grantee}`,
+    `GRANT INSERT ON booking_guest_share_links TO ${grantee}`,
+    `GRANT UPDATE (revoked_at, revoked_by_actor_id, updated_at) ON booking_guest_share_links TO ${grantee}`,
     `GRANT INSERT ON booking_windows, booking_service_dates, appointment_slots TO ${grantee}`,
     ...Object.entries(RUNTIME_ADMIN_UPDATE_COLUMNS).map(([table, columns]) =>
       `GRANT UPDATE (${columns.join(", ")}) ON ${table} TO ${grantee}`),

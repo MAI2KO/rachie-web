@@ -28,7 +28,7 @@ class BookingAdminSession {
       [this.gameProfile, communityId],
     )).rows[0] ?? null;
     if (!community || community.status !== "active") return null;
-    const [services, settings, windows, dates] = await Promise.all([
+    const [services, settings, windows, dates, guestLinks] = await Promise.all([
       this.client.query(
         `SELECT service.service_code,service.display_label,service.sort_order,
                 COALESCE(community_service.enabled,service.active) AS enabled
@@ -73,6 +73,14 @@ class BookingAdminSession {
           ORDER BY dates.booking_date,service.sort_order,dates.service_code`,
         [this.gameProfile, communityId],
       ),
+      this.client.query(
+        `SELECT id,created_at,expires_at,revoked_at
+           FROM booking_guest_share_links
+          WHERE game_profile=$1 AND community_id=$2
+          ORDER BY created_at DESC,id DESC
+          LIMIT 1`,
+        [this.gameProfile, communityId],
+      ),
     ]);
     return {
       community,
@@ -80,7 +88,41 @@ class BookingAdminSession {
       settings: settings.rows[0] ?? null,
       windows: windows.rows,
       dates: dates.rows,
+      guestLink: guestLinks.rows[0] ?? null,
     };
+  }
+
+  async lockGuestLinks(communityId) {
+    await this.client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      `guest-link:${this.gameProfile}:${communityId}`,
+    ]);
+    return (await this.client.query(
+      `SELECT id,created_at,expires_at,revoked_at
+         FROM booking_guest_share_links
+        WHERE game_profile=$1 AND community_id=$2 AND revoked_at IS NULL
+        ORDER BY created_at DESC,id DESC
+        LIMIT 1 FOR UPDATE`,
+      [this.gameProfile, communityId],
+    )).rows[0] ?? null;
+  }
+
+  async revokeGuestLink(linkId, actorId) {
+    await this.client.query(
+      `UPDATE booking_guest_share_links
+          SET revoked_at=now(),revoked_by_actor_id=$3,updated_at=now()
+        WHERE game_profile=$1 AND id=$2 AND revoked_at IS NULL`,
+      [this.gameProfile, linkId, actorId],
+    );
+  }
+
+  async insertGuestLink({ id, communityId, tokenHash, tokenHint, actorId, rotatedFromLinkId }) {
+    await this.client.query(
+      `INSERT INTO booking_guest_share_links
+         (game_profile,id,community_id,token_hash,token_hint,label,
+          created_by_actor_id,rotated_from_link_id)
+       VALUES ($1,$2,$3,$4,$5,'In-game guest booking link',$6,$7)`,
+      [this.gameProfile, id, communityId, tokenHash, tokenHint, actorId, rotatedFromLinkId],
+    );
   }
 
   async setBookingEnabled(communityId, enabled) {
@@ -125,6 +167,19 @@ class BookingAdminSession {
                'website','discord_user',$4,$5,$6,$7)`,
       [this.gameProfile, input.id, input.communityId, input.actorId,
        input.correlationId, input.beforeData, input.afterData],
+    );
+  }
+
+  async insertGuestLinkAudit(input) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,
+          source,actor_type,actor_id,correlation_id,before_data,after_data)
+       VALUES ($1,$2,$3,'guest_share_link',$4,$5,
+               'website','discord_user',$6,$7,$8,$9)`,
+      [this.gameProfile, input.id, input.communityId, input.aggregateId,
+       `guest_link_${input.action}`, input.actorId, input.correlationId,
+       input.beforeData, input.afterData],
     );
   }
 }

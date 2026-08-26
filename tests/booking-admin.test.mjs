@@ -38,6 +38,7 @@ function snapshot() {
     windows: [{ id: "window", status: "open", opens_at: null, closes_at: null }],
     dates: [{ service_code: "construction", display_label: "Construction",
       booking_date: "2026-08-30", window_status: "open" }],
+    guestLink: null,
   };
 }
 
@@ -55,6 +56,20 @@ function fakeRepository() {
       state.settings[`${service}_${requirement}_required`] = enabled;
     },
     async insertAudit(input) { audits.push(input); },
+    async lockGuestLinks() {
+      return state.guestLink && !state.guestLink.revoked_at ? state.guestLink : null;
+    },
+    async revokeGuestLink(_id, actorId) {
+      state.guestLink.revoked_at = "2026-08-26T12:00:00.000Z";
+      state.guestLink.revoked_by_actor_id = actorId;
+    },
+    async insertGuestLink(input) {
+      state.guestLink = {
+        id: input.id, token_hash: input.tokenHash, token_hint: input.tokenHint,
+        created_at: "2026-08-26T12:00:00.000Z", expires_at: null, revoked_at: null,
+      };
+    },
+    async insertGuestLinkAudit(input) { audits.push(input); },
   };
   return {
     gameProfile: "wos", state, audits,
@@ -151,6 +166,35 @@ test("booking, service, resource, and speed-ups toggles persist and are audited"
     && audit.actorId === manager.discordUserId), true);
 });
 
+test("manager guest-link lifecycle returns plaintext only for generation and rotation", async () => {
+  const repository = fakeRepository();
+  let id = 0;
+  const tokens = ["a".repeat(43), "b".repeat(43)];
+  const service = createBookingAdminService({
+    gameProfile: "wos", communityId, managerContext: manager, repository,
+    createId: () => `00000000-0000-4000-8000-${String(++id).padStart(12, "0")}`,
+    createGuestToken: () => tokens.shift(),
+    now: () => new Date("2026-08-26T12:00:00.000Z"),
+  });
+
+  const generated = await service.updateGuestLink({ section: "guestLink", action: "generate" });
+  assert.equal(generated.configuration.guestLink.status, "active");
+  assert.equal(generated.guestLinkPath, `/book/${"a".repeat(43)}`);
+  assert.doesNotMatch(JSON.stringify(generated.configuration), /token|hash/i);
+  await assert.rejects(
+    service.updateGuestLink({ section: "guestLink", action: "generate" }),
+    (error) => error.code === "active_link_exists",
+  );
+
+  const rotated = await service.updateGuestLink({ section: "guestLink", action: "rotate" });
+  assert.equal(rotated.guestLinkPath, `/book/${"b".repeat(43)}`);
+  assert.equal(repository.state.guestLink.token_hash.length, 64);
+  const revoked = await service.updateGuestLink({ section: "guestLink", action: "revoke" });
+  assert.equal(revoked.guestLinkPath, null);
+  assert.equal(revoked.configuration.guestLink.status, "revoked");
+  assert.equal(repository.audits.slice(-3).every((audit) => audit.actorId === manager.discordUserId), true);
+});
+
 test("unauthorised, cross-profile, and other-community manager contexts fail closed", () => {
   const repository = fakeRepository();
   for (const managerContext of [null, { ...manager, gameProfile: "kingshot" },
@@ -171,6 +215,10 @@ test("admin mutations accept only known, strictly scoped boolean changes", () =>
   assert.throws(() => validateBookingAdminChange({
     section: "requirement", serviceCode: "troop", requirementCode: "fc", enabled: true,
   }), BookingAdminValidationError);
+  assert.deepEqual(validateBookingAdminChange({ section: "guestLink", action: "rotate" }),
+    { section: "guestLink", action: "rotate" });
+  assert.throws(() => validateBookingAdminChange({ section: "guestLink", action: "copy" }),
+    BookingAdminValidationError);
 });
 
 test("admin routes and UI reuse manager authorization and expose no destructive date controls", () => {
@@ -191,6 +239,8 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
   assert.match(handler, /bookingAdminMutation/);
   assert.match(ui, /role="switch"/); assert.match(ui, /Read-only in Booking Admin v1/);
   assert.match(ui, /Automatic booking cycle/);
+  assert.match(ui, /Guest booking link/); assert.match(ui, /Generate/); assert.match(ui, /Rotate/);
+  assert.match(ui, /Revoke/); assert.match(ui, /Copy/); assert.match(ui, /only a hash is stored/);
   assert.doesNotMatch(ui, /create date|delete date|generate slot/i);
 });
 

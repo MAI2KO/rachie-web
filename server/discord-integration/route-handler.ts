@@ -42,7 +42,7 @@ interface ApprovalRepository {
   withTransaction<T>(work: (session: ApprovalSession) => Promise<T> | T): Promise<T>;
 }
 
-async function authenticate(request: Request) {
+export async function authenticateDiscordIntegrationRequest(request: Request) {
   const context = resolveNativeBookingRequestContext(request);
   const profileHeader = request.headers.get("x-booking-profile");
   if (!context || profileHeader !== context.gameProfile) {
@@ -69,7 +69,7 @@ async function authenticate(request: Request) {
   return { profile, body, repository };
 }
 
-function integrationError(error: unknown, operation: string) {
+export function discordIntegrationError(error: unknown, operation: string) {
   if (error instanceof DiscordIntegrationAuthenticationError) {
     const key = `${operation}:${error.code}`;
     if (!observedAuthenticationFailures.has(key)) {
@@ -91,7 +91,7 @@ function integrationError(error: unknown, operation: string) {
 
 export async function handleDiscordWorkClaim(request: Request) {
   try {
-    const scope = await authenticate(request);
+    const scope = await authenticateDiscordIntegrationRequest(request);
     if (!observedClaimProfiles.has(scope.profile)) {
       observedClaimProfiles.add(scope.profile);
       console.info("discord_booking_integration_claim_authenticated", {
@@ -107,26 +107,26 @@ export async function handleDiscordWorkClaim(request: Request) {
       });
     }
     return json({ ok: true, profile: scope.profile, work });
-  } catch (error) { return integrationError(error, "claim"); }
+  } catch (error) { return discordIntegrationError(error, "claim"); }
 }
 
 export async function handleDiscordWorkRecipients(request: Request, workId: string) {
   try {
     if (!UUID.test(workId)) throw new TypeError("invalid_work_id");
-    const scope = await authenticate(request);
+    const scope = await authenticateDiscordIntegrationRequest(request);
     const body = scope.body as { claimToken?: unknown; recipients?: unknown };
     if (!UUID.test(String(body.claimToken ?? "")) || !Array.isArray(body.recipients)) throw new TypeError("invalid_recipients");
     const recipients = body.recipients as unknown[];
     const accepted = await scope.repository.withTransaction((session) =>
       session.registerRecipients(workId, body.claimToken, recipients));
     return accepted ? json({ ok: true }) : json({ ok: false, error: "Work claim is no longer active.", code: "stale_claim" }, 409);
-  } catch (error) { return integrationError(error, "register_recipients"); }
+  } catch (error) { return discordIntegrationError(error, "register_recipients"); }
 }
 
 export async function handleDiscordWorkOutcome(request: Request, workId: string) {
   try {
     if (!UUID.test(workId)) throw new TypeError("invalid_work_id");
-    const scope = await authenticate(request);
+    const scope = await authenticateDiscordIntegrationRequest(request);
     const body = scope.body as { claimToken?: unknown; status?: unknown; discordChannelId?: unknown; discordMessageId?: unknown };
     if (!UUID.test(String(body.claimToken ?? ""))
         || !["sent", "retry", "permanent_failure"].includes(String(body.status))) throw new TypeError("invalid_outcome");
@@ -134,7 +134,7 @@ export async function handleDiscordWorkOutcome(request: Request, workId: string)
         || (body.discordMessageId != null && !SNOWFLAKE.test(String(body.discordMessageId))))) throw new TypeError("invalid_message_id");
     const accepted = await scope.repository.withTransaction((session) => session.finish(workId, body.claimToken, body));
     return accepted ? json({ ok: true }) : json({ ok: false, error: "Work claim is no longer active.", code: "stale_claim" }, 409);
-  } catch (error) { return integrationError(error, "delivery_outcome"); }
+  } catch (error) { return discordIntegrationError(error, "delivery_outcome"); }
 }
 
 async function authoritativeApprovalState(repository: ApprovalRepository, requestId: string) {
@@ -152,7 +152,7 @@ async function authoritativeApprovalState(repository: ApprovalRepository, reques
 export async function handleDiscordApprovalAction(request: Request, requestId: string, action: string) {
   try {
     if (!UUID.test(requestId) || !["approve", "deny"].includes(action)) throw new TypeError("invalid_action");
-    const scope = await authenticate(request);
+    const scope = await authenticateDiscordIntegrationRequest(request);
     const body = scope.body as { discordUserId?: unknown; displayName?: unknown };
     const discordUserId = String(body.discordUserId ?? "");
     const displayName = String(body.displayName ?? "").trim().slice(0, 100);
@@ -197,6 +197,6 @@ export async function handleDiscordApprovalAction(request: Request, requestId: s
       const status = String(error.code) === "manager_forbidden" ? 403 : 503;
       return json({ ok: false, error: "Manager authorization failed.", code: String(error.code) }, status);
     }
-    return integrationError(error, "approval_action");
+    return discordIntegrationError(error, "approval_action");
   }
 }

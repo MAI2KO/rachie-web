@@ -37,9 +37,14 @@ function exactKeys(value, expected) {
 
 export function validateBookingAdminChange(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
-      || typeof value.enabled !== "boolean" || typeof value.section !== "string") {
+      || typeof value.section !== "string") {
     throw new BookingAdminValidationError();
   }
+  if (value.section === "guestLink" && exactKeys(value, ["section", "action"])
+      && ["generate", "rotate", "revoke"].includes(value.action)) {
+    return Object.freeze({ section: "guestLink", action: value.action });
+  }
+  if (typeof value.enabled !== "boolean") throw new BookingAdminValidationError();
   if (value.section === "booking" && exactKeys(value, ["section", "enabled"])) {
     return Object.freeze({ section: "booking", enabled: value.enabled });
   }
@@ -72,6 +77,9 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date()) {
     }))),
   ]));
   const automaticCycle = gameProfile === "wos" ? automaticWosCycleForDisplay(now) : null;
+  const guestLink = snapshot.guestLink ?? null;
+  const guestLinkActive = Boolean(guestLink && !guestLink.revoked_at
+    && (!guestLink.expires_at || new Date(guestLink.expires_at) > now));
   return Object.freeze({
     profile: gameProfile,
     community: Object.freeze({
@@ -85,6 +93,9 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date()) {
       enabled: Boolean(service.enabled),
       requirements: requirementsByService.get(service.service_code) ?? Object.freeze([]),
     }))),
+    guestLink: Object.freeze({
+      status: guestLinkActive ? "active" : guestLink?.revoked_at ? "revoked" : "inactive",
+    }),
     automaticCycle: automaticCycle ? Object.freeze({
       status: automaticWosCycleStatus(automaticCycle, now),
       opensAt: automaticCycle.opensAt,

@@ -120,6 +120,19 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
 
     const context = { gameProfile: "wos", community: { id: communityId }, discordUser: { id: "runtime-user" } };
     const repository = createProfileScopedBookingRepository("wos", runtime);
+    const linked = await repository.withTransaction((session) => session.linkDiscordGuild({
+      discordGuildId: "777777777777777777", communityId,
+      discordGuildName: "Runtime Guild", actorId: "999999999999999999",
+    }));
+    assert.equal(linked.status, "created");
+    const relinked = await repository.withTransaction((session) => session.linkDiscordGuild({
+      discordGuildId: "777777777777777777", communityId,
+      discordGuildName: "Renamed Runtime Guild", actorId: "999999999999999999",
+    }));
+    assert.equal(relinked.status, "updated");
+    assert.equal((await repository.findCommunityForDiscordGuild(
+      "777777777777777777"
+    )).id, communityId);
     await createRegistrationService({ context, repository }).upsert(
       { playerId: "99990001", inGameName: "Runtime Test", alliance: "TST" },
       "runtime-register-0001",

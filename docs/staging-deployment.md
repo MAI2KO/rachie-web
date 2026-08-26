@@ -187,6 +187,14 @@ TO rachie_peggie_runtime;
 -- Booking Admin may mutate only these reviewed community configuration fields.
 GRANT INSERT, UPDATE ON booking_community_services
 TO rachie_peggie_runtime;
+GRANT INSERT ON booking_discord_guilds
+TO rachie_peggie_runtime;
+GRANT UPDATE (discord_guild_name, linked_by_actor_id, updated_at)
+ON booking_discord_guilds TO rachie_peggie_runtime;
+GRANT INSERT ON booking_guest_share_links
+TO rachie_peggie_runtime;
+GRANT UPDATE (revoked_at, revoked_by_actor_id, updated_at)
+ON booking_guest_share_links TO rachie_peggie_runtime;
 GRANT UPDATE (bookings_open, version, updated_at) ON booking_communities
 TO rachie_peggie_runtime;
 GRANT UPDATE (
@@ -247,6 +255,7 @@ reviewing future schema changes.
 | Reschedule | Booking/participant locks, booking update+insert, answer/audit/outbox inserts | Existing grants plus both narrow lock grants |
 | Cancellation | Booking/participant locks, booking update, audit/outbox inserts | Existing grants plus community lock grant |
 | Booking Admin | Community booking flag, service overrides, requirement flags and audit insert | Narrow configuration-column grants plus service-override `INSERT, UPDATE` |
+| Booking Admin guest links | Hashed-link insert; active-link revoke/rotate; audit insert | Link `INSERT` plus `UPDATE (revoked_at, revoked_by_actor_id, updated_at)` |
 | Guest link resolution | Active hashed-link read with `FOR SHARE OF link` | Link `SELECT` plus `UPDATE (updated_at)` |
 | Guest pending request | Request/answer/audit/outbox inserts and expired-hold updates | Approval-table read/write grants plus community/slot lock grants |
 | Approval/denial/expiry | Request and slot locks, request/booking/answer/audit/outbox updates | Existing booking grants plus approval-table grants |

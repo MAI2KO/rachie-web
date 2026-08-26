@@ -1,5 +1,5 @@
 export const REGISTRATION_LIMITS = Object.freeze({
-  playerIdMaxLength: 20,
+  playerIdMaxLength: 32,
   inGameNameMaxLength: 30,
   allianceLength: 3,
   idempotencyKeyMinLength: 16,
@@ -40,7 +40,7 @@ export function validateRegistrationInput(input) {
     !PLAYER_ID_PATTERN.test(playerId) ||
     playerId.length > REGISTRATION_LIMITS.playerIdMaxLength
   ) {
-    fields.playerId = "Must contain 1 to 20 digits.";
+    fields.playerId = "Must contain 1 to 32 digits.";
   }
   if (
     !inGameName ||

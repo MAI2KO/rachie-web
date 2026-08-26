@@ -88,6 +88,9 @@ export interface ParticipantBookingRecord {
 }
 
 export interface NativeBookingSession {
+  linkDiscordGuild(input: {
+    discordGuildId: string; communityId: string; discordGuildName: string; actorId: string;
+  }): Promise<{ status: "created" | "updated" | "conflict" }>;
   findCommunityById(id: string): Promise<BookingCommunityRecord | null>;
   findCommunityByLocationCode(
     locationCode: string,

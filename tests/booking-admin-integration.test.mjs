@@ -7,6 +7,8 @@ import pg from "pg";
 
 import { createProfileScopedBookingAdminRepository } from "../server/booking-admin/repository-core.mjs";
 import { createBookingAdminService } from "../server/booking-admin/service-core.mjs";
+import { createProfileScopedApprovalRepository } from "../server/booking-approval/repository-core.mjs";
+import { createGuestBookingPageService } from "../server/booking-approval/service-core.mjs";
 import { loadMigrations, runMigrations } from "../server/database/migrations.mjs";
 import {
   enabledBookingRequirementDefinitions,
@@ -95,8 +97,10 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       discordUserId: "111111111111111111", displayName: "Manager",
     };
     const adminRepository = createProfileScopedBookingAdminRepository("wos", pool);
+    const guestTokens = ["a".repeat(43), "b".repeat(43)];
     const service = createBookingAdminService({
       gameProfile: "wos", communityId: sharedId, managerContext, repository: adminRepository,
+      createGuestToken: () => guestTokens.shift(),
     });
     const initial = await service.read();
     assert.equal(initial.community.bookingsEnabled, true);
@@ -104,6 +108,22 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       serviceCode: "construction", serviceName: "Construction",
       date: "2026-08-30", windowStatus: "open",
     }]);
+
+    const guestPages = createGuestBookingPageService({
+      gameProfile: "wos", repository: createProfileScopedApprovalRepository("wos", pool),
+    });
+    const generated = await service.updateGuestLink({ section: "guestLink", action: "generate" });
+    assert.equal(generated.guestLinkPath, `/book/${"a".repeat(43)}`);
+    assert.equal((await guestPages.read("a".repeat(43))).community.code, "9999");
+    const rotated = await service.updateGuestLink({ section: "guestLink", action: "rotate" });
+    assert.equal(rotated.guestLinkPath, `/book/${"b".repeat(43)}`);
+    await assert.rejects(guestPages.read("a".repeat(43)), (error) => error.code === "invalid_share_link");
+    await assert.rejects(createGuestBookingPageService({
+      gameProfile: "kingshot", repository: createProfileScopedApprovalRepository("kingshot", pool),
+    }).read("b".repeat(43)), (error) => error.code === "invalid_share_link");
+    assert.equal((await service.updateGuestLink({ section: "guestLink", action: "revoke" }))
+      .configuration.guestLink.status, "revoked");
+    await assert.rejects(guestPages.read("b".repeat(43)), (error) => error.code === "invalid_share_link");
 
     await service.update({ section: "booking", enabled: false });
     await service.update({ section: "service", serviceCode: "construction", enabled: false });
@@ -163,9 +183,11 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       `SELECT event_type,actor_id FROM booking_change_events
         WHERE community_id=$1 ORDER BY created_at,id`, [sharedId],
     ));
-    assert.equal(audits.rows.length, 8);
-    assert.equal(audits.rows.every((row) => row.event_type === "booking_admin_updated"
-      && row.actor_id === managerContext.discordUserId), true);
+    assert.equal(audits.rows.length, 11);
+    assert.equal(audits.rows.every((row) => row.actor_id === managerContext.discordUserId), true);
+    assert.deepEqual([...new Set(audits.rows.map((row) => row.event_type))].sort(), [
+      "booking_admin_updated", "guest_link_generate", "guest_link_revoke", "guest_link_rotate",
+    ]);
   } finally {
     await pool.end();
     await admin.query(`DROP SCHEMA ${schema} CASCADE`);
