@@ -141,7 +141,7 @@ test("State and Kingdom share navigation and render UTC plus browser-local time 
   assert.doesNotMatch(topEvents, /AllianceEvents|alliance-events/);
 });
 
-test("Alliance Events presentation is compact, group-led, and keeps later occurrences secondary", () => {
+test("Alliance Events presentation shows only alliance, event, group, and next UTC/local time", () => {
   const ui = fs.readFileSync(new URL("../components/alliance-events/alliance-events.tsx", import.meta.url), "utf8");
   const local = fs.readFileSync(new URL("../components/alliance-events/browser-local-time.tsx", import.meta.url), "utf8");
   const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -149,14 +149,14 @@ test("Alliance Events presentation is compact, group-led, and keeps later occurr
   assert.match(ui, /<h4>\{event\.name\}<\/h4>/);
   assert.match(ui, /alliance-event-groups/);
   assert.match(ui, /<dt>\{occurrence\.group\}<\/dt>/);
-  assert.match(ui, /event\.recurrence\.summary/);
-  assert.match(ui, /Upcoming:/);
   assert.match(ui, /event\.upcoming\.slice\(0, 1\)/);
   assert.doesNotMatch(ui, /event\.upcoming\.map/);
+  assert.doesNotMatch(ui, /event\.recurrence\.summary|Upcoming:|utcDate/);
   assert.doesNotMatch(ui, /First date|advance reminder|final reminder|publish_to_state|roundup settings/i);
   assert.match(local, /Your local time/);
   assert.match(css, /\.alliance-event-list \{ display: grid; \}/);
   assert.match(css, /\.alliance-event \+ \.alliance-event \{ border-top:/);
+  assert.doesNotMatch(css, /alliance-event-recurrence|alliance-event-upcoming/);
 });
 
 test("auth request contains no secret and supports large public models", () => {

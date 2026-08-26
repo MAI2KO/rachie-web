@@ -424,9 +424,6 @@ button:focus-visible,
 .alliance-event-time { margin: 0; }
 .alliance-occurrence-time { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; justify-content: flex-end; font-variant-numeric: tabular-nums; }
 .alliance-occurrence-time__local { color: var(--brand-text-muted); }
-.alliance-event-recurrence { margin: 0.65rem 0 0; color: var(--brand-text-muted); font-size: 0.8125rem; font-weight: 700; }
-.alliance-event-upcoming { margin: 0.25rem 0 0; color: var(--brand-text-muted); font-size: 0.75rem; }
-.alliance-event-upcoming > span:first-child { font-weight: 700; }
 
 .guest-booking { max-width: 46rem; margin-inline: auto; }
 .guest-booking > header h1,
