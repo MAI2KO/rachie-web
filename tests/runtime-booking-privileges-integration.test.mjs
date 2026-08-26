@@ -5,6 +5,7 @@ import test from "node:test";
 
 import pg from "pg";
 
+import { reconcileAutomaticWosBookingCycles } from "../server/automatic-booking-cycle/repository-core.mjs";
 import { loadMigrations, runMigrations } from "../server/database/migrations.mjs";
 import { runtimePrivilegeStatements } from "../server/database/runtime-privileges.mjs";
 import { createBookingCreationService } from "../server/native-booking/booking-creation-service-core.mjs";
@@ -89,6 +90,22 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
             `${String(9 + ordinal).padStart(2, "0")}:00`,
             `${String(9 + ordinal).padStart(2, "0")}:00`,
           ],
+        );
+      }
+      for (const [serviceCode, bookingDate] of [["research", "2026-09-02"], ["troop", "2026-09-03"]]) {
+        const dateId = randomUUID();
+        await client.query(
+          `INSERT INTO booking_service_dates
+             (game_profile,id,community_id,window_id,service_code,booking_date)
+           VALUES ('wos',$1,$2,$3,$4,$5)`,
+          [dateId, communityId, windowId, serviceCode, bookingDate],
+        );
+        await client.query(
+          `INSERT INTO appointment_slots
+             (game_profile,id,community_id,window_id,service_date_id,service_code,
+              booking_date,ordinal,display_time_label,local_start_time,time_zone)
+           VALUES ('wos',$1,$2,$3,$4,$5,$6,0,'09:00','09:00','Europe/London')`,
+          [randomUUID(), communityId, windowId, dateId, serviceCode, bookingDate],
         );
       }
     });
@@ -195,6 +212,20 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
         section: "requirement", serviceCode: "construction", requirementCode: "fc", enabled: true,
       })).services.find(({ code }) => code === "construction")
         .requirements.find(({ code }) => code === "fc").enabled, true);
+    });
+
+    await t.test("runtime role can reconcile deterministic automatic WOS cycles", async () => {
+      const result = await reconcileAutomaticWosBookingCycles({
+        pool: runtime, now: new Date("2026-09-01T00:00:00.000Z"),
+      });
+      assert.equal(result.communities.length, 1);
+      assert.equal(result.communities[0].cycles.every(({ status }) => status === "draft"), true);
+      const automaticWindows = await withProfile(runtime, "wos", (client) => client.query(
+        `SELECT count(*)::int AS count FROM booking_windows
+          WHERE community_id=$1 AND created_by_actor_id='automatic-wos-28-day-cycle-v1'`,
+        [communityId],
+      ));
+      assert.equal(automaticWindows.rows[0].count, 2);
     });
   } finally {
     await runtime?.end();

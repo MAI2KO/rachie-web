@@ -28,6 +28,23 @@ test("public serializer is stable and removes all scheduler-private fields", () 
   assert.throws(() => publicAllianceEventsModel({ ok: true, ...raw }, "kingshot", "9999"));
 });
 
+test("public serializer preserves daily scheduler occurrences", () => {
+  const daily = structuredClone(raw);
+  daily.alliances[0].events[0].recurrence = { days: 1, summary: "Every day" };
+  daily.alliances[0].events[0].upcoming = [
+    { at: "2026-09-01T10:00:00.000Z", group: null },
+    { at: "2026-09-02T10:00:00.000Z", group: null },
+    { at: "2026-09-03T10:00:00.000Z", group: null },
+  ];
+  const model = publicAllianceEventsModel({ ok: true, ...daily }, "wos", "9999");
+  assert.equal(model.alliances[0].events[0].recurrence.summary, "Every day");
+  assert.deepEqual(model.alliances[0].events[0].upcoming.map(({ at }) => at), [
+    "2026-09-01T10:00:00.000Z",
+    "2026-09-02T10:00:00.000Z",
+    "2026-09-03T10:00:00.000Z",
+  ]);
+});
+
 test("website client signs, caches by profile/community, and degrades safely", async () => {
   let calls = 0;
   const guildId = "123456789012345678";

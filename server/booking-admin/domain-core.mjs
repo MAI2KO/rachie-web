@@ -1,5 +1,6 @@
 import { bookingRequirementLabel } from "../native-booking/booking-creation-validation.mjs";
 import { isKnownMinisterServiceCode } from "../native-booking/service-codes.mjs";
+import { automaticWosCycleForDisplay, automaticWosCycleStatus } from "../automatic-booking-cycle/domain-core.mjs";
 
 export const BOOKING_ADMIN_REQUIREMENTS = Object.freeze({
   construction: Object.freeze(["fc", "rfc", "speedups"]),
@@ -60,7 +61,7 @@ export function validateBookingAdminChange(value) {
   throw new BookingAdminValidationError();
 }
 
-export function bookingAdminModel(gameProfile, snapshot) {
+export function bookingAdminModel(gameProfile, snapshot, now = new Date()) {
   const settings = snapshot.settings ?? {};
   const requirementsByService = new Map(snapshot.services.map((service) => [
     service.service_code,
@@ -70,6 +71,7 @@ export function bookingAdminModel(gameProfile, snapshot) {
       enabled: Boolean(settings[BOOKING_ADMIN_REQUIREMENT_COLUMNS[service.service_code][code]]),
     }))),
   ]));
+  const automaticCycle = gameProfile === "wos" ? automaticWosCycleForDisplay(now) : null;
   return Object.freeze({
     profile: gameProfile,
     community: Object.freeze({
@@ -83,6 +85,18 @@ export function bookingAdminModel(gameProfile, snapshot) {
       enabled: Boolean(service.enabled),
       requirements: requirementsByService.get(service.service_code) ?? Object.freeze([]),
     }))),
+    automaticCycle: automaticCycle ? Object.freeze({
+      status: automaticWosCycleStatus(automaticCycle, now),
+      opensAt: automaticCycle.opensAt,
+      closesAt: automaticCycle.closesAt,
+      appointments: Object.freeze(snapshot.services
+        .filter((service) => automaticCycle.dates[service.service_code])
+        .map((service) => Object.freeze({
+          serviceCode: service.service_code,
+          serviceName: service.display_label,
+          date: automaticCycle.dates[service.service_code],
+        }))),
+    }) : null,
     windows: Object.freeze(snapshot.windows.map((window) => Object.freeze({
       status: window.status,
       opensAt: window.opens_at ?? null,

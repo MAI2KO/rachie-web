@@ -107,6 +107,11 @@ The initial migration creates:
 | `booking_outbox` | Transactional integration and Discord notification events |
 | `booking_idempotency_keys` | Request hashes, correlation IDs, and replay results |
 
+The automatic WOS cycle is code-anchored to 5 August 2026 and reconciles
+deterministic future windows, service dates, and slots from each community's
+existing slot template. It does not introduce a second booking model or change
+the manager-controlled `bookings_open` flag.
+
 No Sheet mapping, import staging, or compatibility request journal is created yet.
 Those tables should be introduced only alongside a reviewed importer/reconciliation
 design.

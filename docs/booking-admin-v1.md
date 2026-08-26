@@ -24,3 +24,7 @@ for existing communities.
 Booking Admin v1 lists existing non-archived booking windows and service dates
 read-only. Creating dates, generating slots, changing slot availability, and
 deleting configuration are deferred to v2.
+
+For WOS, the page also shows the current or next deterministic automatic cycle,
+including its UTC opening/closing instants and the three appointment dates. The
+automatic schedule remains separate from the manager-controlled booking toggle.

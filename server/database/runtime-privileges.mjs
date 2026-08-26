@@ -38,6 +38,9 @@ export const RUNTIME_ROW_LOCK_COLUMNS = Object.freeze({
 
 export const RUNTIME_ADMIN_UPDATE_COLUMNS = Object.freeze({
   booking_communities: Object.freeze(["bookings_open", "version", "updated_at"]),
+  booking_windows: Object.freeze([
+    "status", "opens_at", "closes_at", "opened_at", "closed_at", "version", "updated_at",
+  ]),
   booking_settings: Object.freeze([
     "construction_fc_required", "construction_rfc_required",
     "construction_speedups_required", "research_shards_required",
@@ -63,6 +66,7 @@ export function runtimePrivilegeStatements(role, { includeRowLockPrivileges = tr
     `GRANT SELECT, INSERT, UPDATE ON ${RUNTIME_DISCORD_NOTIFICATION_TABLE} TO ${grantee}`,
     `GRANT SELECT, INSERT, DELETE ON ${RUNTIME_INTEGRATION_NONCE_TABLE} TO ${grantee}`,
     `GRANT INSERT, UPDATE ON booking_community_services TO ${grantee}`,
+    `GRANT INSERT ON booking_windows, booking_service_dates, appointment_slots TO ${grantee}`,
     ...Object.entries(RUNTIME_ADMIN_UPDATE_COLUMNS).map(([table, columns]) =>
       `GRANT UPDATE (${columns.join(", ")}) ON ${table} TO ${grantee}`),
     ...(includeRowLockPrivileges

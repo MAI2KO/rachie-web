@@ -195,6 +195,15 @@ GRANT UPDATE (
   research_speedups_required, troop_speedups_required, version, updated_at
 ) ON booking_settings TO rachie_peggie_runtime;
 
+-- The WOS cycle reconciler creates deterministic future schedules and updates
+-- only booking-window lifecycle/timestamp fields. It never changes the manager
+-- bookings_open override or mutates existing appointments.
+GRANT INSERT ON booking_windows, booking_service_dates, appointment_slots
+TO rachie_peggie_runtime;
+GRANT UPDATE (
+  status, opens_at, closes_at, opened_at, closed_at, version, updated_at
+) ON booking_windows TO rachie_peggie_runtime;
+
 -- PostgreSQL row locks require UPDATE privilege even when application code
 -- only selects and locks the row. Grant one low-authority metadata column,
 -- not table-wide UPDATE on these operator-owned configuration tables.

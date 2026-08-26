@@ -19,6 +19,16 @@ type BookingAdminConfiguration = {
     readonly bookingsEnabled: boolean;
   };
   readonly services: readonly Service[];
+  readonly automaticCycle: {
+    readonly status: "draft" | "open" | "closed";
+    readonly opensAt: string;
+    readonly closesAt: string;
+    readonly appointments: readonly {
+      readonly serviceCode: string;
+      readonly serviceName: string;
+      readonly date: string;
+    }[];
+  } | null;
   readonly windows: readonly {
     readonly status: string;
     readonly opensAt: string | null;
@@ -50,6 +60,13 @@ function displayDate(date: string) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
   }).format(new Date(`${date}T00:00:00.000Z`));
+}
+
+function displayUtcInstant(instant: string) {
+  return `${new Intl.DateTimeFormat("en-GB", {
+    day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+    hourCycle: "h23", timeZone: "UTC",
+  }).format(new Date(instant))} UTC`;
 }
 
 function SettingSwitch({ checked, disabled, label, onChange }: {
@@ -151,6 +168,25 @@ export function BookingAdmin({ initialConfiguration }: {
         </div>)}
       </div>
     </section>
+
+    {configuration.automaticCycle ? <section className="booking-admin-section"
+      aria-labelledby="booking-admin-automatic-cycle">
+      <div><h2 id="booking-admin-automatic-cycle">Automatic booking cycle</h2>
+        <p>Fixed 28-day Whiteout Survival schedule. Booking also requires the manager control above.</p></div>
+      <dl className="booking-admin-cycle-summary">
+        <div><dt>Schedule</dt><dd>{statusLabel(configuration.automaticCycle.status)}</dd></div>
+        <div><dt>Opening</dt><dd><time dateTime={configuration.automaticCycle.opensAt}>
+          {displayUtcInstant(configuration.automaticCycle.opensAt)}</time></dd></div>
+        <div><dt>Closing</dt><dd><time dateTime={configuration.automaticCycle.closesAt}>
+          {displayUtcInstant(configuration.automaticCycle.closesAt)}</time></dd></div>
+      </dl>
+      <ul className="booking-admin-cycle-appointments">
+        {configuration.automaticCycle.appointments.map((appointment) => <li key={appointment.serviceCode}>
+          <strong>{appointment.serviceName}</strong>
+          <time dateTime={appointment.date}>{displayDate(appointment.date)}</time>
+        </li>)}
+      </ul>
+    </section> : null}
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-requirements">
       <div><h2 id="booking-admin-requirements">Booking requirements</h2>

@@ -115,6 +115,17 @@ test("authorised exact-community manager reads booking, services, requirements, 
   assert.deepEqual(configuration.dates[0], {
     serviceCode: "construction", serviceName: "Construction", date: "2026-08-30", windowStatus: "open",
   });
+  assert.ok(configuration.automaticCycle);
+  const automatic = bookingAdminModel("wos", snapshot(), new Date("2026-08-26T12:00:00Z"));
+  assert.equal(automatic.automaticCycle.opensAt, "2026-09-02T00:00:00.000Z");
+  assert.equal(automatic.automaticCycle.closesAt, "2026-09-06T12:00:00.000Z");
+  assert.deepEqual(automatic.automaticCycle.appointments.map(({ serviceCode, date }) => ({
+    serviceCode, date,
+  })), [
+    { serviceCode: "construction", date: "2026-09-07" },
+    { serviceCode: "research", date: "2026-09-08" },
+    { serviceCode: "troop", date: "2026-09-10" },
+  ]);
 });
 
 test("booking, service, resource, and speed-ups toggles persist and are audited", async () => {
@@ -179,10 +190,12 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
   assert.match(handler, /verifyAuthenticatedMutationCsrf/);
   assert.match(handler, /bookingAdminMutation/);
   assert.match(ui, /role="switch"/); assert.match(ui, /Read-only in Booking Admin v1/);
+  assert.match(ui, /Automatic booking cycle/);
   assert.doesNotMatch(ui, /create date|delete date|generate slot/i);
 });
 
 test("public admin model contains configuration only", () => {
   const model = bookingAdminModel("wos", snapshot());
   assert.doesNotMatch(JSON.stringify(model), /discord|actor|guild|audit|password|token/i);
+  assert.equal(bookingAdminModel("kingshot", snapshot()).automaticCycle, null);
 });
