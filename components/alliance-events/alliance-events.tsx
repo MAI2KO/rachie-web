@@ -79,7 +79,7 @@ export function AllianceEvents({ profile, community, alliances, unavailable }: {
                   </header>
                   <div className="alliance-event-list">
                     {alliance.events.map((event, eventIndex) => (
-                      <article className="alliance-event" key={`${event.name}:${eventIndex}`}>
+                      <article className="alliance-event-card" key={`${event.name}:${eventIndex}`}>
                         <h4>{event.name}</h4>
                         {(() => {
                           const occurrences = eventOccurrences(event);
@@ -88,7 +88,7 @@ export function AllianceEvents({ profile, community, alliances, unavailable }: {
                             ? <dl className="alliance-event-groups">
                               {occurrences.map((occurrence) => (
                                 <div className="alliance-event-group" key={`${occurrence.at}:${occurrence.group}`}>
-                                  <dt>{occurrence.group}</dt>
+                                  <dt>{occurrence.group}<span aria-hidden="true"> — </span></dt>
                                   <dd><OccurrenceTime instant={occurrence.at} /></dd>
                                 </div>
                               ))}

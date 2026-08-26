@@ -141,21 +141,28 @@ test("State and Kingdom share navigation and render UTC plus browser-local time 
   assert.doesNotMatch(topEvents, /AllianceEvents|alliance-events/);
 });
 
-test("Alliance Events presentation shows only alliance, event, group, and next UTC/local time", () => {
+test("Alliance Events presentation uses responsive event cards with event-led hierarchy", () => {
   const ui = fs.readFileSync(new URL("../components/alliance-events/alliance-events.tsx", import.meta.url), "utf8");
   const local = fs.readFileSync(new URL("../components/alliance-events/browser-local-time.tsx", import.meta.url), "utf8");
   const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(ui, /<h3>\{alliance\.name\}<\/h3>/);
   assert.match(ui, /<h4>\{event\.name\}<\/h4>/);
+  assert.match(ui, /<article className="alliance-event-card"/);
+  assert.match(ui, /alliance\.events\.map/);
   assert.match(ui, /alliance-event-groups/);
-  assert.match(ui, /<dt>\{occurrence\.group\}<\/dt>/);
+  assert.match(ui, /<dt>\{occurrence\.group\}/);
+  assert.match(ui, /aria-hidden="true"> — /);
   assert.match(ui, /event\.upcoming\.slice\(0, 1\)/);
   assert.doesNotMatch(ui, /event\.upcoming\.map/);
   assert.doesNotMatch(ui, /event\.recurrence\.summary|Upcoming:|utcDate/);
   assert.doesNotMatch(ui, /First date|advance reminder|final reminder|publish_to_state|roundup settings/i);
   assert.match(local, /Your local time/);
-  assert.match(css, /\.alliance-event-list \{ display: grid; \}/);
-  assert.match(css, /\.alliance-event \+ \.alliance-event \{ border-top:/);
+  assert.match(css, /\.alliance-event-list \{[^}]*grid-template-columns: repeat\(2,/);
+  assert.match(css, /\.alliance-event-card \{[^}]*border: 1px solid/);
+  assert.match(css, /\.alliance-event-card h4 \{[^}]*font-weight: 800/);
+  assert.match(css, /\.alliance-event-group dt \{[^}]*font-weight: 500/);
+  assert.doesNotMatch(css, /alliance-event-group[^}]*justify-content: space-between/);
+  assert.match(css, /@media \(max-width: 39\.99rem\)[\s\S]*\.alliance-event-list \{ grid-template-columns: 1fr; \}/);
   assert.doesNotMatch(css, /alliance-event-recurrence|alliance-event-upcoming/);
 });
 

@@ -413,16 +413,15 @@ button:focus-visible,
 .alliance-schedule { border: 1px solid var(--brand-border); border-radius: 0.75rem; overflow: hidden; background: var(--brand-surface); }
 .alliance-schedule > header { display: flex; gap: 0.55rem; min-height: 3.5rem; padding: 0.8rem 1rem; align-items: center; border-bottom: 2px solid var(--brand-accent-strong); background: var(--brand-surface-muted); }
 .alliance-schedule > header h3 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.45rem); }
-.alliance-event-list { display: grid; }
-.alliance-event { padding: 1rem; }
-.alliance-event + .alliance-event { border-top: 1px solid var(--brand-border); }
-.alliance-event h4 { margin: 0 0 0.65rem; font-size: 1rem; }
+.alliance-event-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; padding: 0.75rem; align-items: start; }
+.alliance-event-card { min-width: 0; padding: 0.8rem 0.9rem; border: 1px solid var(--brand-border); border-radius: 0.65rem; background: var(--brand-surface); }
+.alliance-event-card h4 { margin: 0 0 0.55rem; font-size: 1rem; font-weight: 800; }
 .alliance-event-groups { display: grid; gap: 0.35rem; margin: 0; }
-.alliance-event-group { display: grid; grid-template-columns: minmax(6rem, 1fr) auto; gap: 0.75rem; align-items: baseline; }
-.alliance-event-group dt { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
-.alliance-event-group dd { margin: 0; text-align: right; }
+.alliance-event-group { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: baseline; font-size: 0.875rem; }
+.alliance-event-group dt { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.alliance-event-group dd { margin: 0; }
 .alliance-event-time { margin: 0; }
-.alliance-occurrence-time { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; justify-content: flex-end; font-variant-numeric: tabular-nums; }
+.alliance-occurrence-time { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; color: var(--brand-text-muted); font-variant-numeric: tabular-nums; font-weight: 400; }
 .alliance-occurrence-time__local { color: var(--brand-text-muted); }
 
 .guest-booking { max-width: 46rem; margin-inline: auto; }
@@ -480,9 +479,7 @@ button:focus-visible,
   .guest-service-options { grid-template-columns: 1fr; }
   .guest-slot-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .guest-details { grid-template-columns: 1fr; }
-  .alliance-event-group { grid-template-columns: 1fr; gap: 0.1rem; }
-  .alliance-event-group dd { text-align: left; }
-  .alliance-occurrence-time { justify-content: flex-start; }
+  .alliance-event-list { grid-template-columns: 1fr; }
 }
 
 .site-footer {
