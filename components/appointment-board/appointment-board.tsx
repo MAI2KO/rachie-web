@@ -304,7 +304,8 @@ export function AppointmentBoard({ profile, initialBoard }: {
           </button>
         </div> : null}
       </header>
-      <CommunitySectionNavigation communityCode={initialBoard.community.code} current="appointments" profile={profile} />
+      <CommunitySectionNavigation communityCode={initialBoard.community.code} current="appointments" profile={profile}
+        showAdmin={Boolean(managerBoard)} />
       {notice ? <p aria-live="polite" className="booking-notice">{notice}</p> : null}
       {managerBoard
         ? <ManagerPanels board={managerBoard} busyBooking={busyBooking} busyRequest={busyRequest}

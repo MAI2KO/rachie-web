@@ -96,6 +96,7 @@ The initial migration creates:
 | `booking_settings` | Current requirements and retained inert legacy metadata |
 | `booking_windows` | Historical booking cycles and lifecycle |
 | `minister_services` | Profile-scoped construction, research, and troop definitions |
+| `booking_community_services` | Community-scoped service enablement overrides |
 | `booking_service_dates` | One PostgreSQL `date` per service/window |
 | `appointment_slots` | Ordered slots and their exact display labels |
 | `booking_slot_blocks` | Active/cancelled administrative reservations |

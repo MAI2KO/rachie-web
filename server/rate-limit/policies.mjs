@@ -41,4 +41,9 @@ export const RATE_LIMIT_POLICIES = Object.freeze({
     limit: 20,
     windowSeconds: 60,
   }),
+  bookingAdminMutation: Object.freeze({
+    code: "booking_admin_mutation",
+    limit: 20,
+    windowSeconds: 60,
+  }),
 });

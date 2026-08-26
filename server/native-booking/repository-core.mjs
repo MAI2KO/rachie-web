@@ -360,7 +360,8 @@ class ProfileScopedBookingSession {
               slot.service_code, slot.booking_date, slot.display_time_label,
               slot.status AS slot_status, booking_window.status AS window_status,
               booking_window.opens_at, booking_window.closes_at,
-              service.active AS service_active, service.display_label AS service_label
+              COALESCE(community_service.enabled, service.active) AS service_active,
+              service.display_label AS service_label
        FROM appointment_slots AS slot
        JOIN booking_windows AS booking_window
          ON booking_window.game_profile = slot.game_profile
@@ -369,6 +370,10 @@ class ProfileScopedBookingSession {
        JOIN minister_services AS service
          ON service.game_profile = slot.game_profile
         AND service.service_code = slot.service_code
+       LEFT JOIN booking_community_services AS community_service
+         ON community_service.game_profile = slot.game_profile
+        AND community_service.community_id = slot.community_id
+        AND community_service.service_code = slot.service_code
        WHERE slot.game_profile = $1 AND slot.community_id = $2 AND slot.id = $3
        FOR UPDATE OF slot`,
       [this.gameProfile, communityId, slotId],
@@ -487,14 +492,19 @@ class ProfileScopedBookingSession {
     return result.rows[0] ?? null;
   }
 
-  async listActiveMinisterServices() {
+  async listActiveMinisterServices(communityId) {
     const result = await this.client.query(
-      `SELECT game_profile, service_code, display_label, appointment_label,
-              sort_order
-       FROM minister_services
-       WHERE game_profile = $1 AND active = true
-       ORDER BY sort_order, service_code`,
-      [this.gameProfile],
+      `SELECT service.game_profile,service.service_code,service.display_label,
+              service.appointment_label,service.sort_order
+       FROM minister_services AS service
+       LEFT JOIN booking_community_services AS community_service
+         ON community_service.game_profile = service.game_profile
+        AND community_service.community_id = $2
+        AND community_service.service_code = service.service_code
+       WHERE service.game_profile = $1
+         AND COALESCE(community_service.enabled, service.active) = true
+       ORDER BY service.sort_order,service.service_code`,
+      [this.gameProfile, communityId],
     );
     return result.rows;
   }
@@ -506,10 +516,14 @@ class ProfileScopedBookingSession {
        JOIN minister_services AS service
          ON service.game_profile = dates.game_profile
         AND service.service_code = dates.service_code
+       LEFT JOIN booking_community_services AS community_service
+         ON community_service.game_profile = dates.game_profile
+        AND community_service.community_id = dates.community_id
+        AND community_service.service_code = dates.service_code
        WHERE dates.game_profile = $1
          AND dates.community_id = $2
          AND dates.window_id = $3
-         AND service.active = true
+         AND COALESCE(community_service.enabled, service.active) = true
        ORDER BY service.sort_order, dates.service_code`,
       [this.gameProfile, communityId, windowId],
     );
@@ -547,6 +561,10 @@ class ProfileScopedBookingSession {
        JOIN minister_services AS service
          ON service.game_profile = slot.game_profile
         AND service.service_code = slot.service_code
+       LEFT JOIN booking_community_services AS community_service
+         ON community_service.game_profile = slot.game_profile
+        AND community_service.community_id = slot.community_id
+        AND community_service.service_code = slot.service_code
        WHERE slot.game_profile = $1
          AND slot.community_id = $2
          AND slot.window_id = $3
@@ -555,7 +573,7 @@ class ProfileScopedBookingSession {
          AND community.status = 'active'
          AND community.bookings_open = true
          AND booking_window.status = 'open'
-         AND service.active = true
+         AND COALESCE(community_service.enabled, service.active) = true
          AND NOT EXISTS (
            SELECT 1
            FROM minister_bookings AS booking
@@ -802,9 +820,9 @@ export function createProfileScopedBookingRepository(gameProfile, pool) {
         session.findCurrentBookingWindow(communityId),
       );
     },
-    listActiveMinisterServices() {
+    listActiveMinisterServices(communityId) {
       return withTransaction((session) =>
-        session.listActiveMinisterServices(),
+        session.listActiveMinisterServices(communityId),
       );
     },
     listServiceDates(communityId, windowId) {

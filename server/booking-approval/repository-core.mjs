@@ -51,7 +51,8 @@ class ProfileScopedApprovalSession {
               slot.service_code, slot.booking_date, slot.display_time_label,
               slot.status AS slot_status, booking_window.status AS window_status,
               booking_window.opens_at, booking_window.closes_at,
-              service.active AS service_active, service.display_label AS service_label
+              COALESCE(community_service.enabled, service.active) AS service_active,
+              service.display_label AS service_label
        FROM appointment_slots AS slot
        JOIN booking_windows AS booking_window
          ON booking_window.game_profile = slot.game_profile
@@ -60,6 +61,10 @@ class ProfileScopedApprovalSession {
        JOIN minister_services AS service
          ON service.game_profile = slot.game_profile
         AND service.service_code = slot.service_code
+       LEFT JOIN booking_community_services AS community_service
+         ON community_service.game_profile = slot.game_profile
+        AND community_service.community_id = slot.community_id
+        AND community_service.service_code = slot.service_code
        WHERE slot.game_profile = $1 AND slot.community_id = $2 AND slot.id = $3
        FOR UPDATE OF slot`,
       [this.gameProfile, communityId, slotId],
@@ -194,7 +199,12 @@ class ProfileScopedApprovalSession {
        JOIN current_window ON current_window.id=slot.window_id
        JOIN minister_services AS service
          ON service.game_profile=slot.game_profile AND service.service_code=slot.service_code
+       LEFT JOIN booking_community_services AS community_service
+         ON community_service.game_profile=slot.game_profile
+        AND community_service.community_id=slot.community_id
+        AND community_service.service_code=slot.service_code
        WHERE slot.game_profile=$1 AND slot.community_id=$2 AND slot.status='available'
+         AND COALESCE(community_service.enabled,service.active)=true
          AND NOT EXISTS (SELECT 1 FROM booking_slot_blocks AS block
            WHERE block.game_profile=slot.game_profile AND block.slot_id=slot.id
              AND block.cancelled_at IS NULL)

@@ -61,7 +61,7 @@ export function createNativeBookingReadService({
           communityId,
         );
         const window = await session.findCurrentBookingWindow(community.id);
-        const services = await session.listActiveMinisterServices();
+        const services = await session.listActiveMinisterServices(community.id);
         const settings = await session.findBookingSettings(community.id);
         const dates = window
           ? await session.listServiceDates(community.id, window.id)
@@ -97,7 +97,7 @@ export function createNativeBookingReadService({
           communityId,
         );
         const window = await session.findCurrentBookingWindow(community.id);
-        const services = await session.listActiveMinisterServices();
+        const services = await session.listActiveMinisterServices(community.id);
         const service = services.find(
           (candidate) => candidate.service_code === serviceCode,
         );

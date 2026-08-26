@@ -9,6 +9,8 @@ import { loadMigrations, runMigrations } from "../server/database/migrations.mjs
 import { runtimePrivilegeStatements } from "../server/database/runtime-privileges.mjs";
 import { createBookingCreationService } from "../server/native-booking/booking-creation-service-core.mjs";
 import { createBookingMutationService } from "../server/native-booking/booking-mutation-service-core.mjs";
+import { createProfileScopedBookingAdminRepository } from "../server/booking-admin/repository-core.mjs";
+import { createBookingAdminService } from "../server/booking-admin/service-core.mjs";
 import { createProfileScopedBookingRepository } from "../server/native-booking/repository-core.mjs";
 import { createRegistrationService } from "../server/native-booking/registration-service-core.mjs";
 
@@ -145,12 +147,13 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
       assert.equal(cancelled.body.booking.status, "cancelled");
     });
 
-    await t.test("row-lock grants do not permit business-column updates", async () => {
+    await t.test("admin grants permit only the intended booking configuration columns", async () => {
       const privileges = await runtime.query(
         `SELECT
            has_table_privilege(current_user,'booking_communities','UPDATE') AS community_table_update,
            has_column_privilege(current_user,'booking_communities','updated_at','UPDATE') AS community_lock_column,
            has_column_privilege(current_user,'booking_communities','bookings_open','UPDATE') AS community_business_column,
+           has_column_privilege(current_user,'booking_communities','status','UPDATE') AS community_status_column,
            has_table_privilege(current_user,'appointment_slots','UPDATE') AS slot_table_update,
            has_column_privilege(current_user,'appointment_slots','updated_at','UPDATE') AS slot_lock_column,
            has_column_privilege(current_user,'appointment_slots','status','UPDATE') AS slot_business_column`,
@@ -158,19 +161,40 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
       assert.deepEqual(privileges.rows[0], {
         community_table_update: false,
         community_lock_column: true,
-        community_business_column: false,
+        community_business_column: true,
+        community_status_column: false,
         slot_table_update: false,
         slot_lock_column: true,
         slot_business_column: false,
       });
       await assert.rejects(withProfile(runtime, "wos", (client) => client.query(
-        "UPDATE booking_communities SET bookings_open=false WHERE id=$1",
+        "UPDATE booking_communities SET status='archived' WHERE id=$1",
         [communityId],
       )), (error) => error.code === "42501");
       await assert.rejects(withProfile(runtime, "wos", (client) => client.query(
         "UPDATE appointment_slots SET status='blocked' WHERE id=$1",
         [slotIds[0]],
       )), (error) => error.code === "42501");
+    });
+
+    await t.test("runtime role can persist audited Booking Admin settings", async () => {
+      const managerContext = {
+        gameProfile: "wos", authorizedCommunityId: communityId,
+        discordUserId: "111111111111111111", displayName: "Runtime Manager",
+      };
+      const adminService = createBookingAdminService({
+        gameProfile: "wos", communityId, managerContext,
+        repository: createProfileScopedBookingAdminRepository("wos", runtime),
+      });
+      assert.equal((await adminService.update({ section: "booking", enabled: false }))
+        .community.bookingsEnabled, false);
+      assert.equal((await adminService.update({
+        section: "service", serviceCode: "construction", enabled: false,
+      })).services.find(({ code }) => code === "construction").enabled, false);
+      assert.equal((await adminService.update({
+        section: "requirement", serviceCode: "construction", requirementCode: "fc", enabled: true,
+      })).services.find(({ code }) => code === "construction")
+        .requirements.find(({ code }) => code === "fc").enabled, true);
     });
   } finally {
     await runtime?.end();

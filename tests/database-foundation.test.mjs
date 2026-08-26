@@ -188,6 +188,7 @@ test("migration files are ordered and checksummed", async () => {
       { version: "0004", name: "native_booking_participant_guard" },
       { version: "0005", name: "guest_booking_approval_foundation" },
       { version: "0006", name: "discord_booking_notifications" },
+      { version: "0007", name: "booking_admin_v1" },
     ],
   );
   assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));
@@ -320,4 +321,17 @@ test("initial schema encodes the native isolation and collision rules", () => {
   assert.match(schema, /FOREIGN KEY \(game_profile, community_id\)/);
   assert.doesNotMatch(schema, /join_password text/);
   assert.doesNotMatch(schema, /service_credential/);
+});
+
+test("Booking Admin service overrides are additive, community-scoped, and protected by RLS", () => {
+  const migration = fs.readFileSync(
+    path.join(migrationsDirectory, "0007_booking_admin_v1.sql"),
+    "utf8",
+  );
+  assert.match(migration, /CREATE TABLE booking_community_services/);
+  assert.match(migration, /PRIMARY KEY \(game_profile, community_id, service_code\)/);
+  assert.match(migration, /REFERENCES booking_communities \(game_profile, id\)/);
+  assert.match(migration, /REFERENCES minister_services \(game_profile, service_code\)/);
+  assert.match(migration, /ALTER TABLE booking_community_services FORCE ROW LEVEL SECURITY/);
+  assert.match(migration, /booking_community_services_profile_policy/);
 });

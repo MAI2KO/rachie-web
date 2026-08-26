@@ -5,6 +5,7 @@ export const RUNTIME_READ_TABLES = Object.freeze([
   "booking_windows",
   "minister_services",
   "booking_service_dates",
+  "booking_community_services",
   "appointment_slots",
   "booking_slot_blocks",
   "booking_guest_share_links",
@@ -35,6 +36,15 @@ export const RUNTIME_ROW_LOCK_COLUMNS = Object.freeze({
   booking_guest_share_links: "updated_at",
 });
 
+export const RUNTIME_ADMIN_UPDATE_COLUMNS = Object.freeze({
+  booking_communities: Object.freeze(["bookings_open", "version", "updated_at"]),
+  booking_settings: Object.freeze([
+    "construction_fc_required", "construction_rfc_required",
+    "construction_speedups_required", "research_shards_required",
+    "research_speedups_required", "troop_speedups_required", "version", "updated_at",
+  ]),
+});
+
 export const RUNTIME_DISCORD_NOTIFICATION_TABLE = "booking_discord_notifications";
 export const RUNTIME_INTEGRATION_NONCE_TABLE = "booking_integration_nonces";
 
@@ -52,6 +62,9 @@ export function runtimePrivilegeStatements(role, { includeRowLockPrivileges = tr
     `GRANT SELECT, INSERT, UPDATE, DELETE ON ${RUNTIME_WRITE_TABLES.join(", ")} TO ${grantee}`,
     `GRANT SELECT, INSERT, UPDATE ON ${RUNTIME_DISCORD_NOTIFICATION_TABLE} TO ${grantee}`,
     `GRANT SELECT, INSERT, DELETE ON ${RUNTIME_INTEGRATION_NONCE_TABLE} TO ${grantee}`,
+    `GRANT INSERT, UPDATE ON booking_community_services TO ${grantee}`,
+    ...Object.entries(RUNTIME_ADMIN_UPDATE_COLUMNS).map(([table, columns]) =>
+      `GRANT UPDATE (${columns.join(", ")}) ON ${table} TO ${grantee}`),
     ...(includeRowLockPrivileges
       ? Object.entries(RUNTIME_ROW_LOCK_COLUMNS).map(([table, column]) => `GRANT UPDATE (${column}) ON ${table} TO ${grantee}`)
       : []),

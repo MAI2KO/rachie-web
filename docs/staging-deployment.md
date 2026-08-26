@@ -164,6 +164,7 @@ owner:
 GRANT SELECT ON
   booking_communities, booking_discord_guilds, booking_settings,
   booking_windows, minister_services, booking_service_dates,
+  booking_community_services,
   appointment_slots, booking_slot_blocks, booking_guest_share_links
 TO rachie_peggie_runtime;
 
@@ -183,11 +184,20 @@ TO rachie_peggie_runtime;
 GRANT SELECT, INSERT, DELETE ON booking_integration_nonces
 TO rachie_peggie_runtime;
 
+-- Booking Admin may mutate only these reviewed community configuration fields.
+GRANT INSERT, UPDATE ON booking_community_services
+TO rachie_peggie_runtime;
+GRANT UPDATE (bookings_open, version, updated_at) ON booking_communities
+TO rachie_peggie_runtime;
+GRANT UPDATE (
+  construction_fc_required, construction_rfc_required,
+  construction_speedups_required, research_shards_required,
+  research_speedups_required, troop_speedups_required, version, updated_at
+) ON booking_settings TO rachie_peggie_runtime;
+
 -- PostgreSQL row locks require UPDATE privilege even when application code
 -- only selects and locks the row. Grant one low-authority metadata column,
 -- not table-wide UPDATE on these operator-owned configuration tables.
-GRANT UPDATE (updated_at) ON booking_communities
-TO rachie_peggie_runtime;
 GRANT UPDATE (updated_at) ON appointment_slots
 TO rachie_peggie_runtime;
 GRANT UPDATE (updated_at) ON booking_guest_share_links
@@ -206,13 +216,13 @@ SELECT-only staging grant, the first query fails with SQLSTATE `42501`
 (`permission denied for table booking_communities`). Granting only the community
 lock privilege exposes the same `42501` at the appointment-slot lock.
 
-Column-level `UPDATE (updated_at)` is sufficient for both row locks on
-PostgreSQL 18.6. It is preferable to table-wide `UPDATE`: the runtime still
-cannot change `booking_communities.bookings_open` or
-`appointment_slots.status`. The lock queries do not update `updated_at`; the
-grant is solely the narrow PostgreSQL authorization needed to acquire the row
-lock. Keep these grants paired with the lock methods when reviewing future
-schema or repository changes.
+Column-level `UPDATE` is sufficient for row locks on PostgreSQL 18.6 and remains
+preferable to table-wide `UPDATE`. Booking Admin deliberately adds access to
+`booking_communities.bookings_open` and the six existing requirement columns;
+the runtime still cannot change `booking_communities.status`,
+`appointment_slots.status`, approval policy, or other operator-owned fields.
+Keep these grants paired with the lock and Booking Admin repository methods when
+reviewing future schema changes.
 
 | Runtime path | Tables and operations | Required grant |
 | --- | --- | --- |
@@ -227,6 +237,7 @@ schema or repository changes.
 | Create | Booking, requirement-answer, audit and outbox inserts | Existing read/write-table grants |
 | Reschedule | Booking/participant locks, booking update+insert, answer/audit/outbox inserts | Existing grants plus both narrow lock grants |
 | Cancellation | Booking/participant locks, booking update, audit/outbox inserts | Existing grants plus community lock grant |
+| Booking Admin | Community booking flag, service overrides, requirement flags and audit insert | Narrow configuration-column grants plus service-override `INSERT, UPDATE` |
 | Guest link resolution | Active hashed-link read with `FOR SHARE OF link` | Link `SELECT` plus `UPDATE (updated_at)` |
 | Guest pending request | Request/answer/audit/outbox inserts and expired-hold updates | Approval-table read/write grants plus community/slot lock grants |
 | Approval/denial/expiry | Request and slot locks, request/booking/answer/audit/outbox updates | Existing booking grants plus approval-table grants |

@@ -126,7 +126,7 @@ export interface NativeBookingSession {
   findCurrentBookingWindow(
     communityId: string,
   ): Promise<BookingWindowRecord | null>;
-  listActiveMinisterServices(): Promise<readonly MinisterServiceRecord[]>;
+  listActiveMinisterServices(communityId: string): Promise<readonly MinisterServiceRecord[]>;
   listServiceDates(
     communityId: string,
     windowId: string,

@@ -133,6 +133,7 @@ test(
             "booking_approval_request_answers",
             "booking_approval_requests",
             "booking_change_events",
+            "booking_community_services",
             "booking_communities",
             "booking_discord_guilds",
             "booking_discord_notifications",
