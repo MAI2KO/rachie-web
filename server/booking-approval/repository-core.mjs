@@ -397,7 +397,7 @@ class ProfileScopedApprovalSession {
 
   async listLinkedManagerGuilds(communityId) {
     const result = await this.client.query(
-      `SELECT discord_guild_id,bot_manager_role_id
+      `SELECT discord_guild_id
        FROM booking_discord_guilds
        WHERE game_profile=$1 AND community_id=$2
        ORDER BY discord_guild_id`,

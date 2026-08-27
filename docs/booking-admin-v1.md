@@ -4,7 +4,9 @@ Booking Admin is available to an existing authorized community manager at
 `/state/{communityCode}/admin` for WOS and `/kingdom/{communityCode}/admin` for
 Kingshot. It reuses the appointment-board manager authorization check against
 the exact profile and community: Discord guild owner, Discord Administrator,
-or the configured bot-manager role.
+or the configured bot-manager role. Custom-role authority is a live signed query
+to the matching bot instance, whose native PostgreSQL setup is authoritative; the
+booking database's historical role column is not an authorization source.
 
 The manager-only endpoint is `GET` and `PATCH`
 `/api/v1/booking-admin/{communityCode}`. Mutations require the authenticated

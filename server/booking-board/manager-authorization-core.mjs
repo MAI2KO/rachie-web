@@ -49,7 +49,6 @@ export function createCommunityManagerAuthorizer({
           gameProfile,
           discordUserId: discordSession.discordUser.id,
           guildId: guild.discord_guild_id,
-          managerRoleId: guild.bot_manager_role_id,
         });
         if (result.status === "authorized") {
           return Object.freeze({

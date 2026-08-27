@@ -234,7 +234,10 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
   assert.match(apiRoute, /GET/); assert.match(apiRoute, /PATCH/);
   assert.match(page, /authorizeBookingAdminRequest/); assert.match(page, /notFound/);
   assert.match(access, /createCommunityManagerAuthorizer/);
+  assert.match(access, /verifyDiscordGuildManager/);
   assert.match(handler, /authorizeBookingAdminRequest/);
+  assert.equal(handler.match(/await scope\(request, communityCode\)/g)?.length, 2,
+    "GET and PATCH share the same scoped authorization helper");
   assert.match(handler, /verifyAuthenticatedMutationCsrf/);
   assert.match(handler, /bookingAdminMutation/);
   assert.match(ui, /role="switch"/); assert.match(ui, /Read-only in Booking Admin v1/);

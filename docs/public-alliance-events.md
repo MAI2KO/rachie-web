@@ -4,6 +4,14 @@ The Discord bot scheduler remains the only source of truth. The website does not
 
 The bot scheduler and booking website currently use separate configured PostgreSQL databases. This integration therefore avoids giving the public website scheduler-database credentials. Configure `RACHIE_ALLIANCE_EVENTS_INTERNAL_URL` and `RACHIE_ALLIANCE_EVENTS_INTEGRATION_SECRET` for WOS, and the equivalent `PEGGIE_...` values for Kingshot. URLs must use HTTPS (loopback HTTP is accepted for local testing), and secrets must be at least 32 characters. Use a distinct random secret for each profile.
 
+The same private listener and signing configuration serve live website manager
+decisions at
+`/internal/v1/manager-authorization/guild/{guildId}/user/{discordUserId}`. The
+website supplies only guild and authenticated Discord user IDs resolved inside
+the exact booking community/profile. The bot returns only `canManage` and the
+bounded authorization kind; role IDs and member role lists are never returned.
+Manager decisions use `cache: no-store` and are not stored in login sessions.
+
 Routes are `/state/{code}/events` and `/kingdom/{code}/events`. Their parent appointment pages remain `/state/{code}` and `/kingdom/{code}`. Both share the **Appointments / Alliance Events** navigation. `GET /api/v1/communities/{code}/alliance-events` is anonymous; the hostname, never a query parameter or request body, selects WOS or Kingshot.
 
 The website resolves the active profile-scoped `booking_communities` row by its State/Kingdom code, then reads Discord guild IDs linked to that exact community from `booking_discord_guilds`. It requests each guild's active `scheduled_events` from the matching profile bot and merges the public-safe responses. No State Discord destination or `event_state_links` row is required. The bot read never queries canonical `state_events`, so State-wide events remain excluded. Paused and soft-deleted alliance events are excluded. Multiple linked alliances are grouped and sorted by alliance name; their events are sorted by next occurrence, then name. The scheduler's existing recurrence engine calculates exactly three upcoming occurrences, including group streams.

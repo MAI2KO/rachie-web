@@ -99,15 +99,18 @@ cannot choose that scope. A manager assertion for one community is rejected for
 another community, including communities with the same code in the other game
 profile.
 
-`booking_discord_guilds.bot_manager_role_id` stores the configured “can manage
-the bot” role per linked guild. A future Discord authorization adapter must grant
-the trusted assertion when the authenticated user is either:
+`booking_discord_guilds.bot_manager_role_id` historically stored the configured
+“can manage the bot” role per linked guild, but it is no longer an authorization
+source. The live signed bot adapter grants the trusted assertion when the
+authenticated user is either:
 
 - an administrator of any linked guild; or
 - a current member of that linked guild's configured manager role.
 
-That live Discord permission/role resolver is remaining work. Display names may
-be stored for audit presentation but never establish identity; Discord user ID
+The exact profile bot reads its native PostgreSQL manager role and checks the
+current guild member without caching the decision in the website session.
+Display names may be stored for audit presentation but never establish identity;
+Discord user ID
 is canonical.
 
 ## Public and administrator representations

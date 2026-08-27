@@ -29,9 +29,17 @@ On desktop, configured service panels appear side by side. Each has its own date
 The board checks the existing Discord session in the background. Anonymous users and ordinary guild members keep the public view. A manager view is returned only after live, bounded server verification proves that the user qualifies in at least one Discord guild linked to that State/Kingdom by either:
 
 - being the guild owner or holding a live role with Discord's `Administrator` permission; or
-- holding the live role configured in `booking_discord_guilds.bot_manager_role_id`.
+- holding the live role configured in the linked bot's native PostgreSQL
+  `bot_managed_discord_setups.bot_manager_role_id` for the exact profile and guild.
 
-The bot checks the current guild member role list. Administrator checks also compare those roles with current guild role permissions and check current ownership. No stored login-time manager claim is trusted. Unavailable or malformed Discord responses fail closed. Any linked guild may qualify, but authority remains scoped to that community and profile.
+The website resolves the community's linked guild IDs, then asks the corresponding
+R.A.C.H.I.E or P.E.G.G.I.E private service for a live decision over the existing
+profile-specific signed integration. The bot checks current ownership,
+Administrator permission, and its native manager-role configuration. The website
+does not trust a stored login-time claim or cache the result. A bot lookup failure
+fails closed for role-only users; the existing direct Discord check remains as an
+owner/Administrator fallback. Any linked guild may qualify, but authority remains
+scoped to that community and profile.
 
 The manager serializer may return in-game name, Player ID, alliance, requirements, pending/confirmed state, action IDs, and recent activity. It does not return linked guild IDs. Every manager read and mutation repeats server authorization.
 
