@@ -39,6 +39,7 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
   const kingshotCommunityId = randomUUID();
   const legacyWindowId = randomUUID();
   const bookingId = randomUUID();
+  const guestTokenSecret = "integration-booking-secret-value-123456789";
   try {
     await runMigrations(pool, await loadMigrations(
       fileURLToPath(new URL("../db/migrations/", import.meta.url)),
@@ -57,6 +58,12 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
          VALUES ('wos',$1,$2,'closed','2026-08-05T00:00:00Z','2026-08-09T12:00:00Z',
                  '2026-08-05T00:00:00Z','2026-08-09T12:00:00Z','system','legacy-template')`,
         [legacyWindowId, wosCommunityId],
+      );
+      await client.query(
+        `INSERT INTO booking_discord_guilds
+           (game_profile,discord_guild_id,community_id,discord_guild_name)
+         VALUES ('wos','777777777777777777',$1,'Test Guild')`,
+        [wosCommunityId],
       );
       for (const [serviceCode, bookingDate] of [
         ["construction", "2026-08-10"], ["research", "2026-08-11"], ["troop", "2026-08-13"],
@@ -113,7 +120,7 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
     });
 
     const beforeOpen = new Date("2026-09-01T23:59:59.999Z");
-    await reconcileAutomaticWosBookingCycles({ pool, now: beforeOpen });
+    await reconcileAutomaticWosBookingCycles({ pool, now: beforeOpen, guestTokenSecret });
     const repository = createProfileScopedBookingRepository("wos", pool);
     const read = createNativeBookingReadService({
       gameProfile: "wos", communityId: wosCommunityId, repository,
@@ -127,7 +134,7 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
          (SELECT count(*)::int FROM appointment_slots WHERE community_id=$1) AS slots`,
       [wosCommunityId],
     ));
-    await reconcileAutomaticWosBookingCycles({ pool, now: beforeOpen });
+    await reconcileAutomaticWosBookingCycles({ pool, now: beforeOpen, guestTokenSecret });
     const countsAfterSecond = await withProfile(pool, "wos", (client) => client.query(
       `SELECT
          (SELECT count(*)::int FROM booking_windows WHERE community_id=$1) AS windows,
@@ -138,15 +145,42 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
     assert.deepEqual(countsAfterSecond.rows[0], countsAfterFirst.rows[0]);
     assert.deepEqual(countsAfterFirst.rows[0], { windows: 3, dates: 9, slots: 9 });
 
-    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-02T00:00:00.000Z") });
+    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-02T00:00:00.000Z"), guestTokenSecret });
     assert.equal((await read.getContext()).bookingsOpen, true);
-    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-06T12:00:00.000Z") });
+    const openLifecycle = await withProfile(pool, "wos", (client) => client.query(
+      `SELECT
+         (SELECT count(*)::int FROM booking_guest_share_links
+           WHERE community_id=$1 AND revoked_at IS NULL) AS active_links,
+         (SELECT count(*)::int FROM booking_discord_notifications
+           WHERE community_id=$1 AND notification_type='booking_window_open') AS announcements,
+         (SELECT bool_and(token_hash ~ '^[0-9a-f]{64}$') FROM booking_guest_share_links
+           WHERE community_id=$1) AS hashes_only`,
+      [wosCommunityId],
+    ));
+    assert.deepEqual(openLifecycle.rows[0], {
+      active_links: 1, announcements: 1, hashes_only: true,
+    });
+    await reconcileAutomaticWosBookingCycles({
+      pool, now: new Date("2026-09-03T00:00:00.000Z"), guestTokenSecret,
+    });
+    const restartCount = await withProfile(pool, "wos", (client) => client.query(
+      `SELECT count(*)::int AS count FROM booking_discord_notifications
+        WHERE community_id=$1 AND notification_type='booking_window_open'`,
+      [wosCommunityId],
+    ));
+    assert.equal(restartCount.rows[0].count, 1);
+    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-06T12:00:00.000Z"), guestTokenSecret });
     assert.equal((await read.getContext()).bookingsOpen, false);
+    const closedLinks = await withProfile(pool, "wos", (client) => client.query(
+      `SELECT count(*)::int AS count FROM booking_guest_share_links
+        WHERE community_id=$1 AND revoked_at IS NULL`, [wosCommunityId],
+    ));
+    assert.equal(closedLinks.rows[0].count, 0);
 
     await withProfile(pool, "wos", (client) => client.query(
       "UPDATE booking_communities SET bookings_open=false WHERE id=$1", [wosCommunityId],
     ));
-    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-30T00:00:00.000Z") });
+    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-30T00:00:00.000Z"), guestTokenSecret });
     assert.equal((await read.getContext()).bookingsOpen, false);
 
     await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-10-28T01:00:00.000Z") });

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getDatabasePool } from "@/server/database/pool";
+import { getBookingIntegrationSecret } from "@/server/discord-integration/config";
 
 import { reconcileAutomaticWosBookingCycles } from "./repository-core.mjs";
 
@@ -13,7 +14,10 @@ async function reconcile() {
   const pool = getDatabasePool();
   if (!pool) return;
   try {
-    await reconcileAutomaticWosBookingCycles({ pool });
+    await reconcileAutomaticWosBookingCycles({
+      pool,
+      guestTokenSecret: getBookingIntegrationSecret("wos"),
+    });
   } catch (error) {
     console.error("[Automatic booking cycle] Reconciliation failed.", error);
   }

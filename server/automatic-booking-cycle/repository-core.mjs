@@ -3,6 +3,7 @@ import {
   automaticWosCyclesToReconcile,
   automaticWosCycleStatus,
 } from "./domain-core.mjs";
+import { automaticWindowGuestTokenRecord } from "./announcement-core.mjs";
 
 const PROFILE = "wos";
 const ACTOR_ID = "automatic-wos-28-day-cycle-v1";
@@ -79,7 +80,50 @@ async function latestSlotTemplate(client, communityId, serviceCode, beforeDate) 
   )).rows;
 }
 
-async function reconcileCycle(client, community, cycle, at) {
+async function reconcileWindowAnnouncement(client, community, windowId, cycle, at, guestTokenSecret) {
+  if (at < new Date(cycle.opensAt) || at >= new Date(cycle.closesAt)) return 0;
+  const token = automaticWindowGuestTokenRecord(
+    guestTokenSecret, PROFILE, community.id, windowId,
+  );
+  if (!token) return 0;
+
+  const current = (await client.query(
+    `SELECT id FROM booking_guest_share_links
+      WHERE game_profile=$1 AND community_id=$2 AND revoked_at IS NULL
+      ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`,
+    [PROFILE, community.id],
+  )).rows[0] ?? null;
+  const linkId = automaticBookingUuid(community.id, windowId, "automatic-guest-link");
+  if (current?.id !== linkId) {
+    if (current) await client.query(
+      `UPDATE booking_guest_share_links
+          SET revoked_at=$3,revoked_by_actor_id=$4,updated_at=$3
+        WHERE game_profile=$1 AND id=$2 AND revoked_at IS NULL`,
+      [PROFILE, current.id, at, ACTOR_ID],
+    );
+    await client.query(
+      `INSERT INTO booking_guest_share_links
+         (game_profile,id,community_id,token_hash,token_hint,label,created_by_actor_id,
+          expires_at,rotated_from_link_id,booking_window_id)
+       VALUES ($1,$2,$3,$4,$5,'Automatic booking window',$6,$7,$8,$9)
+       ON CONFLICT (game_profile,id) DO NOTHING`,
+      [PROFILE, linkId, community.id, token.tokenHash, token.tokenHint, ACTOR_ID,
+       cycle.closesAt, current?.id ?? null, windowId],
+    );
+  }
+  const inserted = await client.query(
+    `INSERT INTO booking_discord_notifications
+       (game_profile,id,community_id,notification_type,booking_window_id,
+        guest_share_link_id,due_at,idempotency_key)
+     VALUES ($1,$2,$3,'booking_window_open',$4,$5,$6,$7)
+     ON CONFLICT (game_profile,community_id,idempotency_key) DO NOTHING`,
+    [PROFILE, automaticBookingUuid(windowId, "booking-open-notification"), community.id,
+     windowId, linkId, cycle.opensAt, `booking-window-open:${windowId}`],
+  );
+  return inserted.rowCount;
+}
+
+async function reconcileCycle(client, community, cycle, at, guestTokenSecret) {
   const templates = new Map();
   for (const serviceCode of SERVICE_CODES) {
     templates.set(serviceCode, await latestSlotTemplate(
@@ -164,10 +208,17 @@ async function reconcileCycle(client, community, cycle, at) {
       slotsCreated += inserted.rowCount;
     }
   }
-  return { cycleIndex: cycle.index, status: desiredStatus, windowsCreated, datesCreated, slotsCreated };
+  const announcementsCreated = desiredStatus === "open"
+    ? await reconcileWindowAnnouncement(
+      client, community, windowId, cycle, at, guestTokenSecret,
+    ) : 0;
+  return { cycleIndex: cycle.index, status: desiredStatus, windowsCreated, datesCreated,
+    slotsCreated, announcementsCreated };
 }
 
-export async function reconcileAutomaticWosBookingCycles({ pool, now = new Date(), futureCycles = 1 }) {
+export async function reconcileAutomaticWosBookingCycles({
+  pool, now = new Date(), futureCycles = 1, guestTokenSecret,
+}) {
   const cycles = automaticWosCyclesToReconcile(now, futureCycles);
   const communities = await listCommunities(pool);
   const results = [];
@@ -183,8 +234,21 @@ export async function reconcileAutomaticWosBookingCycles({ pool, now = new Date(
             AND closes_at IS NOT NULL AND closes_at<=$3`,
         [PROFILE, community.id, now],
       );
+      await client.query(
+        `UPDATE booking_guest_share_links AS link
+            SET revoked_at=$3,revoked_by_actor_id=$4,updated_at=$3
+          FROM booking_windows AS booking_window
+         WHERE link.game_profile=$1 AND link.community_id=$2 AND link.revoked_at IS NULL
+           AND link.booking_window_id=booking_window.id
+           AND booking_window.game_profile=link.game_profile
+           AND booking_window.community_id=link.community_id
+           AND booking_window.closes_at<=$3`,
+        [PROFILE, community.id, now, ACTOR_ID],
+      );
       const reconciled = [];
-      for (const cycle of cycles) reconciled.push(await reconcileCycle(client, community, cycle, now));
+      for (const cycle of cycles) reconciled.push(await reconcileCycle(
+        client, community, cycle, now, guestTokenSecret,
+      ));
       return reconciled;
     });
     results.push({ communityId: community.id, communityCode: community.location_code, cycles: communityResults });

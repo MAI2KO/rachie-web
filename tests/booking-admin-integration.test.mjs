@@ -205,7 +205,7 @@ test("Booking Admin migration backfills existing communities through profile RLS
   const communityId = randomUUID();
   try {
     const migrations = await loadMigrations(migrationsDirectory);
-    await runMigrations(pool, migrations.slice(0, -1));
+    await runMigrations(pool, migrations.slice(0, -2));
     for (const profile of ["wos", "kingshot"]) {
       await withProfile(pool, profile, (client) => client.query(
         `INSERT INTO booking_communities

@@ -24,7 +24,7 @@ const observedAuthenticationFailures = new Set<string>();
 
 interface IntegrationSession {
   consumeNonce(nonce: string, expiresAt: Date): Promise<boolean>;
-  claim(limit: unknown): Promise<unknown[]>;
+  claim(limit: unknown, deliveryContext?: object): Promise<unknown[]>;
   registerRecipients(workId: string, claimToken: unknown, recipients: unknown[]): Promise<boolean>;
   finish(workId: string, claimToken: unknown, outcome: object): Promise<boolean>;
 }
@@ -99,7 +99,11 @@ export async function handleDiscordWorkClaim(request: Request) {
       });
     }
     const body = scope.body as { limit?: unknown };
-    const work = await scope.repository.withTransaction((session) => session.claim(body.limit));
+    const secret = getBookingIntegrationSecret(scope.profile);
+    const work = await scope.repository.withTransaction((session) => session.claim(body.limit, {
+      guestTokenSecret: secret,
+      publicBaseUrl: new URL(request.url).origin,
+    }));
     if (work.length > 0) {
       console.info("discord_booking_integration_work_claimed", {
         profile: scope.profile,

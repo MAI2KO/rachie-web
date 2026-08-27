@@ -143,7 +143,8 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
     await t.test("the documented SELECT-only configuration grant reproduces SQLSTATE 42501", async () => {
       await assert.rejects(
         creator.create(choice(slotIds[0]), "runtime-booking-before-lock-grants"),
-        (error) => error.code === "42501" && /booking_communities/.test(error.message),
+        (error) => error.code === "42501"
+          && /booking_(?:communities|appointment_slots)|appointment_slots/.test(error.message),
       );
       const started = await withProfile(runtime, "wos", (client) => client.query(
         "SELECT count(*)::int AS count FROM booking_idempotency_keys WHERE operation='booking_create'",

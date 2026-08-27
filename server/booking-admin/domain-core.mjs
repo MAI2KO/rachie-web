@@ -29,6 +29,11 @@ export class BookingAdminValidationError extends Error {
   }
 }
 
+function dateOnly(value) {
+  if (!(value instanceof Date)) return String(value).slice(0, 10);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
 function exactKeys(value, expected) {
   const keys = Object.keys(value).sort();
   return keys.length === expected.length
@@ -116,7 +121,7 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date()) {
     dates: Object.freeze(snapshot.dates.map((date) => Object.freeze({
       serviceCode: date.service_code,
       serviceName: date.display_label,
-      date: String(date.booking_date).slice(0, 10),
+      date: dateOnly(date.booking_date),
       windowStatus: date.window_status,
     }))),
   });

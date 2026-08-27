@@ -71,7 +71,8 @@ test(
         fileURLToPath(new URL("../db/migrations/", import.meta.url)),
       );
       const migrationResult = await runMigrations(migrationPool, migrations);
-      assert.deepEqual(migrationResult.applied, ["0001", "0002", "0003", "0004", "0005", "0006"]);
+      assert.deepEqual(migrationResult.applied,
+        ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"]);
 
       await adminPool.query(
         `CREATE ROLE ${runtimeRole}

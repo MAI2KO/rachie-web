@@ -189,6 +189,7 @@ test("migration files are ordered and checksummed", async () => {
       { version: "0005", name: "guest_booking_approval_foundation" },
       { version: "0006", name: "discord_booking_notifications" },
       { version: "0007", name: "booking_admin_v1" },
+      { version: "0008", name: "booking_window_announcements" },
     ],
   );
   assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));

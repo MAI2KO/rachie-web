@@ -9,6 +9,10 @@ import {
   wosBookingCycleAtIndex,
   wosBookingCycleIndexAtOrBefore,
 } from "../server/automatic-booking-cycle/domain-core.mjs";
+import {
+  automaticWindowGuestToken,
+  automaticWindowGuestTokenRecord,
+} from "../server/automatic-booking-cycle/announcement-core.mjs";
 
 test("historical anchor derives the fixed September WOS booking cycle", () => {
   const cycle = wosBookingCycleAtIndex(1);
@@ -54,4 +58,21 @@ test("scheduled availability boundaries are inclusive at open and exclusive at c
   assert.equal(automaticWosCycleStatus(cycle, new Date(cycle.opensAt)), "open");
   assert.equal(automaticWosCycleStatus(cycle, new Date("2026-09-06T11:59:59.999Z")), "open");
   assert.equal(automaticWosCycleStatus(cycle, new Date(cycle.closesAt)), "closed");
+});
+
+test("automatic guest tokens are opaque, window-specific, and only hash and hint are persisted", () => {
+  const secret = "test-booking-integration-secret-value-123456";
+  const first = automaticWindowGuestToken(secret, "wos", "community", "window-one");
+  const retry = automaticWindowGuestToken(secret, "wos", "community", "window-one");
+  const next = automaticWindowGuestToken(secret, "wos", "community", "window-two");
+  assert.equal(first, retry);
+  assert.notEqual(first, next);
+  assert.match(first, /^[A-Za-z0-9_-]{43}$/);
+  const persisted = automaticWindowGuestTokenRecord(
+    secret, "wos", "community", "window-one",
+  );
+  assert.deepEqual(Object.keys(persisted).sort(), ["tokenHash", "tokenHint"]);
+  assert.equal(persisted.tokenHash.length, 64);
+  assert.equal(persisted.tokenHint, first.slice(0, 6));
+  assert.doesNotMatch(JSON.stringify(persisted), new RegExp(first));
 });

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { automaticWindowGuestToken } from "../automatic-booking-cycle/announcement-core.mjs";
+
 const PROFILES = new Set(["wos", "kingshot"]);
 const RETRY_MINUTES = [1, 5, 15, 30, 60];
 
@@ -146,13 +148,45 @@ async function materializePending(client, profile, limit = 100) {
   for (const event of result.rows) await materializeEvent(client, profile, event);
 }
 
-async function workPayload(client, profile, row) {
+async function workPayload(client, profile, row, deliveryContext = {}) {
   const base = {
     workId: row.id, claimToken: row.claim_token, profile,
     type: row.notification_type, recipientDiscordUserId: row.recipient_discord_user_id,
     sourceDiscordGuildId: row.source_discord_guild_id,
     attributionDisplayName: row.attribution_display_name,
   };
+  if (row.notification_type === "booking_window_open") {
+    const result = await client.query(
+      `SELECT community.location_code AS "communityCode",
+              booking_window.opens_at AS "opensAt",booking_window.closes_at AS "closesAt",
+              array_agg(guild.discord_guild_id ORDER BY guild.discord_guild_id)
+                FILTER (WHERE guild.discord_guild_id IS NOT NULL) AS guilds
+         FROM booking_windows AS booking_window
+         JOIN booking_communities AS community
+           ON community.game_profile=booking_window.game_profile
+          AND community.id=booking_window.community_id
+         LEFT JOIN booking_discord_guilds AS guild
+           ON guild.game_profile=booking_window.game_profile
+          AND guild.community_id=booking_window.community_id
+        WHERE booking_window.game_profile=$1 AND booking_window.id=$2
+        GROUP BY community.location_code,booking_window.opens_at,booking_window.closes_at`,
+      [profile, row.booking_window_id],
+    );
+    const details = result.rows[0];
+    const guestToken = automaticWindowGuestToken(
+      deliveryContext.guestTokenSecret, profile, row.community_id, row.booking_window_id,
+    );
+    if (!details || !guestToken || !deliveryContext.publicBaseUrl) {
+      throw new Error("booking_window_announcement_configuration");
+    }
+    return {
+      ...base,
+      ...details,
+      guilds: details.guilds ?? [],
+      memberUrl: `${deliveryContext.publicBaseUrl}/booking`,
+      guestUrl: `${deliveryContext.publicBaseUrl}/book/${guestToken}`,
+    };
+  }
   if (row.notification_type === "manager_discovery") {
     const guilds = await client.query(
       `SELECT discord_guild_id AS "guildId",bot_manager_role_id AS "managerRoleId"
@@ -229,8 +263,20 @@ class DiscordIntegrationSession {
     return result.rowCount === 1;
   }
 
-  async claim(limit = 10) {
+  async claim(limit = 10, deliveryContext = {}) {
     await materializePending(this.client, this.profile);
+    await this.client.query(
+      `UPDATE booking_discord_notifications AS work
+          SET status='superseded',updated_at=now(),claim_token=NULL,
+              claimed_at=NULL,claimed_until=NULL
+         FROM booking_windows AS booking_window
+        WHERE work.game_profile=$1 AND work.notification_type='booking_window_open'
+          AND work.booking_window_id=booking_window.id
+          AND booking_window.game_profile=work.game_profile
+          AND booking_window.closes_at<=clock_timestamp()
+          AND work.status IN ('pending','retry','claimed')`,
+      [this.profile],
+    );
     const bounded = Math.max(1, Math.min(Number(limit) || 10, 25));
     const token = randomUUID();
     const result = await this.client.query(
@@ -247,7 +293,9 @@ class DiscordIntegrationSession {
       [this.profile, bounded, token],
     );
     const work = [];
-    for (const row of result.rows) work.push(await workPayload(this.client, this.profile, row));
+    for (const row of result.rows) work.push(await workPayload(
+      this.client, this.profile, row, deliveryContext,
+    ));
     return work;
   }
 
