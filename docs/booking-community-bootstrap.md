@@ -46,10 +46,14 @@ private channel.
 
 ## What the generated file contains
 
-Version 1 requires:
+Version 2 requires:
 
 - `profile`: exactly `wos` or `kingshot`;
-- `community`: code, public display name, Discord guild ID and public guild name;
+- `community`: code, public display name, and an explicit `stateGuild` value.
+  Use a reviewed `{ "id": "...", "displayName": "..." }` object only for the
+  shared State/Kingdom Discord, or `null` when no shared guild is configured.
+  Ambiguous version-1 `discordGuild` files are rejected; canonical Discord
+  `/setup` explicitly creates new alliance mappings;
 - `booking.enabled`: initial active/archived state;
 - `booking.open`: whether the community and its booking window accept bookings;
 - `timeZone`: an IANA zone used with every local slot time;
@@ -142,10 +146,11 @@ administrative `DATABASE_URL`; do not guess either value. A dry run does connect
 to the selected database, so stop and ask the database operator if those terms
 or the target are unfamiliar.
 
-Use the direct, unpooled migration/bootstrap administrative `DATABASE_URL`.
-That role must own or have `INSERT` and `UPDATE` on every bootstrap table. The
-restricted website runtime role deliberately lacks structural writes and is
-refused; its grants are not changed.
+Use the direct, unpooled migration/bootstrap administrative `DATABASE_URL` for
+apply. That role must own or have `INSERT` and `UPDATE` on every bootstrap
+table. Preview uses `BEGIN READ ONLY`, performs only `SELECT`, and may use a
+profile-scoped read role. The restricted website runtime role remains unable to
+apply structural changes.
 
 `BOOKING_BOOTSTRAP_ENABLED=true` is required for every run. A non-loopback
 database also requires `--confirm-remote-bootstrap`, including for dry runs.
@@ -191,9 +196,20 @@ dates, or slot order/time/label/status. Missing or extra existing structure is
 drift. Drift fails clearly, and existing booking history is explicitly reported;
 there is no force flag.
 
-`--dry-run` performs validation, permission and RLS checks, locking, inspection,
-and conflict reporting, then rolls back. Conflicts exit unsuccessfully. Apply is
-one transaction, so any error rolls back every create/update.
+`--dry-run` starts a genuine read-only transaction. It reports linked guilds,
+their current kinds, proposed kind changes, active grants, grant create/
+reclassify/revoke counts, session repoint/removal counts, and whether explicit
+State/Kingdom classification remains required. It performs no write and does
+not depend on rollback to undo mutations. It never infers classification from
+names, guild counts, or cross-profile reuse.
+
+Classifying a reviewed guild as `state` changes its topology label and reviewed
+display/link metadata. Any active `alliance_discord` grants already attributed
+to that guild are conservatively relabelled `legacy_session`, so existing access
+continues without claiming the State guild is an alliance source. Classification
+does not revoke grants or remove/repoint session-community rows. Only the
+explicit alliance-unlink operation performs source access revocation. Apply
+remains one transaction, so any error rolls back every create/update.
 
 ## Verification and rollback
 

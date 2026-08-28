@@ -133,6 +133,10 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
     assert.equal((await repository.findCommunityForDiscordGuild(
       "777777777777777777"
     )).id, communityId);
+    await assert.rejects(withProfile(runtime, "wos", (client) => client.query(
+      `UPDATE booking_discord_guilds SET guild_kind='state'
+        WHERE discord_guild_id='777777777777777777'`,
+    )), (error) => error.code === "42501");
     await createRegistrationService({ context, repository }).upsert(
       { playerId: "99990001", inGameName: "Runtime Test", alliance: "TST" },
       "runtime-register-0001",

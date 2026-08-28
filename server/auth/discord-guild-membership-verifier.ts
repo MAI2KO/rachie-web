@@ -8,7 +8,10 @@ import {
   createDiscordGuildManagerVerifier,
   createDiscordGuildMembershipVerifier,
 } from "./discord-guild-membership-verifier-core.mjs";
-import { createNativeBotManagerVerifier } from "./native-bot-manager-verifier-core.mjs";
+import {
+  createNativeBotGuildOwnerVerifier,
+  createNativeBotManagerVerifier,
+} from "./native-bot-manager-verifier-core.mjs";
 
 export type DiscordGuildMembershipResult =
   | { readonly status: "member" }
@@ -50,3 +53,16 @@ export const verifyDiscordGuildManager = createNativeBotManagerVerifier({
   discordUserId: string;
   guildId: string;
 }) => Promise<DiscordGuildManagerResult>;
+
+export type DiscordGuildOwnerResult =
+  | { readonly status: "owner" | "not_owner" }
+  | { readonly status: "unavailable"; readonly reason: string; readonly retryAfterSeconds: number | null };
+
+export const verifyDiscordGuildOwner = createNativeBotGuildOwnerVerifier({
+  resolveIntegrationConfig: (gameProfile: GameProfile) =>
+    getAllianceEventsIntegrationConfig(gameProfile),
+}) as (input: {
+  gameProfile: GameProfile;
+  discordUserId: string;
+  guildId: string;
+}) => Promise<DiscordGuildOwnerResult>;

@@ -17,12 +17,12 @@ const testDatabaseUrl = String(process.env.TEST_DATABASE_URL ?? "").trim();
 
 function configuration(profile, suffix = "001") {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     profile,
     community: {
       code: `${profile.toUpperCase()}-${suffix}`,
       displayName: `${profile} bootstrap ${suffix}`,
-      discordGuild: { id: `${profile === "wos" ? "1" : "2"}2345678901234${suffix}`, displayName: `${profile} guild` },
+      stateGuild: { id: `${profile === "wos" ? "1" : "2"}2345678901234${suffix}`, displayName: `${profile} guild` },
     },
     booking: { enabled: true, open: false },
     timeZone: "Europe/London",
@@ -59,7 +59,7 @@ test("bootstrap configuration validation rejects malformed input before database
   for (const mutate of [
     (value) => { value.profile = "unknown"; },
     (value) => { value.community.code = "bad code"; },
-    (value) => { value.community.discordGuild.id = "not-a-guild"; },
+    (value) => { value.community.stateGuild.id = "not-a-guild"; },
     (value) => { value.timeZone = "Mars/Olympus"; },
     (value) => { value.services[0].code = "invalid"; },
     (value) => { value.services[0].requirements = ["hours"]; },
@@ -73,6 +73,12 @@ test("bootstrap configuration validation rejects malformed input before database
     mutate(malformed);
     assert.throws(() => validateBookingBootstrapConfig(malformed), (error) => error instanceof BookingBootstrapError && error.code === "invalid_config");
   }
+  const ambiguousLegacy = configuration("wos");
+  ambiguousLegacy.schemaVersion = 1;
+  ambiguousLegacy.community.discordGuild = ambiguousLegacy.community.stateGuild;
+  delete ambiguousLegacy.community.stateGuild;
+  assert.throws(() => validateBookingBootstrapConfig(ambiguousLegacy),
+    /schemaVersion must be 2/);
 });
 
 test("remote bootstrap needs the environment gate and confirmation flag", () => {
@@ -127,11 +133,11 @@ test("booking bootstrap PostgreSQL integration", { skip: !testDatabaseUrl && "TE
       const wosInput = configuration("wos", "999");
       wosInput.community.code = "9999";
       wosInput.community.displayName = "WOS staging 9999";
-      wosInput.community.discordGuild = { id: sharedGuildId, displayName: "Shared staging guild" };
+      wosInput.community.stateGuild = { id: sharedGuildId, displayName: "Shared staging guild" };
       const kingshotInput = configuration("kingshot", "999");
       kingshotInput.community.code = "9999";
       kingshotInput.community.displayName = "Kingshot staging 9999";
-      kingshotInput.community.discordGuild = { id: sharedGuildId, displayName: "Shared staging guild" };
+      kingshotInput.community.stateGuild = { id: sharedGuildId, displayName: "Shared staging guild" };
       const wos = validateBookingBootstrapConfig(wosInput);
       const kingshot = validateBookingBootstrapConfig(kingshotInput);
 
@@ -197,16 +203,111 @@ test("booking bootstrap PostgreSQL integration", { skip: !testDatabaseUrl && "TE
 
     await t.test("dry-run plans creates but makes no changes", async () => {
       const config = validateBookingBootstrapConfig(configuration("wos", "303"));
-      const plan = await runBookingCommunityBootstrap({ pool: bootstrapPool, config, dryRun: true });
+      const plan = await runBookingCommunityBootstrap({ pool: restrictedPool, config, dryRun: true });
       assert.equal(plan.community, "create");
       const count = await profileQuery(bootstrapPool, config.profile, "SELECT count(*)::int AS count FROM booking_communities WHERE location_code=$1", [config.community.code]);
       assert.equal(count.rows[0].count, 0);
     });
 
+    await t.test("State classification is explicit, read-only-previewed, and non-destructive", async () => {
+      const input = configuration("wos", "313");
+      const reviewedStateGuild = structuredClone(input.community.stateGuild);
+      input.community.stateGuild = null;
+      const noState = validateBookingBootstrapConfig(input);
+      await runBookingCommunityBootstrap({ pool: bootstrapPool, config: noState });
+      const community = (await profileQuery(
+        bootstrapPool, "wos",
+        "SELECT id FROM booking_communities WHERE location_code=$1", [noState.community.code],
+      )).rows[0];
+      const tokenHash = "d".repeat(64);
+      await profileQuery(bootstrapPool, "wos", "SELECT 1");
+      const client = await bootstrapPool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.game_profile','wos',true)");
+        await client.query(
+          `INSERT INTO booking_discord_guilds
+             (game_profile,discord_guild_id,community_id,discord_guild_name,guild_kind)
+           VALUES ('wos',$1,$2,$3,'alliance')`,
+          [reviewedStateGuild.id, community.id, reviewedStateGuild.displayName],
+        );
+        await client.query(
+          `INSERT INTO booking_discord_guilds
+             (game_profile,discord_guild_id,community_id,discord_guild_name)
+           VALUES ('wos','313000000000000000',$1,'Still unclassified')`,
+          [community.id],
+        );
+        await client.query(
+          `INSERT INTO website_discord_identities
+             (game_profile,discord_user_id,username)
+           VALUES ('wos','313313313313313313','legacy-user')`,
+        );
+        await client.query(
+          `INSERT INTO website_auth_sessions
+             (game_profile,token_hash,discord_user_id,expires_at)
+           VALUES ('wos',$1,'313313313313313313',now()+interval '1 day')`,
+          [tokenHash],
+        );
+        await client.query(
+          `INSERT INTO website_auth_session_communities
+             (game_profile,session_token_hash,community_id,discord_guild_id)
+           VALUES ('wos',$1,$2,$3)`,
+          [tokenHash, community.id, reviewedStateGuild.id],
+        );
+        await client.query(
+          `INSERT INTO community_access_grants
+             (game_profile,id,community_id,discord_user_id,source_guild_id,source_type)
+           VALUES ('wos',$1,$2,'313313313313313313',$3,'alliance_discord')`,
+          [randomUUID(), community.id, reviewedStateGuild.id],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      const unknownPreview = await runBookingCommunityBootstrap({
+        pool: restrictedPool, config: noState, dryRun: true,
+      });
+      assert.equal(unknownPreview.explicitStateClassificationRequired, true);
+      assert.deepEqual(unknownPreview.proposedGuildKindChanges, []);
+      assert.deepEqual(unknownPreview.accessGrants,
+        { currentActive: 1, create: 0, reclassify: 0, revoke: 0 });
+      assert.deepEqual(unknownPreview.sessionCommunities, { repoint: 0, remove: 0 });
+
+      input.community.stateGuild = reviewedStateGuild;
+      const reviewed = validateBookingBootstrapConfig(input);
+      const preview = await runBookingCommunityBootstrap({ pool: restrictedPool, config: reviewed, dryRun: true });
+      assert.equal(preview.explicitStateClassificationRequired, false);
+      assert.deepEqual(preview.proposedGuildKindChanges, [{
+        guildId: reviewedStateGuild.id, from: "alliance", to: "state",
+      }]);
+      assert.deepEqual(preview.accessGrants,
+        { currentActive: 1, create: 0, reclassify: 1, revoke: 0 });
+      assert.deepEqual(preview.sessionCommunities, { repoint: 0, remove: 0 });
+
+      await runBookingCommunityBootstrap({ pool: bootstrapPool, config: reviewed });
+      const preserved = await profileQuery(bootstrapPool, "wos",
+        `SELECT g.guild_kind,
+                (SELECT count(*)::int FROM community_access_grants a
+                  WHERE a.community_id=g.community_id AND a.status='active') AS grants,
+                (SELECT min(source_type) FROM community_access_grants a
+                  WHERE a.community_id=g.community_id AND a.status='active') AS source_type,
+                (SELECT count(*)::int FROM website_auth_session_communities sc
+                  WHERE sc.community_id=g.community_id) AS sessions
+           FROM booking_discord_guilds g WHERE g.discord_guild_id=$1`,
+        [reviewedStateGuild.id]);
+      assert.deepEqual(preserved.rows[0], {
+        guild_kind: "state", grants: 1, source_type: "legacy_session", sessions: 1,
+      });
+    });
+
     await t.test("a second community cannot claim an existing guild within either profile", async () => {
       for (const profile of ["wos", "kingshot"]) {
         const input = configuration(profile, profile === "wos" ? "404" : "405");
-        input.community.discordGuild.id = "999999999999999999";
+        input.community.stateGuild.id = "999999999999999999";
         const config = validateBookingBootstrapConfig(input);
         await assert.rejects(runBookingCommunityBootstrap({ pool: bootstrapPool, config }), (error) =>
           error instanceof BookingBootstrapError && error.code === "configuration_conflict"
@@ -239,7 +340,7 @@ test("booking bootstrap PostgreSQL integration", { skip: !testDatabaseUrl && "TE
     await t.test("safe mutable display, open-state, guild-name, and requirement reconciliation works", async () => {
       const input = configuration("wos", "101");
       input.community.displayName = "Updated public name";
-      input.community.discordGuild.displayName = "Updated guild name";
+      input.community.stateGuild.displayName = "Updated guild name";
       input.booking.open = true;
       input.services[0].requirements = ["rfc"];
       const config = validateBookingBootstrapConfig(input);
@@ -269,7 +370,7 @@ test("booking bootstrap PostgreSQL integration", { skip: !testDatabaseUrl && "TE
     await t.test("structural drift is rejected", async () => {
       const input = configuration("wos", "101");
       input.community.displayName = "Updated public name";
-      input.community.discordGuild.displayName = "Updated guild name";
+      input.community.stateGuild.displayName = "Updated guild name";
       input.booking.open = true;
       input.services[0].requirements = ["rfc"];
       input.services[0].slots[0].displayTimeLabel = "Changed label";
@@ -323,7 +424,7 @@ test("booking bootstrap PostgreSQL integration", { skip: !testDatabaseUrl && "TE
 
       const input = configuration("wos", "101");
       input.community.displayName = "Updated public name";
-      input.community.discordGuild.displayName = "Updated guild name";
+      input.community.stateGuild.displayName = "Updated guild name";
       input.booking.open = true;
       input.services[0].requirements = ["rfc"];
       input.services[0].slots[0].displayTimeLabel = "Changed label";

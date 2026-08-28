@@ -165,7 +165,9 @@ GRANT SELECT ON
   booking_communities, booking_discord_guilds, booking_settings,
   booking_windows, minister_services, booking_service_dates,
   booking_community_services,
-  appointment_slots, booking_slot_blocks, booking_guest_share_links
+  appointment_slots, booking_slot_blocks, booking_guest_share_links,
+  community_access_grants, booking_cycle_schedule_overrides,
+  player_points_ledger, community_points_ledger
 TO rachie_peggie_runtime;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON
@@ -191,6 +193,17 @@ GRANT INSERT ON booking_discord_guilds
 TO rachie_peggie_runtime;
 GRANT UPDATE (discord_guild_name, linked_by_actor_id, updated_at)
 ON booking_discord_guilds TO rachie_peggie_runtime;
+GRANT UPDATE (link_status, revoked_at, revoked_by_actor_id, revocation_reason, updated_at)
+ON booking_discord_guilds TO rachie_peggie_runtime;
+GRANT INSERT ON community_access_grants TO rachie_peggie_runtime;
+GRANT UPDATE (
+  status, verified_at, revoked_at, revoked_by_actor_id, revocation_reason, updated_at
+) ON community_access_grants TO rachie_peggie_runtime;
+GRANT INSERT, DELETE ON booking_cycle_schedule_overrides TO rachie_peggie_runtime;
+GRANT UPDATE (opens_at, closes_at, updated_by_actor_id, updated_at)
+ON booking_cycle_schedule_overrides TO rachie_peggie_runtime;
+GRANT SELECT, INSERT ON player_points_ledger, community_points_ledger
+TO rachie_peggie_runtime;
 GRANT INSERT ON booking_guest_share_links
 TO rachie_peggie_runtime;
 GRANT UPDATE (revoked_at, revoked_by_actor_id, updated_at)

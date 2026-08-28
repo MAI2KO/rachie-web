@@ -42,7 +42,8 @@ class ProfileScopedBookingSession {
        JOIN booking_communities AS c
          ON c.game_profile = guild.game_profile
         AND c.id = guild.community_id
-       WHERE guild.game_profile = $1 AND guild.discord_guild_id = $2`,
+       WHERE guild.game_profile = $1 AND guild.discord_guild_id = $2
+         AND guild.link_status='active'`,
       [this.gameProfile, discordGuildId],
     );
     return result.rows[0] ?? null;
@@ -59,11 +60,20 @@ class ProfileScopedBookingSession {
     }
     await this.client.query(
       `INSERT INTO booking_discord_guilds
-         (game_profile,discord_guild_id,community_id,discord_guild_name,linked_by_actor_id)
-       VALUES ($1,$2,$3,$4,$5)
+         (game_profile,discord_guild_id,community_id,discord_guild_name,linked_by_actor_id,guild_kind)
+       VALUES ($1,$2,$3,$4,$5,'alliance')
        ON CONFLICT (game_profile,discord_guild_id) DO UPDATE
          SET discord_guild_name=EXCLUDED.discord_guild_name,
-             linked_by_actor_id=EXCLUDED.linked_by_actor_id,updated_at=now()`,
+             linked_by_actor_id=EXCLUDED.linked_by_actor_id,
+             link_status=CASE WHEN booking_discord_guilds.guild_kind='alliance'
+                              THEN 'active' ELSE booking_discord_guilds.link_status END,
+             revoked_at=CASE WHEN booking_discord_guilds.guild_kind='alliance'
+                             THEN NULL ELSE booking_discord_guilds.revoked_at END,
+             revoked_by_actor_id=CASE WHEN booking_discord_guilds.guild_kind='alliance'
+                                      THEN NULL ELSE booking_discord_guilds.revoked_by_actor_id END,
+             revocation_reason=CASE WHEN booking_discord_guilds.guild_kind='alliance'
+                                    THEN NULL ELSE booking_discord_guilds.revocation_reason END,
+             updated_at=now()`,
       [this.gameProfile, discordGuildId, communityId, discordGuildName, actorId],
     );
     return { status: existing.rowCount ? "updated" : "created" };
@@ -254,16 +264,16 @@ class ProfileScopedBookingSession {
              cancelled_by_actor_id=$10, version=version+1, updated_at=now()
          WHERE game_profile=$1 AND id=$2 AND community_id=$3
            AND participant_id=$9 AND status='confirmed'
-         RETURNING id
+         RETURNING id,source_discord_guild_id
        )
        INSERT INTO minister_bookings
          (game_profile,id,community_id,window_id,service_date_id,service_code,
           booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
           in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
           source,actor_type,actor_id,idempotency_key,correlation_id,
-          rescheduled_from_booking_id)
+          rescheduled_from_booking_id,source_discord_guild_id)
        SELECT $1,$4,$3,$5,$6,$7,$8,$11,$9,$10,$12,$13,$14,$15,
-              'website','discord_user',$10,$16,$17,$2
+              'website','discord_user',$10,$16,$17,$2,replaced.source_discord_guild_id
        FROM replaced
        RETURNING id,service_code,booking_date,display_time_label_snapshot,
                  in_game_name_snapshot,alliance_snapshot,status`,
@@ -291,11 +301,12 @@ class ProfileScopedBookingSession {
           booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
           in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
           source,actor_type,actor_id,idempotency_key,correlation_id,
-          rescheduled_from_booking_id,approval_request_id)
+          rescheduled_from_booking_id,approval_request_id,source_discord_guild_id)
        SELECT $1,$4,$3,replaced.window_id,$5,replaced.service_code,$6,$7,
               replaced.participant_id,replaced.discord_user_id,replaced.player_id_snapshot,
               replaced.in_game_name_snapshot,replaced.alliance_snapshot,$8,
-              'website','admin',$10,$9,$11,$2,replaced.approval_request_id
+              'website','admin',$10,$9,$11,$2,replaced.approval_request_id,
+              replaced.source_discord_guild_id
        FROM replaced
        RETURNING id,service_code,booking_date,display_time_label_snapshot,
                  in_game_name_snapshot,alliance_snapshot,status,discord_user_id`,
@@ -454,15 +465,17 @@ class ProfileScopedBookingSession {
          (game_profile, id, community_id, window_id, service_date_id, service_code,
           booking_date, slot_id, participant_id, discord_user_id, player_id_snapshot,
           in_game_name_snapshot, alliance_snapshot, display_time_label_snapshot,
-          source, actor_type, actor_id, idempotency_key, correlation_id)
+          source, actor_type, actor_id, idempotency_key, correlation_id,
+          source_discord_guild_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-               'website','discord_user',$10,$15,$16)
+               'website','discord_user',$10,$15,$16,$17)
        RETURNING id, service_code, booking_date, display_time_label_snapshot,
                  in_game_name_snapshot, alliance_snapshot, status`,
       [this.gameProfile, input.id, input.communityId, input.windowId,
        input.serviceDateId, input.serviceCode, input.bookingDate, input.slotId,
        input.participantId, input.discordUserId, input.playerId, input.inGameName,
-       input.alliance, input.displayTime, input.idempotencyKey, input.correlationId],
+       input.alliance, input.displayTime, input.idempotencyKey, input.correlationId,
+       input.sourceGuildId],
     );
     return result.rows[0];
   }
@@ -494,6 +507,38 @@ class ProfileScopedBookingSession {
        VALUES ($1,$2,$3,'booking.created',$4,$5,$6)`,
       [this.gameProfile, id, communityId, payload, idempotencyKey, correlationId],
     );
+  }
+
+  async insertPlayerPointsEntry(input) {
+    return (await this.client.query(
+      `INSERT INTO player_points_ledger
+         (game_profile,id,participant_id,community_id,discord_user_id,points_delta,reason,
+          booking_window_id,booking_id,source_guild_id,idempotency_key,metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (game_profile,idempotency_key) DO NOTHING
+       RETURNING id`,
+      [this.gameProfile, input.id, input.participantId, input.communityId,
+       input.discordUserId ?? null, input.pointsDelta, input.reason,
+       input.bookingWindowId ?? null, input.bookingId ?? null, input.sourceGuildId ?? null,
+       input.idempotencyKey, input.metadata ?? {}],
+    )).rowCount === 1;
+  }
+
+  async insertCommunityParticipationPoints(input) {
+    return (await this.client.query(
+      `INSERT INTO community_points_ledger
+         (game_profile,id,community_id,source_guild_id,booking_window_id,
+          points_delta,reason,idempotency_key,metadata)
+       SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9
+         FROM booking_discord_guilds
+        WHERE game_profile=$1 AND community_id=$3 AND discord_guild_id=$4
+          AND guild_kind='alliance' AND link_status='active'
+       ON CONFLICT (game_profile,idempotency_key) DO NOTHING
+       RETURNING id`,
+      [this.gameProfile, input.id, input.communityId, input.sourceGuildId,
+       input.bookingWindowId, input.pointsDelta, input.reason, input.idempotencyKey,
+       input.metadata ?? {}],
+    )).rowCount === 1;
   }
 
   async findCurrentBookingWindow(communityId) {
@@ -634,7 +679,7 @@ class ProfileScopedBookingSession {
   async listActiveParticipantsByDiscordUser(communityId, discordUserId) {
     const result = await this.client.query(
       `SELECT game_profile, id, community_id, discord_user_id, player_id,
-              in_game_name, alliance
+              in_game_name, alliance, source_discord_guild_id
        FROM booking_participants
        WHERE game_profile = $1
          AND community_id = $2
@@ -650,7 +695,7 @@ class ProfileScopedBookingSession {
   async lockActiveParticipantsByDiscordUser(communityId, discordUserId) {
     const result = await this.client.query(
       `SELECT game_profile, id, community_id, discord_user_id, player_id,
-              in_game_name, alliance
+              in_game_name, alliance, source_discord_guild_id
        FROM booking_participants
        WHERE game_profile = $1
          AND community_id = $2
@@ -673,14 +718,16 @@ class ProfileScopedBookingSession {
     alliance,
     idempotencyKey,
     correlationId,
+    sourceGuildId,
   }) {
     const result = await this.client.query(
       `INSERT INTO booking_participants
          (game_profile, id, community_id, discord_user_id, player_id,
-          in_game_name, alliance, source, idempotency_key, correlation_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'website', $8, $9)
+          in_game_name, alliance, source, idempotency_key, correlation_id,
+          source_discord_guild_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'website', $8, $9,$10)
        RETURNING game_profile, id, community_id, discord_user_id, player_id,
-                 in_game_name, alliance`,
+                 in_game_name, alliance, source_discord_guild_id`,
       [
         this.gameProfile,
         id,
@@ -691,6 +738,7 @@ class ProfileScopedBookingSession {
         alliance,
         idempotencyKey,
         correlationId,
+        sourceGuildId,
       ],
     );
     return result.rows[0];
@@ -705,6 +753,7 @@ class ProfileScopedBookingSession {
     alliance,
     idempotencyKey,
     correlationId,
+    sourceGuildId,
   }) {
     const result = await this.client.query(
       `UPDATE booking_participants
@@ -714,6 +763,7 @@ class ProfileScopedBookingSession {
            source = 'website',
            idempotency_key = $8,
            correlation_id = $9,
+           source_discord_guild_id = COALESCE($10, source_discord_guild_id),
            updated_at = now()
        WHERE game_profile = $1
          AND id = $2
@@ -721,7 +771,7 @@ class ProfileScopedBookingSession {
          AND discord_user_id = $4
          AND status = 'active'
        RETURNING game_profile, id, community_id, discord_user_id, player_id,
-                 in_game_name, alliance`,
+                 in_game_name, alliance, source_discord_guild_id`,
       [
         this.gameProfile,
         id,
@@ -732,6 +782,7 @@ class ProfileScopedBookingSession {
         alliance,
         idempotencyKey,
         correlationId,
+        sourceGuildId,
       ],
     );
     return result.rows[0] ?? null;

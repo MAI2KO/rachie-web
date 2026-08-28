@@ -64,20 +64,56 @@ class ProfileScopedAuthSession {
       [this.gameProfile, tokenHash, user.id, expiresAt],
     );
 
+    await this.client.query(
+      `WITH matched AS (
+         SELECT guild.game_profile,guild.community_id,guild.discord_guild_id,
+                md5(guild.game_profile || ':' || guild.community_id::text || ':'
+                  || $2 || ':' || guild.discord_guild_id) AS digest
+           FROM booking_discord_guilds AS guild
+           JOIN booking_communities AS community
+             ON community.game_profile=guild.game_profile AND community.id=guild.community_id
+          WHERE guild.game_profile=$1 AND guild.discord_guild_id=ANY($3::text[])
+            AND guild.guild_kind='alliance' AND guild.link_status='active'
+            AND community.status='active'
+       )
+       INSERT INTO community_access_grants
+         (game_profile,id,community_id,discord_user_id,source_guild_id,source_type)
+       SELECT game_profile,
+              (substr(digest,1,8) || '-' || substr(digest,9,4) || '-5' || substr(digest,14,3)
+               || '-8' || substr(digest,18,3) || '-' || substr(digest,21,12))::uuid,
+              community_id,$2,discord_guild_id,'alliance_discord'
+         FROM matched
+       ON CONFLICT (game_profile,community_id,discord_user_id,source_guild_id) DO UPDATE
+         SET status='active',verified_at=now(),revoked_at=NULL,revoked_by_actor_id=NULL,
+             revocation_reason=NULL,updated_at=now()`,
+      [this.gameProfile, user.id, guildIds],
+    );
+
     const matches = await this.client.query(
       `INSERT INTO website_auth_session_communities
          (game_profile, session_token_hash, community_id, discord_guild_id)
-       SELECT guild.game_profile, $2, guild.community_id, guild.discord_guild_id
-       FROM booking_discord_guilds AS guild
+       SELECT DISTINCT ON (guild.community_id)
+              guild.game_profile, $2, guild.community_id, guild.discord_guild_id
+       FROM community_access_grants AS access
+       JOIN booking_discord_guilds AS guild
+         ON guild.game_profile=access.game_profile
+        AND guild.community_id=access.community_id
+        AND guild.discord_guild_id=access.source_guild_id
        JOIN booking_communities AS community
          ON community.game_profile = guild.game_profile
         AND community.id = guild.community_id
-       WHERE guild.game_profile = $1
+       WHERE access.game_profile=$1 AND access.discord_user_id=$4
+         AND access.status='active'
          AND guild.discord_guild_id = ANY($3::text[])
+         AND guild.link_status='active'
+         AND ((access.source_type='alliance_discord' AND guild.guild_kind='alliance')
+           OR (access.source_type='legacy_session'
+             AND guild.guild_kind IN ('unclassified','state','alliance')))
          AND community.status = 'active'
+       ORDER BY guild.community_id,guild.discord_guild_id
        ON CONFLICT (game_profile, session_token_hash, community_id) DO NOTHING
        RETURNING community_id`,
-      [this.gameProfile, tokenHash, guildIds],
+      [this.gameProfile, tokenHash, guildIds, user.id],
     );
 
     if (matches.rowCount === 1) {
@@ -106,6 +142,7 @@ class ProfileScopedAuthSession {
       [this.gameProfile, tokenHash],
     );
     if (sessionResult.rowCount !== 1) return null;
+    const identity = sessionResult.rows[0];
 
     const communities = await this.client.query(
       `SELECT community.id, community.location_code, community.display_name,
@@ -113,6 +150,17 @@ class ProfileScopedAuthSession {
               session_community.verified_at,
               (selection.community_id IS NOT NULL) AS selected
        FROM website_auth_session_communities AS session_community
+       JOIN community_access_grants AS access
+         ON access.game_profile=session_community.game_profile
+        AND access.community_id=session_community.community_id
+        AND access.source_guild_id=session_community.discord_guild_id
+        AND access.discord_user_id=$3
+        AND access.status='active'
+       JOIN booking_discord_guilds AS guild
+         ON guild.game_profile=session_community.game_profile
+        AND guild.discord_guild_id=session_community.discord_guild_id
+        AND guild.community_id=session_community.community_id
+        AND guild.link_status='active'
        JOIN booking_communities AS community
          ON community.game_profile = session_community.game_profile
         AND community.id = session_community.community_id
@@ -123,11 +171,13 @@ class ProfileScopedAuthSession {
        WHERE session_community.game_profile = $1
          AND session_community.session_token_hash = $2
          AND community.status = 'active'
+         AND ((access.source_type='alliance_discord' AND guild.guild_kind='alliance')
+           OR (access.source_type='legacy_session'
+             AND guild.guild_kind IN ('unclassified','state','alliance')))
        ORDER BY community.location_code, community.id`,
-      [this.gameProfile, tokenHash],
+      [this.gameProfile, tokenHash, identity.discord_user_id],
     );
 
-    const identity = sessionResult.rows[0];
     return {
       user: {
         id: identity.discord_user_id,
@@ -159,6 +209,17 @@ class ProfileScopedAuthSession {
        JOIN website_auth_sessions AS session
          ON session.game_profile = session_community.game_profile
         AND session.token_hash = session_community.session_token_hash
+       JOIN community_access_grants AS access
+         ON access.game_profile=session_community.game_profile
+        AND access.community_id=session_community.community_id
+        AND access.source_guild_id=session_community.discord_guild_id
+        AND access.discord_user_id=session.discord_user_id
+        AND access.status='active'
+       JOIN booking_discord_guilds AS guild
+         ON guild.game_profile=session_community.game_profile
+        AND guild.discord_guild_id=session_community.discord_guild_id
+        AND guild.community_id=session_community.community_id
+        AND guild.link_status='active'
        JOIN booking_communities AS community
          ON community.game_profile = session_community.game_profile
         AND community.id = session_community.community_id
@@ -166,6 +227,9 @@ class ProfileScopedAuthSession {
          AND session_community.session_token_hash = $2
          AND community.location_code = $3
          AND community.status = 'active'
+         AND ((access.source_type='alliance_discord' AND guild.guild_kind='alliance')
+           OR (access.source_type='legacy_session'
+             AND guild.guild_kind IN ('unclassified','state','alliance')))
          AND session.revoked_at IS NULL
          AND session.expires_at > now()
        ON CONFLICT (game_profile, session_token_hash) DO UPDATE SET
@@ -178,6 +242,22 @@ class ProfileScopedAuthSession {
   }
 
   async refreshSessionCommunityMembership(tokenHash, communityId, discordGuildId) {
+    await this.client.query(
+      `UPDATE community_access_grants AS access
+          SET verified_at=now(),updated_at=now()
+         FROM website_auth_sessions AS session, booking_discord_guilds AS guild
+        WHERE access.game_profile=$1 AND access.community_id=$3
+          AND access.source_guild_id=$4 AND access.status='active'
+          AND session.game_profile=access.game_profile AND session.token_hash=$2
+          AND session.discord_user_id=access.discord_user_id
+          AND guild.game_profile=access.game_profile AND guild.community_id=access.community_id
+          AND guild.discord_guild_id=access.source_guild_id
+          AND guild.link_status='active'
+          AND ((access.source_type='alliance_discord' AND guild.guild_kind='alliance')
+            OR (access.source_type='legacy_session'
+              AND guild.guild_kind IN ('unclassified','state','alliance')))` ,
+      [this.gameProfile, tokenHash, communityId, discordGuildId],
+    );
     const result = await this.client.query(
       `UPDATE website_auth_session_communities AS session_community
        SET verified_at = now()
@@ -197,16 +277,57 @@ class ProfileScopedAuthSession {
   }
 
   async revokeSessionCommunityMembership(tokenHash, communityId, discordGuildId) {
-    const result = await this.client.query(
-      `DELETE FROM website_auth_session_communities
-       WHERE game_profile = $1
-         AND session_token_hash = $2
-         AND community_id = $3
-         AND discord_guild_id = $4
-       RETURNING community_id`,
+    const revoked = await this.client.query(
+      `UPDATE community_access_grants AS access
+          SET status='revoked',revoked_at=now(),revocation_reason='membership_lost',updated_at=now()
+         FROM website_auth_sessions AS session
+        WHERE access.game_profile=$1 AND access.community_id=$3 AND access.source_guild_id=$4
+          AND access.status='active' AND session.game_profile=access.game_profile
+          AND session.token_hash=$2 AND session.discord_user_id=access.discord_user_id
+        RETURNING access.discord_user_id`,
       [this.gameProfile, tokenHash, communityId, discordGuildId],
     );
-    return result.rowCount === 1;
+    const discordUserId = revoked.rows[0]?.discord_user_id;
+    if (!discordUserId) return false;
+    await this.repointOrDeleteSessionCommunityAccess(communityId, discordGuildId, discordUserId);
+    return true;
+  }
+
+  async repointOrDeleteSessionCommunityAccess(communityId, revokedGuildId, discordUserId) {
+    await this.client.query(
+      `UPDATE website_auth_session_communities AS session_community
+          SET discord_guild_id=replacement.source_guild_id,verified_at=replacement.verified_at
+         FROM website_auth_sessions AS session
+         CROSS JOIN LATERAL (
+           SELECT access.source_guild_id,access.verified_at
+             FROM community_access_grants AS access
+             JOIN booking_discord_guilds AS guild
+               ON guild.game_profile=access.game_profile
+              AND guild.community_id=access.community_id
+              AND guild.discord_guild_id=access.source_guild_id
+            WHERE access.game_profile=$1 AND access.community_id=$2
+              AND access.discord_user_id=$4 AND access.status='active'
+              AND access.source_guild_id<>$3
+              AND guild.guild_kind='alliance' AND guild.link_status='active'
+            ORDER BY access.source_guild_id LIMIT 1
+         ) AS replacement
+        WHERE session_community.game_profile=$1 AND session_community.community_id=$2
+          AND session_community.discord_guild_id=$3
+          AND session.game_profile=session_community.game_profile
+          AND session.token_hash=session_community.session_token_hash
+          AND session.discord_user_id=$4`,
+      [this.gameProfile, communityId, revokedGuildId, discordUserId],
+    );
+    await this.client.query(
+      `DELETE FROM website_auth_session_communities AS session_community
+        USING website_auth_sessions AS session
+        WHERE session_community.game_profile=$1 AND session_community.community_id=$2
+          AND session_community.discord_guild_id=$3
+          AND session.game_profile=session_community.game_profile
+          AND session.token_hash=session_community.session_token_hash
+          AND session.discord_user_id=$4`,
+      [this.gameProfile, communityId, revokedGuildId, discordUserId],
+    );
   }
 
   async revokeSession(tokenHash) {

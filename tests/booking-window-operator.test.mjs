@@ -21,12 +21,12 @@ const testDatabaseUrl = String(process.env.TEST_DATABASE_URL ?? "").trim();
 
 function configuration(profile) {
   return validateBookingBootstrapConfig({
-    schemaVersion: 1,
+    schemaVersion: 2,
     profile,
     community: {
       code: "9999",
       displayName: profile === "wos" ? "WOS staging 9999" : "Kingshot staging 9999",
-      discordGuild: { id: "999999999999999999", displayName: "Shared staging guild" },
+      stateGuild: { id: "999999999999999999", displayName: "Shared staging guild" },
     },
     booking: { enabled: true, open: false },
     timeZone: "Europe/London",

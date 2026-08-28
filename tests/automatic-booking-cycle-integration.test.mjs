@@ -61,8 +61,15 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
       );
       await client.query(
         `INSERT INTO booking_discord_guilds
-           (game_profile,discord_guild_id,community_id,discord_guild_name)
-         VALUES ('wos','777777777777777777',$1,'Test Guild')`,
+           (game_profile,discord_guild_id,community_id,discord_guild_name,guild_kind)
+         VALUES ('wos','777777777777777777',$1,'Test Guild','alliance')`,
+        [wosCommunityId],
+      );
+      await client.query(
+        `INSERT INTO booking_cycle_schedule_overrides
+           (game_profile,community_id,cycle_index,opens_at,closes_at,
+            created_by_actor_id,updated_by_actor_id)
+         VALUES ('wos',$1,1,'2026-09-01T18:00:00Z','2026-09-06T18:00:00Z','manager','manager')`,
         [wosCommunityId],
       );
       for (const [serviceCode, bookingDate] of [
@@ -119,7 +126,7 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
       );
     });
 
-    const beforeOpen = new Date("2026-09-01T23:59:59.999Z");
+    const beforeOpen = new Date("2026-09-01T17:59:59.999Z");
     await reconcileAutomaticWosBookingCycles({ pool, now: beforeOpen, guestTokenSecret });
     const repository = createProfileScopedBookingRepository("wos", pool);
     const read = createNativeBookingReadService({
@@ -145,7 +152,7 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
     assert.deepEqual(countsAfterSecond.rows[0], countsAfterFirst.rows[0]);
     assert.deepEqual(countsAfterFirst.rows[0], { windows: 3, dates: 9, slots: 9 });
 
-    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-02T00:00:00.000Z"), guestTokenSecret });
+    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-01T18:00:00.000Z"), guestTokenSecret });
     assert.equal((await read.getContext()).bookingsOpen, true);
     const openLifecycle = await withProfile(pool, "wos", (client) => client.query(
       `SELECT
@@ -154,12 +161,24 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
          (SELECT count(*)::int FROM booking_discord_notifications
            WHERE community_id=$1 AND notification_type='booking_window_open') AS announcements,
          (SELECT bool_and(token_hash ~ '^[0-9a-f]{64}$') FROM booking_guest_share_links
-           WHERE community_id=$1) AS hashes_only`,
+           WHERE community_id=$1) AS hashes_only,
+         (SELECT min(expires_at) FROM booking_guest_share_links
+           WHERE community_id=$1 AND revoked_at IS NULL) AS expires_at,
+         (SELECT min(due_at) FROM booking_discord_notifications
+           WHERE community_id=$1 AND notification_type='booking_window_open') AS due_at`,
       [wosCommunityId],
     ));
     assert.deepEqual(openLifecycle.rows[0], {
       active_links: 1, announcements: 1, hashes_only: true,
+      expires_at: new Date("2026-09-06T18:00:00.000Z"),
+      due_at: new Date("2026-09-01T18:00:00.000Z"),
     });
+    await withProfile(pool, "wos", (client) => client.query(
+      `UPDATE booking_cycle_schedule_overrides
+          SET closes_at='2026-09-06T19:00:00Z',updated_at=now()
+        WHERE community_id=$1 AND cycle_index=1`,
+      [wosCommunityId],
+    ));
     await reconcileAutomaticWosBookingCycles({
       pool, now: new Date("2026-09-03T00:00:00.000Z"), guestTokenSecret,
     });
@@ -169,13 +188,41 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
       [wosCommunityId],
     ));
     assert.equal(restartCount.rows[0].count, 1);
+    const changedLifecycle = await withProfile(pool, "wos", (client) => client.query(
+      `SELECT booking_window.closes_at,link.expires_at
+         FROM booking_windows AS booking_window
+         JOIN booking_guest_share_links AS link ON link.booking_window_id=booking_window.id
+        WHERE booking_window.community_id=$1 AND link.revoked_at IS NULL`, [wosCommunityId],
+    ));
+    assert.deepEqual(changedLifecycle.rows, [{
+      closes_at: new Date("2026-09-06T19:00:00.000Z"),
+      expires_at: new Date("2026-09-06T19:00:00.000Z"),
+    }], "changing an announced cycle updates lifecycle times without another announcement");
     await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-06T12:00:00.000Z"), guestTokenSecret });
+    assert.equal((await read.getContext()).bookingsOpen, true,
+      "the override, not the default close, controls availability");
+    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-06T18:00:00.000Z"), guestTokenSecret });
+    assert.equal((await read.getContext()).bookingsOpen, true);
+    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-06T19:00:00.000Z"), guestTokenSecret });
     assert.equal((await read.getContext()).bookingsOpen, false);
     const closedLinks = await withProfile(pool, "wos", (client) => client.query(
       `SELECT count(*)::int AS count FROM booking_guest_share_links
         WHERE community_id=$1 AND revoked_at IS NULL`, [wosCommunityId],
     ));
     assert.equal(closedLinks.rows[0].count, 0);
+
+    const nextCycle = await withProfile(pool, "wos", (client) => client.query(
+      `SELECT opens_at,closes_at FROM booking_windows AS booking_window
+        WHERE community_id=$1 AND EXISTS (
+          SELECT 1 FROM booking_service_dates AS date
+           WHERE date.window_id=booking_window.id AND date.service_code='construction'
+             AND date.booking_date='2026-10-05')`,
+      [wosCommunityId],
+    ));
+    assert.deepEqual(nextCycle.rows, [{
+      opens_at: new Date("2026-09-30T00:00:00.000Z"),
+      closes_at: new Date("2026-10-04T12:00:00.000Z"),
+    }], "the following cycle returns to its deterministic defaults");
 
     await withProfile(pool, "wos", (client) => client.query(
       "UPDATE booking_communities SET bookings_open=false WHERE id=$1", [wosCommunityId],

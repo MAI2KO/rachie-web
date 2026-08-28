@@ -94,7 +94,7 @@ export async function handleDiscordCanonicalRegistration(request: Request) {
     const result = await createRegistrationService({
       context: {
         gameProfile: scope.profile,
-        community: { id: community.id },
+        community: { id: community.id, discordGuildId: guildId },
         discordUser: { id: discordUserId },
       },
       repository,

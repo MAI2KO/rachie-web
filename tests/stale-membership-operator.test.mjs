@@ -174,8 +174,8 @@ test("stale-membership PostgreSQL integration", { skip: !testDatabaseUrl && "TES
       ));
       await withProfile(operatorPool, profile, (client) => client.query(
         `INSERT INTO booking_discord_guilds
-           (game_profile,discord_guild_id,community_id,discord_guild_name)
-         VALUES ($1,$2,$3,'Shared Test Guild')`,
+           (game_profile,discord_guild_id,community_id,discord_guild_name,guild_kind)
+         VALUES ($1,$2,$3,'Shared Test Guild','alliance')`,
         [profile, guildId, communityIds[profile]],
       ));
       const repository = createProfileScopedAuthRepository(profile, operatorPool);

@@ -76,3 +76,48 @@ export function createNativeBotManagerVerifier({
     return unavailable(primary.reason, primary.retryAfterSeconds);
   };
 }
+
+export function createNativeBotGuildOwnerVerifier({
+  resolveIntegrationConfig,
+  fetchImplementation = fetch,
+  now = Date.now,
+  createNonce = undefined,
+  logger = console,
+}) {
+  return async function verifyNativeBotGuildOwner({ gameProfile, discordUserId, guildId }) {
+    if (!PROFILE_SET.has(gameProfile) || !/^\d{15,22}$/.test(discordUserId)
+        || !/^\d{15,22}$/.test(guildId)) {
+      return unavailable("invalid_identifier");
+    }
+    const config = resolveIntegrationConfig(gameProfile);
+    if (!config) return unavailable("configuration");
+    const path = `/internal/v1/guild-ownership/guild/${guildId}/user/${discordUserId}`;
+    try {
+      const response = await fetchImplementation(`${config.baseUrl}${path}`, {
+        method: "GET",
+        headers: allianceEventsRequestHeaders({
+          secret: config.secret, profile: gameProfile, method: "GET", path, now,
+          ...(createNonce ? { createNonce } : {}),
+        }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.status !== 200) {
+        logger.warn("native_guild_owner_verification_unavailable", {
+          gameProfile, status: response.status,
+        });
+        return unavailable(response.status === 503 ? "bot_verification_unavailable" : "unexpected_response",
+          retryAfter(response));
+      }
+      const body = await response.json();
+      if (body?.ok !== true || typeof body.isOwner !== "boolean") {
+        return unavailable("malformed_response");
+      }
+      return Object.freeze({ status: body.isOwner ? "owner" : "not_owner" });
+    } catch (error) {
+      logger.warn("native_guild_owner_verification_unavailable", { gameProfile, reason: "network" });
+      return unavailable(error?.name === "TimeoutError" || error?.name === "AbortError"
+        ? "timeout" : "network");
+    }
+  };
+}

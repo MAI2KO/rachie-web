@@ -138,8 +138,7 @@ export function buildBookingCommunityConfig({
   profile,
   communityCode,
   displayName,
-  discordGuildId,
-  discordGuildDisplayName,
+  stateGuild = null,
   timeZone,
   bookingOpen = false,
   serviceDates,
@@ -150,14 +149,14 @@ export function buildBookingCommunityConfig({
   const uniqueDates = new Set(Object.values(serviceDates));
   if (uniqueDates.size !== 3) invalid("Construction, Research, and Troop must use different dates.");
   const input = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     profile,
     community: {
       code: validateCommunityCode(communityCode),
       displayName: validateHumanName(displayName, "Public display name"),
-      discordGuild: {
-        id: validateDiscordGuildId(discordGuildId),
-        displayName: validateHumanName(discordGuildDisplayName, "Discord server display name"),
+      stateGuild: stateGuild === null ? null : {
+        id: validateDiscordGuildId(stateGuild.id),
+        displayName: validateHumanName(stateGuild.displayName, "State/Kingdom Discord display name"),
       },
     },
     booking: { enabled: true, open: Boolean(bookingOpen) },
@@ -179,7 +178,9 @@ export function formatBookingConfigSummary(config) {
     "Configuration summary",
     `Profile: ${details.label} (${config.profile})`,
     `${details.communityTerm}: ${config.community.code} — ${config.community.displayName}`,
-    `Discord guild: ${config.community.discordGuild.displayName} (${config.community.discordGuild.id})`,
+    `Shared ${details.communityTerm} Discord: ${config.community.stateGuild
+      ? `${config.community.stateGuild.displayName} (${config.community.stateGuild.id})`
+      : "None configured"}`,
     `Timezone: ${config.timeZone}`,
     `Booking: ${config.booking.open ? "OPEN" : "CLOSED"}`,
     "Service dates and requirements:",
@@ -238,7 +239,7 @@ export function bookingConfigWizardQuestions(profile) {
   return Object.freeze({
     communityCode: `${details.communityTerm} code - the in-game ${details.communityTerm} number, e.g. 9999: `,
     publicDisplayName: "Public display name - the name shown on the website, e.g. Test Server: ",
-    discordDisplayName: "Discord server display name - the current name of the Discord server. This may be the same as the public display name: ",
+    discordDisplayName: `Shared ${details.communityTerm} Discord display name: `,
   });
 }
 
@@ -252,8 +253,14 @@ export async function runBookingConfigWizard({ prompter, outputDirectory = DEFAU
   const questions = bookingConfigWizardQuestions(profile);
   const communityCode = await askValidated(prompter, questions.communityCode, validateCommunityCode);
   const displayName = await askValidated(prompter, questions.publicDisplayName, (value) => validateHumanName(value, "Public display name"));
-  const discordGuildId = await askValidated(prompter, "Discord server ID: ", validateDiscordGuildId);
-  const discordGuildDisplayName = await askValidated(prompter, questions.discordDisplayName, (value) => validateHumanName(value, "Discord server display name"));
+  const hasStateGuild = await prompter.confirm(
+    `Does this community currently have a reviewed shared ${details.communityTerm} Discord?`, false,
+  );
+  const stateGuild = hasStateGuild ? {
+    id: await askValidated(prompter, `Shared ${details.communityTerm} Discord server ID: `, validateDiscordGuildId),
+    displayName: await askValidated(prompter, questions.discordDisplayName,
+      (value) => validateHumanName(value, `Shared ${details.communityTerm} Discord display name`)),
+  } : null;
   const timeZone = await askValidated(prompter, "IANA timezone (for example Europe/London): ", validateTimeZone);
   const keepClosed = await prompter.confirm("Keep bookings closed initially?", true);
 
@@ -296,8 +303,7 @@ export async function runBookingConfigWizard({ prompter, outputDirectory = DEFAU
     profile,
     communityCode,
     displayName,
-    discordGuildId,
-    discordGuildDisplayName,
+    stateGuild,
     timeZone,
     bookingOpen: !keepClosed,
     serviceDates,

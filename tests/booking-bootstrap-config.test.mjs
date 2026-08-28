@@ -26,7 +26,7 @@ test("wizard wording distinguishes the in-game code and both display names", () 
   assert.match(kingshot.communityCode, /Kingdom code.*in-game Kingdom number.*9999/i);
   for (const questions of [wos, kingshot]) {
     assert.match(questions.publicDisplayName, /name shown on the website.*Test Server/i);
-    assert.match(questions.discordDisplayName, /current name of the Discord server.*same as the public display name/i);
+    assert.match(questions.discordDisplayName, /shared (?:State|Kingdom) Discord display name/i);
   }
 });
 
@@ -35,8 +35,10 @@ function input(profile, overrides = {}) {
     profile,
     communityCode: profile === "wos" ? "1234" : "K-5678",
     displayName: profile === "wos" ? "State 1234" : "Kingdom 5678",
-    discordGuildId: profile === "wos" ? "123456789012345678" : "223456789012345678",
-    discordGuildDisplayName: profile === "wos" ? "Rachie staging" : "Peggie staging",
+    stateGuild: {
+      id: profile === "wos" ? "123456789012345678" : "223456789012345678",
+      displayName: profile === "wos" ? "Rachie staging" : "Peggie staging",
+    },
     timeZone: "Europe/London",
     serviceDates: { construction: "2026-09-01", research: "2026-09-02", troop: "2026-09-03" },
     requirements: { construction: ["fc", "rfc", "speedups"], research: ["shards"], troop: ["speedups"] },
@@ -57,6 +59,15 @@ test("generates a Kingshot booking community configuration", () => {
   assert.equal(config.profile, "kingshot");
   assert.equal(config.community.code, "K-5678");
   assert.equal(config.community.displayName, "Kingdom 5678");
+});
+
+test("explicitly supports a community with no shared State or Kingdom Discord", () => {
+  for (const profile of ["wos", "kingshot"]) {
+    const config = buildBookingCommunityConfig(input(profile, { stateGuild: null }));
+    assert.equal(config.schemaVersion, 2);
+    assert.equal(config.community.stateGuild, null);
+    assert.equal(validateBookingBootstrapConfig(config).community.stateGuild, null);
+  }
 });
 
 test("rejects an invalid Discord guild ID", () => {

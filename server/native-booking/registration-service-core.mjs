@@ -4,6 +4,10 @@ import {
   validateIdempotencyKey,
   validateRegistrationInput,
 } from "./registration-validation.mjs";
+import {
+  PLAYER_REGISTRATION_POINTS,
+  POINT_REASONS,
+} from "../points/domain-core.mjs";
 
 const REGISTRATION_OPERATION = "participant_registration_upsert";
 
@@ -134,6 +138,7 @@ export function createRegistrationService({
               alliance: normalizedRegistration.alliance,
               idempotencyKey,
               correlationId,
+              sourceGuildId: context.community.discordGuildId ?? null,
             })
           : await session.insertWebsiteParticipant({
               id: createId(),
@@ -144,8 +149,20 @@ export function createRegistrationService({
               alliance: normalizedRegistration.alliance,
               idempotencyKey,
               correlationId,
+              sourceGuildId: context.community.discordGuildId ?? null,
             });
         if (!participant) throw new RegistrationOwnershipAmbiguousError();
+
+        if (!before) {
+          await session.insertPlayerPointsEntry({
+            id: createId(), participantId: participant.id, communityId: context.community.id,
+            discordUserId: context.discordUser.id, pointsDelta: PLAYER_REGISTRATION_POINTS,
+            reason: POINT_REASONS.playerRegistered,
+            sourceGuildId: context.community.discordGuildId ?? null,
+            idempotencyKey: `player_registered:${participant.id}`,
+            metadata: { registrationSource: context.community.discordGuildId ? "discord_guild" : "website" },
+          });
+        }
 
         const outcome = before ? "updated" : "created";
         const status = before ? 200 : 201;

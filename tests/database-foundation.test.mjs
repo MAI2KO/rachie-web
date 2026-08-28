@@ -190,6 +190,7 @@ test("migration files are ordered and checksummed", async () => {
       { version: "0006", name: "discord_booking_notifications" },
       { version: "0007", name: "booking_admin_v1" },
       { version: "0008", name: "booking_window_announcements" },
+      { version: "0009", name: "access_overrides_points" },
     ],
   );
   assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));
@@ -335,4 +336,26 @@ test("Booking Admin service overrides are additive, community-scoped, and protec
   assert.match(migration, /REFERENCES minister_services \(game_profile, service_code\)/);
   assert.match(migration, /ALTER TABLE booking_community_services FORCE ROW LEVEL SECURITY/);
   assert.match(migration, /booking_community_services_profile_policy/);
+});
+
+test("access provenance, cycle overrides, and points migration is scoped and append-only", () => {
+  const migration = fs.readFileSync(
+    path.join(migrationsDirectory, "0009_access_overrides_points.sql"), "utf8",
+  );
+  for (const table of ["community_access_grants", "booking_cycle_schedule_overrides",
+    "player_points_ledger", "community_points_ledger"]) {
+    assert.match(migration, new RegExp(`CREATE TABLE ${table}`));
+    assert.match(migration, new RegExp(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`));
+  }
+  assert.match(migration, /UNIQUE \(game_profile, community_id, discord_user_id, source_guild_id\)/);
+  assert.match(migration, /UNIQUE \(game_profile, idempotency_key\)/);
+  assert.match(migration, /DEFAULT 'unclassified'/);
+  assert.match(migration, /guild_kind IN \('unclassified', 'state', 'alliance'\)/);
+  assert.match(migration, /session\.revoked_at IS NULL/);
+  assert.match(migration, /session\.expires_at > now\(\)/);
+  assert.match(migration, /'legacy_session'/);
+  assert.doesNotMatch(migration, /INSERT INTO player_points_ledger[\s\S]*SELECT/);
+  assert.doesNotMatch(migration, /INSERT INTO community_points_ledger[\s\S]*SELECT/);
+  assert.match(migration, /BEFORE UPDATE OR DELETE ON player_points_ledger/);
+  assert.match(migration, /BEFORE UPDATE OR DELETE ON community_points_ledger/);
 });

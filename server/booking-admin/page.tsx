@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import type { GameProfile } from "@/brands/types";
 import { getBrandRequestContext } from "@/brands/server";
 import { BookingAdmin } from "@/components/booking-admin/booking-admin";
+import { verifyDiscordGuildOwner } from "@/server/auth/discord-guild-membership-verifier";
 
 import { authorizeBookingAdminRequest } from "./access";
 import { createBookingAdminRepository } from "./repository";
@@ -30,6 +31,7 @@ export async function BookingAdminPage({ communityCode, requiredProfile }: {
       communityId: authorization.managerContext.authorizedCommunityId,
       managerContext: authorization.managerContext,
       repository,
+      verifyGuildOwner: verifyDiscordGuildOwner,
     }).read();
   } catch {
     notFound();

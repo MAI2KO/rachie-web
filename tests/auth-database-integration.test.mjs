@@ -72,7 +72,7 @@ test(
       );
       const migrationResult = await runMigrations(migrationPool, migrations);
       assert.deepEqual(migrationResult.applied,
-        ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"]);
+        ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009"]);
 
       await adminPool.query(
         `CREATE ROLE ${runtimeRole}
@@ -112,9 +112,9 @@ test(
         );
         await client.query(
           `INSERT INTO booking_discord_guilds
-             (game_profile, discord_guild_id, community_id, discord_guild_name)
-           VALUES ('wos', 'wos-guild-one', $1, 'WOS One'),
-                  ('wos', 'wos-guild-two', $2, 'WOS Two')`,
+             (game_profile, discord_guild_id, community_id, discord_guild_name, guild_kind)
+           VALUES ('wos', 'wos-guild-one', $1, 'WOS One', 'alliance'),
+                  ('wos', 'wos-guild-two', $2, 'WOS Two', 'alliance')`,
           [wosOne, wosTwo],
         );
       });
@@ -127,8 +127,8 @@ test(
         );
         await client.query(
           `INSERT INTO booking_discord_guilds
-             (game_profile, discord_guild_id, community_id, discord_guild_name)
-           VALUES ('kingshot', 'kingshot-guild-one', $1, 'Kingshot One')`,
+             (game_profile, discord_guild_id, community_id, discord_guild_name, guild_kind)
+           VALUES ('kingshot', 'kingshot-guild-one', $1, 'Kingshot One', 'alliance')`,
           [kingshotOne],
         );
       });

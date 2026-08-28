@@ -4,7 +4,9 @@ import test from "node:test";
 
 import {
   bookingAdminModel,
+  BookingAdminTopologyDeniedError,
   BookingAdminValidationError,
+  validateCycleScheduleTiming,
   validateBookingAdminChange,
 } from "../server/booking-admin/domain-core.mjs";
 import { createBookingAdminService } from "../server/booking-admin/service-core.mjs";
@@ -39,6 +41,8 @@ function snapshot() {
     dates: [{ service_code: "construction", display_label: "Construction",
       booking_date: "2026-08-30", window_status: "open" }],
     guestLink: null,
+    guilds: [],
+    scheduleOverrides: [],
   };
 }
 
@@ -219,6 +223,106 @@ test("admin mutations accept only known, strictly scoped boolean changes", () =>
     { section: "guestLink", action: "rotate" });
   assert.throws(() => validateBookingAdminChange({ section: "guestLink", action: "copy" }),
     BookingAdminValidationError);
+  assert.throws(() => validateBookingAdminChange({
+    section: "discordAccess", action: "unlink", guildId: "222222222222222222", confirmed: false,
+  }), BookingAdminValidationError);
+});
+
+function unlinkRepository(guilds) {
+  const state = snapshot();
+  state.guilds = structuredClone(guilds);
+  const audits = [];
+  const session = {
+    async readSnapshot(id) { return id === communityId ? state : null; },
+    async lockDiscordTopology() { return state.guilds; },
+    async revokeAllianceGuildAccess({ guildId }) {
+      const guild = state.guilds.find((candidate) => candidate.discord_guild_id === guildId);
+      if (!guild || guild.link_status !== "active" || guild.guild_kind !== "alliance") {
+        return { changed: false, affectedGrantCount: 0 };
+      }
+      guild.link_status = "revoked";
+      return { changed: true, affectedGrantCount: 3 };
+    },
+    async insertGuildUnlinkAudit(input) { audits.push(input); },
+  };
+  return { gameProfile: "wos", state, audits,
+    async withTransaction(work) { return work(session); } };
+}
+
+const stateGuild = { discord_guild_id: "999999999999999999", discord_guild_name: "Shared State",
+  guild_kind: "state", link_status: "active" };
+const allianceOne = { discord_guild_id: "222222222222222222", discord_guild_name: "Alliance One",
+  guild_kind: "alliance", link_status: "active" };
+const allianceTwo = { discord_guild_id: "333333333333333333", discord_guild_name: "Alliance Two",
+  guild_kind: "alliance", link_status: "active" };
+
+function ownerVerifier(ownerGuildIds) {
+  return async ({ guildId }) => ({ status: ownerGuildIds.includes(guildId) ? "owner" : "not_owner" });
+}
+
+test("guild unlink requires exact alliance or shared-State ownership, never manager role alone", async () => {
+  for (const allowedGuilds of [[allianceOne.discord_guild_id], [stateGuild.discord_guild_id]]) {
+    const repository = unlinkRepository([stateGuild, allianceOne, allianceTwo]);
+    const result = await createBookingAdminService({
+      gameProfile: "wos", communityId, managerContext: manager, repository,
+      verifyGuildOwner: ownerVerifier(allowedGuilds),
+    }).unlinkAllianceGuild({ section: "discordAccess", action: "unlink",
+      guildId: allianceOne.discord_guild_id, confirmed: true });
+    assert.equal(result.unlink.changed, true);
+    assert.equal(result.unlink.affectedGrantCount, 3);
+    assert.equal(repository.audits.length, 1);
+  }
+
+  for (const ownedGuilds of [[], [allianceTwo.discord_guild_id]]) {
+    await assert.rejects(createBookingAdminService({
+      gameProfile: "wos", communityId, managerContext: {
+        ...manager, authorization: { via: "bot_manager_role" },
+      }, repository: unlinkRepository([stateGuild, allianceOne, allianceTwo]),
+      verifyGuildOwner: ownerVerifier(ownedGuilds),
+    }).unlinkAllianceGuild({ section: "discordAccess", action: "unlink",
+      guildId: allianceOne.discord_guild_id, confirmed: true }), BookingAdminTopologyDeniedError);
+  }
+});
+
+test("alliance owner can self-unlink without a State Discord; topology scope fails closed", async () => {
+  const self = await createBookingAdminService({
+    gameProfile: "wos", communityId, managerContext: manager,
+    repository: unlinkRepository([allianceOne]),
+    verifyGuildOwner: ownerVerifier([allianceOne.discord_guild_id]),
+  }).unlinkAllianceGuild({ section: "discordAccess", action: "unlink",
+    guildId: allianceOne.discord_guild_id, confirmed: true });
+  assert.equal(self.unlink.changed, true);
+
+  for (const target of [stateGuild.discord_guild_id, "444444444444444444"]) {
+    await assert.rejects(createBookingAdminService({
+      gameProfile: "wos", communityId, managerContext: manager,
+      repository: unlinkRepository([stateGuild, allianceOne]),
+      verifyGuildOwner: ownerVerifier([stateGuild.discord_guild_id]),
+    }).unlinkAllianceGuild({ section: "discordAccess", action: "unlink",
+      guildId: target, confirmed: true }), BookingAdminTopologyDeniedError);
+  }
+});
+
+test("cycle override validation is cycle-scoped, bounded, historical-safe, and explicit when open", () => {
+  const draftNow = new Date("2026-09-01T12:00:00.000Z");
+  const valid = validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
+    cycleIndex: 1, opensAt: "2026-09-01T18:00:00.000Z", closesAt: "2026-09-06T18:00:00.000Z",
+    confirmedOpenChange: false }, draftNow);
+  assert.equal(valid.opensAt, "2026-09-01T18:00:00.000Z");
+  assert.throws(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
+    cycleIndex: 2, opensAt: valid.opensAt, closesAt: valid.closesAt, confirmedOpenChange: false }, draftNow),
+  (error) => error.code === "cycle_not_current");
+  assert.throws(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
+    cycleIndex: 1, opensAt: valid.closesAt, closesAt: valid.opensAt, confirmedOpenChange: false }, draftNow),
+  (error) => error.code === "invalid_schedule");
+  const openNow = new Date("2026-09-03T12:00:00.000Z");
+  assert.throws(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
+    cycleIndex: 1, opensAt: "2026-09-02T00:00:00.000Z", closesAt: "2026-09-06T12:00:00.000Z",
+    confirmedOpenChange: false }, openNow), (error) => error.code === "confirmation_required");
+  assert.throws(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "restore",
+    cycleIndex: 1, confirmedOpenChange: true }, new Date("2026-09-07T01:00:00.000Z"), {
+    cycle_index: 1, opens_at: "2026-09-02T00:00:00.000Z", closes_at: "2026-09-06T18:00:00.000Z",
+  }), (error) => error.code === "historical_cycle");
 });
 
 test("admin routes and UI reuse manager authorization and expose no destructive date controls", () => {
@@ -241,14 +345,16 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
   assert.match(handler, /verifyAuthenticatedMutationCsrf/);
   assert.match(handler, /bookingAdminMutation/);
   assert.match(ui, /role="switch"/); assert.match(ui, /Read-only in Booking Admin v1/);
-  assert.match(ui, /Automatic booking cycle/);
+  assert.match(ui, /Booking window/); assert.match(ui, /Save override/);
+  assert.match(ui, /Restore automatic schedule/); assert.match(ui, /Discord access/);
+  assert.match(ui, /Unlink alliance/); assert.match(ui, /Confirm access revocation/);
   assert.match(ui, /Guest booking link/); assert.match(ui, /Generate/); assert.match(ui, /Rotate/);
   assert.match(ui, /Revoke/); assert.match(ui, /Copy/); assert.match(ui, /only a hash is stored/);
   assert.doesNotMatch(ui, /create date|delete date|generate slot/i);
 });
 
-test("public admin model contains configuration only", () => {
+test("public admin model contains only display-safe configuration and linked guild choices", () => {
   const model = bookingAdminModel("wos", snapshot());
-  assert.doesNotMatch(JSON.stringify(model), /discord|actor|guild|audit|password|token/i);
+  assert.doesNotMatch(JSON.stringify(model), /actor|audit|password|token|revoked_by|source_guild/i);
   assert.equal(bookingAdminModel("kingshot", snapshot()).automaticCycle, null);
 });

@@ -2,6 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { validateIdempotencyKey } from "../native-booking/registration-validation.mjs";
 import {
+  APPOINTMENT_CONFIRMED_POINTS,
+  CYCLE_DISCORD_PARTICIPATION_POINTS,
+  POINT_REASONS,
+} from "../points/domain-core.mjs";
+import {
   adminApprovalRequest,
   approvalDateOnly,
   APPROVAL_REQUEST_STATES,
@@ -300,6 +305,28 @@ export function createBookingApprovalService({
         await session.copyRequestAnswersToBooking(request.id, bookingId);
         const confirmed = await session.confirmRequest(request.id, bookingId, actor, at);
         if (!confirmed) throw new BookingApprovalTransitionError("invalid_transition", "Booking request could not be approved.");
+        if (request.participant_id) {
+          await session.insertPlayerPointsEntry({
+            id: createId(), participantId: request.participant_id,
+            communityId, discordUserId: request.discord_user_id,
+            pointsDelta: APPOINTMENT_CONFIRMED_POINTS,
+            reason: POINT_REASONS.appointmentConfirmed,
+            bookingWindowId: request.window_id, bookingId,
+            sourceGuildId: booking.source_discord_guild_id,
+            idempotencyKey: `appointment_confirmed:${request.participant_id}:${request.window_id}:${request.service_code}`,
+            metadata: { approvalRequestId: request.id, serviceCode: request.service_code },
+          });
+          if (booking.source_discord_guild_id) {
+            await session.insertCommunityParticipationPoints({
+              id: createId(), communityId, sourceGuildId: booking.source_discord_guild_id,
+              bookingWindowId: request.window_id,
+              pointsDelta: CYCLE_DISCORD_PARTICIPATION_POINTS,
+              reason: POINT_REASONS.cycleDiscordParticipation,
+              idempotencyKey: `cycle_discord_participation:${request.window_id}:${booking.source_discord_guild_id}`,
+              metadata: { firstQualifyingBookingId: bookingId },
+            });
+          }
+        }
         await session.insertApprovalEvent({
           id: createId(), communityId, requestId: request.id, action: "approved",
           actorType: "discord_user", actorDiscordUserId: actor.discordUserId,

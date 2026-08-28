@@ -332,22 +332,61 @@ class ProfileScopedApprovalSession {
   }
 
   async insertConfirmedBookingFromRequest(request, bookingId, actor, correlationId) {
+    const participantSource = request.participant_id ? (await this.client.query(
+      `SELECT source_discord_guild_id
+         FROM booking_participants
+        WHERE game_profile=$1 AND id=$2 AND community_id=$3`,
+      [this.gameProfile, request.participant_id, request.community_id],
+    )).rows[0]?.source_discord_guild_id ?? null : null;
     const result = await this.client.query(
       `INSERT INTO minister_bookings
          (game_profile,id,community_id,window_id,service_date_id,service_code,
           booking_date,slot_id,player_id_snapshot,in_game_name_snapshot,
           alliance_snapshot,display_time_label_snapshot,source,actor_type,
-          actor_id,idempotency_key,correlation_id,approval_request_id)
+          actor_id,idempotency_key,correlation_id,approval_request_id,
+          participant_id,discord_user_id,source_discord_guild_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-               'website','admin',$13,$14,$15,$16)
+               'website','admin',$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [this.gameProfile, bookingId, request.community_id, request.window_id,
        request.service_date_id, request.service_code, request.booking_date,
        request.slot_id, request.player_id_snapshot, request.in_game_name_snapshot,
        request.alliance_snapshot, request.display_time_label_snapshot,
-       actor.discordUserId, request.idempotency_key, correlationId, request.id],
+       actor.discordUserId, request.idempotency_key, correlationId, request.id,
+       request.participant_id ?? null, request.discord_user_id ?? null, participantSource],
     );
     return result.rows[0];
+  }
+
+  async insertPlayerPointsEntry(input) {
+    return (await this.client.query(
+      `INSERT INTO player_points_ledger
+         (game_profile,id,participant_id,community_id,discord_user_id,points_delta,reason,
+          booking_window_id,booking_id,source_guild_id,idempotency_key,metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (game_profile,idempotency_key) DO NOTHING
+       RETURNING id`,
+      [this.gameProfile, input.id, input.participantId, input.communityId,
+       input.discordUserId ?? null, input.pointsDelta, input.reason, input.bookingWindowId,
+       input.bookingId, input.sourceGuildId ?? null, input.idempotencyKey, input.metadata ?? {}],
+    )).rowCount === 1;
+  }
+
+  async insertCommunityParticipationPoints(input) {
+    return (await this.client.query(
+      `INSERT INTO community_points_ledger
+         (game_profile,id,community_id,source_guild_id,booking_window_id,
+          points_delta,reason,idempotency_key,metadata)
+       SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9
+         FROM booking_discord_guilds
+        WHERE game_profile=$1 AND community_id=$3 AND discord_guild_id=$4
+          AND guild_kind='alliance' AND link_status='active'
+       ON CONFLICT (game_profile,idempotency_key) DO NOTHING
+       RETURNING id`,
+      [this.gameProfile, input.id, input.communityId, input.sourceGuildId,
+       input.bookingWindowId, input.pointsDelta, input.reason, input.idempotencyKey,
+       input.metadata ?? {}],
+    )).rowCount === 1;
   }
 
   async copyRequestAnswersToBooking(requestId, bookingId) {
@@ -399,7 +438,7 @@ class ProfileScopedApprovalSession {
     const result = await this.client.query(
       `SELECT discord_guild_id
        FROM booking_discord_guilds
-       WHERE game_profile=$1 AND community_id=$2
+       WHERE game_profile=$1 AND community_id=$2 AND link_status='active'
        ORDER BY discord_guild_id`,
       [this.gameProfile, communityId],
     );

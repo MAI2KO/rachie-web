@@ -3,6 +3,7 @@ import "server-only";
 import { BookingApprovalTransitionError } from "@/server/booking-approval/domain-core.mjs";
 import { BookingAuthenticationRequiredError } from "@/server/auth/authenticated-booking-context-core.mjs";
 import { verifyAuthenticatedMutationCsrf } from "@/server/auth/mutation-csrf";
+import { verifyDiscordGuildOwner } from "@/server/auth/discord-guild-membership-verifier";
 import {
   ManagerAccessDeniedError,
   ManagerVerificationUnavailableError,
@@ -11,7 +12,11 @@ import { createServerRateLimiter } from "@/server/rate-limit/limiter";
 import { RATE_LIMIT_POLICIES } from "@/server/rate-limit/policies.mjs";
 
 import { authorizeBookingAdminRequest } from "./access";
-import { BookingAdminValidationError } from "./domain-core.mjs";
+import {
+  BookingAdminTopologyDeniedError,
+  BookingAdminTopologyUnavailableError,
+  BookingAdminValidationError,
+} from "./domain-core.mjs";
 import { createBookingAdminRepository } from "./repository";
 import { createBookingAdminService, BookingAdminUnavailableError } from "./service-core.mjs";
 
@@ -34,6 +39,12 @@ function bookingAdminError(error: unknown) {
   if (error instanceof BookingAdminValidationError) {
     return json({ ok: false, code: error.code, error: error.message }, 400);
   }
+  if (error instanceof BookingAdminTopologyDeniedError) {
+    return json({ ok: false, code: error.code, error: error.message }, 403);
+  }
+  if (error instanceof BookingAdminTopologyUnavailableError) {
+    return json({ ok: false, code: error.code, error: error.message }, 503);
+  }
   if (error instanceof BookingAdminUnavailableError) {
     return json({ ok: false, code: error.code, error: error.message }, 503);
   }
@@ -49,6 +60,7 @@ async function scope(request: Request, communityCode: string) {
     communityId: authorization.managerContext.authorizedCommunityId,
     managerContext: authorization.managerContext,
     repository,
+    verifyGuildOwner: verifyDiscordGuildOwner,
   });
   return { ...authorization, service };
 }
@@ -84,6 +96,14 @@ export async function handleBookingAdminMutation(request: Request, communityCode
     if (body && typeof body === "object" && !Array.isArray(body)
         && (body as { section?: unknown }).section === "guestLink") {
       return json({ ok: true, ...(await authorized.service.updateGuestLink(body)) });
+    }
+    if (body && typeof body === "object" && !Array.isArray(body)
+        && (body as { section?: unknown }).section === "discordAccess") {
+      return json({ ok: true, ...(await authorized.service.unlinkAllianceGuild(body)) });
+    }
+    if (body && typeof body === "object" && !Array.isArray(body)
+        && (body as { section?: unknown }).section === "cycleSchedule") {
+      return json({ ok: true, ...(await authorized.service.updateCycleSchedule(body)) });
     }
     return json({ ok: true, configuration: await authorized.service.update(body) });
   } catch (error) {

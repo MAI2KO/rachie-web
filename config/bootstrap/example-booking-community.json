@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "profile": "<wos-or-kingshot>",
   "community": {
     "code": "<community-code>",
     "displayName": "<public-community-name>",
-    "discordGuild": {
+    "stateGuild": {
       "id": "<discord-guild-id>",
       "displayName": "<public-discord-guild-name>"
     }

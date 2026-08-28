@@ -106,21 +106,27 @@ function deterministicUuid(...parts) {
 export function validateBookingBootstrapConfig(input) {
   const root = expectObject(input, "configuration");
   expectKeys(root, ["schemaVersion", "profile", "community", "booking", "timeZone", "services"], "configuration");
-  if (root.schemaVersion !== 1) fail("schemaVersion must be 1.");
+  if (root.schemaVersion !== 2) fail("schemaVersion must be 2.");
   if (!PROFILES.includes(root.profile)) fail("profile must be either wos or kingshot.");
 
   const community = expectObject(root.community, "community");
-  expectKeys(community, ["code", "displayName", "discordGuild"], "community");
+  expectKeys(community, ["code", "displayName", "stateGuild"], "community");
   const code = requiredString(community.code, "community.code", 32);
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(code)) {
     fail("community.code must start with a letter or digit and contain only letters, digits, hyphens, or underscores.");
   }
   const displayName = requiredString(community.displayName, "community.displayName");
-  const guild = expectObject(community.discordGuild, "community.discordGuild");
-  expectKeys(guild, ["id", "displayName"], "community.discordGuild");
-  const guildId = requiredString(guild.id, "community.discordGuild.id", 25);
-  if (!/^\d{15,25}$/.test(guildId)) fail("community.discordGuild.id must be a valid Discord guild ID.");
-  const guildName = requiredString(guild.displayName, "community.discordGuild.displayName");
+  let stateGuild = null;
+  if (community.stateGuild !== null) {
+    const guild = expectObject(community.stateGuild, "community.stateGuild");
+    expectKeys(guild, ["id", "displayName"], "community.stateGuild");
+    const guildId = requiredString(guild.id, "community.stateGuild.id", 25);
+    if (!/^\d{15,25}$/.test(guildId)) fail("community.stateGuild.id must be a valid Discord guild ID.");
+    stateGuild = Object.freeze({
+      id: guildId,
+      displayName: requiredString(guild.displayName, "community.stateGuild.displayName"),
+    });
+  }
 
   const booking = expectObject(root.booking, "booking");
   expectKeys(booking, ["enabled", "open"], "booking");
@@ -182,9 +188,9 @@ export function validateBookingBootstrapConfig(input) {
   }
 
   const normalized = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     profile: root.profile,
-    community: { code, displayName, discordGuild: { id: guildId, displayName: guildName } },
+    community: { code, displayName, stateGuild },
     booking: { enabled, open },
     timeZone,
     services,
@@ -213,7 +219,12 @@ function emptyPlan(config) {
     profile: config.profile,
     communityCode: config.community.code,
     community: "existing",
-    guildMapping: "existing",
+    guildMapping: config.community.stateGuild ? "existing" : "none",
+    linkedGuilds: [],
+    proposedGuildKindChanges: [],
+    accessGrants: { currentActive: 0, create: 0, reclassify: 0, revoke: 0 },
+    sessionCommunities: { repoint: 0, remove: 0 },
+    explicitStateClassificationRequired: false,
     services: { existing: 0, changes: 0 },
     dates: { existing: 0, create: 0 },
     slots: { existing: 0, create: 0 },
@@ -283,21 +294,77 @@ export async function planBookingCommunityBootstrap(client, config) {
     plan.operations.push({ type: "createCommunity", id: communityId });
   }
 
-  const guildRows = (await client.query(
-    `SELECT game_profile, discord_guild_id, community_id, discord_guild_name
+  const communityGuilds = selectedCommunity ? (await client.query(
+    `SELECT discord_guild_id,discord_guild_name,guild_kind,link_status
+       FROM booking_discord_guilds
+      WHERE game_profile=$1 AND community_id=$2
+      ORDER BY discord_guild_id`,
+    [config.profile, effectiveCommunityId],
+  )).rows : [];
+  plan.linkedGuilds = communityGuilds.map((guild) => ({
+    id: guild.discord_guild_id,
+    displayName: guild.discord_guild_name,
+    guildKind: guild.guild_kind,
+    linkStatus: guild.link_status,
+  }));
+  if (selectedCommunity) {
+    plan.accessGrants.currentActive = Number((await client.query(
+      `SELECT count(*)::int AS count FROM community_access_grants
+        WHERE game_profile=$1 AND community_id=$2 AND status='active'`,
+      [config.profile, effectiveCommunityId],
+    )).rows[0]?.count ?? 0);
+  }
+
+  const configuredStateGuild = config.community.stateGuild;
+  const differentActiveStateGuild = configuredStateGuild && communityGuilds.find(
+    (guild) => guild.guild_kind === "state" && guild.link_status === "active"
+      && guild.discord_guild_id !== configuredStateGuild.id,
+  );
+  if (differentActiveStateGuild) {
+    plan.conflicts.push("A different active State/Kingdom Discord is already configured for this community.");
+  }
+  const guildRows = configuredStateGuild ? (await client.query(
+    `SELECT game_profile, discord_guild_id, community_id, discord_guild_name,guild_kind,link_status
      FROM booking_discord_guilds WHERE game_profile=$1 AND discord_guild_id=$2`,
-    [config.profile, config.community.discordGuild.id],
-  )).rows;
+    [config.profile, configuredStateGuild.id],
+  )).rows : [];
   const guildRow = guildRows[0];
-  if (!guildRow) {
+  if (!configuredStateGuild) {
+    if (communityGuilds.some((guild) => guild.guild_kind === "state"
+        && guild.link_status === "active")) {
+      plan.conflicts.push("Configuration declares no shared State/Kingdom Discord, but one is already active.");
+    }
+    plan.explicitStateClassificationRequired = communityGuilds.some(
+      (guild) => guild.guild_kind === "unclassified" && guild.link_status === "active",
+    );
+  } else if (!guildRow) {
     plan.guildMapping = "create";
+    plan.proposedGuildKindChanges.push({ guildId: configuredStateGuild.id, from: null, to: "state" });
     plan.operations.push({ type: "createGuild", communityId: effectiveCommunityId });
   } else if (guildRow.community_id !== effectiveCommunityId) {
     plan.guildMapping = "conflict";
     plan.conflicts.push("Discord guild ID is already mapped to a different community.");
-  } else if (guildRow.discord_guild_name !== config.community.discordGuild.displayName) {
+  } else if (guildRow.discord_guild_name !== configuredStateGuild.displayName
+      || guildRow.guild_kind !== "state" || guildRow.link_status !== "active") {
     plan.guildMapping = "update";
+    plan.proposedGuildKindChanges.push({
+      guildId: guildRow.discord_guild_id,
+      from: guildRow.guild_kind,
+      to: "state",
+    });
     plan.operations.push({ type: "updateGuild" });
+  }
+  if (configuredStateGuild && guildRow?.community_id === effectiveCommunityId) {
+    const grantsToReclassify = Number((await client.query(
+      `SELECT count(*)::int AS count FROM community_access_grants
+        WHERE game_profile=$1 AND community_id=$2 AND source_guild_id=$3
+          AND source_type='alliance_discord' AND status='active'`,
+      [config.profile, effectiveCommunityId, configuredStateGuild.id],
+    )).rows[0]?.count ?? 0);
+    if (grantsToReclassify > 0) {
+      plan.accessGrants.reclassify = grantsToReclassify;
+      plan.operations.push({ type: "reclassifyStateGuildGrants", communityId: effectiveCommunityId });
+    }
   }
 
   await setProfile(client, config.profile);
@@ -426,15 +493,25 @@ async function applyPlan(client, config, plan, injectFailureAfter) {
     } else if (operation.type === "createGuild") {
       await client.query(
         `INSERT INTO booking_discord_guilds
-           (game_profile,discord_guild_id,community_id,discord_guild_name,linked_by_actor_id)
-         VALUES ($1,$2,$3,$4,'booking-bootstrap')`,
-        [config.profile, config.community.discordGuild.id, operation.communityId, config.community.discordGuild.displayName],
+           (game_profile,discord_guild_id,community_id,discord_guild_name,linked_by_actor_id,guild_kind)
+         VALUES ($1,$2,$3,$4,'booking-bootstrap','state')`,
+        [config.profile, config.community.stateGuild.id, operation.communityId, config.community.stateGuild.displayName],
       );
     } else if (operation.type === "updateGuild") {
       await client.query(
-        `UPDATE booking_discord_guilds SET discord_guild_name=$3, linked_by_actor_id='booking-bootstrap', updated_at=now()
+        `UPDATE booking_discord_guilds SET discord_guild_name=$3,guild_kind='state',link_status='active',
+                revoked_at=NULL,revoked_by_actor_id=NULL,revocation_reason=NULL,
+                linked_by_actor_id='booking-bootstrap',updated_at=now()
          WHERE game_profile=$1 AND discord_guild_id=$2`,
-        [config.profile, config.community.discordGuild.id, config.community.discordGuild.displayName],
+        [config.profile, config.community.stateGuild.id, config.community.stateGuild.displayName],
+      );
+    } else if (operation.type === "reclassifyStateGuildGrants") {
+      await client.query(
+        `UPDATE community_access_grants
+            SET source_type='legacy_session',updated_at=now()
+          WHERE game_profile=$1 AND community_id=$2 AND source_guild_id=$3
+            AND source_type='alliance_discord' AND status='active'`,
+        [config.profile, operation.communityId, config.community.stateGuild.id],
       );
     } else if (operation.type === "createWindow") {
       await client.query(
@@ -496,16 +573,17 @@ async function applyPlan(client, config, plan, injectFailureAfter) {
 export async function runBookingCommunityBootstrap({ pool, config, dryRun = false, injectFailureAfter } = {}) {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    await checkAdministrativeRole(client);
-    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`booking-bootstrap:${config.profile}:${config.community.code}`]);
+    await client.query(dryRun ? "BEGIN READ ONLY" : "BEGIN");
+    if (!dryRun) {
+      await checkAdministrativeRole(client);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`booking-bootstrap:${config.profile}:${config.community.code}`]);
+    }
     const plan = await planBookingCommunityBootstrap(client, config);
     if (plan.conflicts.length && !dryRun) {
       throw new BookingBootstrapError("configuration_conflict", "Bootstrap refused because existing configuration conflicts with the reviewed file.", plan.conflicts);
     }
     if (!dryRun) await applyPlan(client, config, plan, injectFailureAfter);
-    if (dryRun) await client.query("ROLLBACK");
-    else await client.query("COMMIT");
+    await client.query("COMMIT");
     return plan;
   } catch (error) {
     try { await client.query("ROLLBACK"); } catch { /* preserve the original error */ }
@@ -520,6 +598,14 @@ export function formatBookingBootstrapSummary(plan, { dryRun = false } = {}) {
     `Profile: ${plan.profile}`,
     `Community: ${plan.communityCode} (${plan.community})`,
     `Guild mapping: ${plan.guildMapping}`,
+    `State/Kingdom classification: ${plan.explicitStateClassificationRequired ? "explicit classification required" : "explicitly configured"}`,
+    `Linked guilds: ${plan.linkedGuilds.length}`,
+    ...plan.linkedGuilds.map((guild) => `- ${guild.displayName} (${guild.id}): ${guild.guildKind}/${guild.linkStatus}`),
+    `Proposed guild-kind changes: ${plan.proposedGuildKindChanges.length}`,
+    ...plan.proposedGuildKindChanges.map((change) => `- ${change.guildId}: ${change.from} -> ${change.to}`),
+    `Active access grants: ${plan.accessGrants.currentActive}`,
+    `Grant effects: ${plan.accessGrants.create} create / ${plan.accessGrants.reclassify} reclassify / ${plan.accessGrants.revoke} revoke`,
+    `Session effects: ${plan.sessionCommunities.repoint} repoint / ${plan.sessionCommunities.remove} remove`,
     `Services: ${plan.services.existing} existing / ${plan.services.changes} changes`,
     `Dates: ${plan.dates.existing} existing / ${plan.dates.create} create`,
     `Slots: ${plan.slots.existing} existing / ${plan.slots.create} create`,

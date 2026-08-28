@@ -28,7 +28,7 @@ class BookingAdminSession {
       [this.gameProfile, communityId],
     )).rows[0] ?? null;
     if (!community || community.status !== "active") return null;
-    const [services, settings, windows, dates, guestLinks] = await Promise.all([
+    const [services, settings, windows, dates, guestLinks, guilds, scheduleOverrides] = await Promise.all([
       this.client.query(
         `SELECT service.service_code,service.display_label,service.sort_order,
                 COALESCE(community_service.enabled,service.active) AS enabled
@@ -81,6 +81,20 @@ class BookingAdminSession {
           LIMIT 1`,
         [this.gameProfile, communityId],
       ),
+      this.client.query(
+        `SELECT discord_guild_id,discord_guild_name,guild_kind,link_status,revoked_at
+           FROM booking_discord_guilds
+          WHERE game_profile=$1 AND community_id=$2
+          ORDER BY CASE guild_kind WHEN 'state' THEN 0 ELSE 1 END,discord_guild_name,discord_guild_id`,
+        [this.gameProfile, communityId],
+      ),
+      this.client.query(
+        `SELECT cycle_index,opens_at,closes_at,created_at,updated_at
+           FROM booking_cycle_schedule_overrides
+          WHERE game_profile=$1 AND community_id=$2
+          ORDER BY cycle_index`,
+        [this.gameProfile, communityId],
+      ),
     ]);
     return {
       community,
@@ -89,7 +103,116 @@ class BookingAdminSession {
       windows: windows.rows,
       dates: dates.rows,
       guestLink: guestLinks.rows[0] ?? null,
+      guilds: guilds.rows,
+      scheduleOverrides: scheduleOverrides.rows,
     };
+  }
+
+  async lockDiscordTopology(communityId) {
+    return (await this.client.query(
+      `SELECT discord_guild_id,discord_guild_name,guild_kind,link_status,revoked_at
+         FROM booking_discord_guilds
+        WHERE game_profile=$1 AND community_id=$2
+        ORDER BY discord_guild_id FOR UPDATE`,
+      [this.gameProfile, communityId],
+    )).rows;
+  }
+
+  async revokeAllianceGuildAccess({ communityId, guildId, actorId }) {
+    const link = await this.client.query(
+      `UPDATE booking_discord_guilds
+          SET link_status='revoked',revoked_at=now(),revoked_by_actor_id=$4,
+              revocation_reason='native_owner_unlink',updated_at=now()
+        WHERE game_profile=$1 AND community_id=$2 AND discord_guild_id=$3
+          AND guild_kind='alliance' AND link_status='active'
+        RETURNING discord_guild_id`,
+      [this.gameProfile, communityId, guildId, actorId],
+    );
+    if (link.rowCount === 0) return { changed: false, affectedGrantCount: 0 };
+    const revoked = await this.client.query(
+      `UPDATE community_access_grants
+          SET status='revoked',revoked_at=now(),revoked_by_actor_id=$4,
+              revocation_reason='source_guild_unlinked',updated_at=now()
+        WHERE game_profile=$1 AND community_id=$2 AND source_guild_id=$3
+          AND status='active'
+        RETURNING discord_user_id`,
+      [this.gameProfile, communityId, guildId, actorId],
+    );
+    await this.client.query(
+      `UPDATE website_auth_session_communities AS session_community
+          SET discord_guild_id=replacement.source_guild_id,verified_at=replacement.verified_at
+         FROM website_auth_sessions AS session
+         CROSS JOIN LATERAL (
+           SELECT access.source_guild_id,access.verified_at
+             FROM community_access_grants AS access
+             JOIN booking_discord_guilds AS guild
+               ON guild.game_profile=access.game_profile
+              AND guild.community_id=access.community_id
+              AND guild.discord_guild_id=access.source_guild_id
+            WHERE access.game_profile=$1 AND access.community_id=$2
+              AND access.discord_user_id=session.discord_user_id
+              AND access.status='active' AND access.source_guild_id<>$3
+              AND guild.guild_kind='alliance' AND guild.link_status='active'
+            ORDER BY access.source_guild_id LIMIT 1
+         ) AS replacement
+        WHERE session_community.game_profile=$1 AND session_community.community_id=$2
+          AND session_community.discord_guild_id=$3
+          AND session.game_profile=session_community.game_profile
+          AND session.token_hash=session_community.session_token_hash`,
+      [this.gameProfile, communityId, guildId],
+    );
+    await this.client.query(
+      `DELETE FROM website_auth_session_communities
+        WHERE game_profile=$1 AND community_id=$2 AND discord_guild_id=$3`,
+      [this.gameProfile, communityId, guildId],
+    );
+    return { changed: true, affectedGrantCount: revoked.rowCount };
+  }
+
+  async insertGuildUnlinkAudit(input) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,event_type,source,actor_type,
+          actor_id,correlation_id,before_data,after_data)
+       VALUES ($1,$2,$3,'discord_guild_link','alliance_discord_unlinked','website',
+               'discord_user',$4,$5,$6,$7)`,
+      [this.gameProfile, input.id, input.communityId, input.actorId, input.correlationId,
+       input.beforeData, input.afterData],
+    );
+  }
+
+  async upsertCycleScheduleOverride({ communityId, cycleIndex, opensAt, closesAt, actorId }) {
+    return (await this.client.query(
+      `INSERT INTO booking_cycle_schedule_overrides
+         (game_profile,community_id,cycle_index,opens_at,closes_at,
+          created_by_actor_id,updated_by_actor_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$6)
+       ON CONFLICT (game_profile,community_id,cycle_index) DO UPDATE
+         SET opens_at=EXCLUDED.opens_at,closes_at=EXCLUDED.closes_at,
+             updated_by_actor_id=EXCLUDED.updated_by_actor_id,updated_at=now()
+       RETURNING cycle_index,opens_at,closes_at`,
+      [this.gameProfile, communityId, cycleIndex, opensAt, closesAt, actorId],
+    )).rows[0];
+  }
+
+  async removeCycleScheduleOverride(communityId, cycleIndex) {
+    return (await this.client.query(
+      `DELETE FROM booking_cycle_schedule_overrides
+        WHERE game_profile=$1 AND community_id=$2 AND cycle_index=$3
+        RETURNING cycle_index,opens_at,closes_at`,
+      [this.gameProfile, communityId, cycleIndex],
+    )).rows[0] ?? null;
+  }
+
+  async insertCycleScheduleAudit(input) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,event_type,source,actor_type,
+          actor_id,correlation_id,before_data,after_data)
+       VALUES ($1,$2,$3,'booking_cycle_schedule',$4,'website','discord_user',$5,$6,$7,$8)`,
+      [this.gameProfile, input.id, input.communityId, input.eventType, input.actorId,
+       input.correlationId, input.beforeData, input.afterData],
+    );
   }
 
   async lockGuestLinks(communityId) {

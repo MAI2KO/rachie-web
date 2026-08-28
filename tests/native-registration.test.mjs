@@ -44,6 +44,7 @@ function createTransactionalRepository(gameProfile = "wos") {
     participants: [],
     idempotency: new Map(),
     events: [],
+    points: [],
     bookingSnapshots: [],
   };
   let failAudit = false;
@@ -101,6 +102,7 @@ function createTransactionalRepository(gameProfile = "wos") {
             player_id: input.playerId,
             in_game_name: input.inGameName,
             alliance: input.alliance,
+            source_discord_guild_id: input.sourceGuildId ?? null,
             status: "active",
           };
           draft.participants.push(participant);
@@ -118,7 +120,14 @@ function createTransactionalRepository(gameProfile = "wos") {
           participant.player_id = input.playerId;
           participant.in_game_name = input.inGameName;
           participant.alliance = input.alliance;
+          participant.source_discord_guild_id = input.sourceGuildId
+            ?? participant.source_discord_guild_id;
           return participant;
+        },
+        async insertPlayerPointsEntry(input) {
+          if (draft.points.some((entry) => entry.idempotencyKey === input.idempotencyKey)) return false;
+          draft.points.push(input);
+          return true;
         },
         async insertParticipantChangeEvent(event) {
           if (failAudit) throw new Error("forced audit failure");

@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { validateBookingChoice, validateIdempotencyKey, validateRequirementAnswers } from "./booking-creation-validation.mjs";
+import {
+  APPOINTMENT_CONFIRMED_POINTS,
+  CYCLE_DISCORD_PARTICIPATION_POINTS,
+  POINT_REASONS,
+} from "../points/domain-core.mjs";
 
 const OPERATION = "booking_create";
 
@@ -66,12 +71,31 @@ export function createBookingCreationService({ context, repository, createId = r
           const settings = await session.findBookingSettings(context.community.id);
           const answers = validateRequirementAnswers(context.gameProfile, choice.serviceCode, settings, choice.requirements);
           const bookingId = createId();
-          const booking = await session.insertWebsiteBooking({ id: bookingId, communityId: context.community.id, windowId: slot.window_id, serviceDateId: slot.service_date_id, serviceCode: choice.serviceCode, bookingDate: slot.booking_date, slotId: slot.id, participantId: participant.id, discordUserId: context.discordUser.id, playerId: participant.player_id, inGameName: participant.in_game_name, alliance: participant.alliance, displayTime: slot.display_time_label, idempotencyKey: key, correlationId });
+          const sourceGuildId = context.community.discordGuildId
+            ?? participant.source_discord_guild_id ?? null;
+          const booking = await session.insertWebsiteBooking({ id: bookingId, communityId: context.community.id, windowId: slot.window_id, serviceDateId: slot.service_date_id, serviceCode: choice.serviceCode, bookingDate: slot.booking_date, slotId: slot.id, participantId: participant.id, discordUserId: context.discordUser.id, playerId: participant.player_id, inGameName: participant.in_game_name, alliance: participant.alliance, displayTime: slot.display_time_label, idempotencyKey: key, correlationId, sourceGuildId });
           for (const answer of answers) await session.insertBookingRequirementAnswer({ bookingId, ...answer });
           const body = { booking: { bookingId: booking.id, serviceCode: booking.service_code, serviceLabel: slot.service_label, date: booking.booking_date, displayTime: booking.display_time_label_snapshot, playerName: booking.in_game_name_snapshot, alliance: booking.alliance_snapshot, requirements: answers.map(publicAnswer), status: booking.status } };
           const boundedEvent = { bookingId, serviceCode: choice.serviceCode, slotId: slot.id, participant: { playerId: participant.player_id, inGameName: participant.in_game_name, alliance: participant.alliance }, correlationId };
           await session.insertBookingCreatedEvent({ id: createId(), communityId: context.community.id, bookingId, actorId: context.discordUser.id, correlationId, afterData: boundedEvent });
           await session.insertBookingOutboxEvent({ id: createId(), communityId: context.community.id, idempotencyKey: `booking.created:${bookingId}`, correlationId, payload: boundedEvent });
+          await session.insertPlayerPointsEntry({
+            id: createId(), participantId: participant.id, communityId: context.community.id,
+            discordUserId: context.discordUser.id, pointsDelta: APPOINTMENT_CONFIRMED_POINTS,
+            reason: POINT_REASONS.appointmentConfirmed, bookingWindowId: slot.window_id,
+            bookingId, sourceGuildId,
+            idempotencyKey: `appointment_confirmed:${participant.id}:${slot.window_id}:${choice.serviceCode}`,
+            metadata: { serviceCode: choice.serviceCode },
+          });
+          if (sourceGuildId) {
+            await session.insertCommunityParticipationPoints({
+              id: createId(), communityId: context.community.id, sourceGuildId,
+              bookingWindowId: slot.window_id, pointsDelta: CYCLE_DISCORD_PARTICIPATION_POINTS,
+              reason: POINT_REASONS.cycleDiscordParticipation,
+              idempotencyKey: `cycle_discord_participation:${slot.window_id}:${sourceGuildId}`,
+              metadata: { firstQualifyingBookingId: bookingId },
+            });
+          }
           await session.completeBookingIdempotency(context.community.id, key, 201, body);
           return { status: 201, body, replayed: false };
         });

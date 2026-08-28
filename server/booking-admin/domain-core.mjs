@@ -1,6 +1,10 @@
 import { bookingRequirementLabel } from "../native-booking/booking-creation-validation.mjs";
 import { isKnownMinisterServiceCode } from "../native-booking/service-codes.mjs";
-import { automaticWosCycleForDisplay, automaticWosCycleStatus } from "../automatic-booking-cycle/domain-core.mjs";
+import {
+  automaticWosCycleForDisplay,
+  automaticWosCycleStatus,
+  wosBookingCycleAtIndex,
+} from "../automatic-booking-cycle/domain-core.mjs";
 
 export const BOOKING_ADMIN_REQUIREMENTS = Object.freeze({
   construction: Object.freeze(["fc", "rfc", "speedups"]),
@@ -29,6 +33,22 @@ export class BookingAdminValidationError extends Error {
   }
 }
 
+export class BookingAdminTopologyDeniedError extends Error {
+  constructor(message = "Only the State/Kingdom Discord owner or this alliance Discord owner may unlink it.") {
+    super(message);
+    this.name = "BookingAdminTopologyDeniedError";
+    this.code = "guild_unlink_forbidden";
+  }
+}
+
+export class BookingAdminTopologyUnavailableError extends Error {
+  constructor(message = "Discord ownership could not be verified right now.") {
+    super(message);
+    this.name = "BookingAdminTopologyUnavailableError";
+    this.code = "guild_ownership_unavailable";
+  }
+}
+
 function dateOnly(value) {
   if (!(value instanceof Date)) return String(value).slice(0, 10);
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
@@ -48,6 +68,30 @@ export function validateBookingAdminChange(value) {
   if (value.section === "guestLink" && exactKeys(value, ["section", "action"])
       && ["generate", "rotate", "revoke"].includes(value.action)) {
     return Object.freeze({ section: "guestLink", action: value.action });
+  }
+  if (value.section === "discordAccess"
+      && exactKeys(value, ["section", "action", "guildId", "confirmed"])
+      && value.action === "unlink" && value.confirmed === true
+      && /^\d{15,22}$/.test(String(value.guildId))) {
+    return Object.freeze({ section: "discordAccess", action: "unlink", guildId: String(value.guildId) });
+  }
+  if (value.section === "cycleSchedule" && value.action === "override"
+      && exactKeys(value, ["section", "action", "cycleIndex", "opensAt", "closesAt", "confirmedOpenChange"])
+      && Number.isInteger(value.cycleIndex) && typeof value.confirmedOpenChange === "boolean") {
+    const opensAt = new Date(value.opensAt);
+    const closesAt = new Date(value.closesAt);
+    if (!Number.isFinite(opensAt.getTime()) || !Number.isFinite(closesAt.getTime())) {
+      throw new BookingAdminValidationError("invalid_schedule", "Open and close must be valid UTC instants.");
+    }
+    return Object.freeze({ section: "cycleSchedule", action: "override",
+      cycleIndex: value.cycleIndex, opensAt: opensAt.toISOString(), closesAt: closesAt.toISOString(),
+      confirmedOpenChange: value.confirmedOpenChange });
+  }
+  if (value.section === "cycleSchedule" && value.action === "restore"
+      && exactKeys(value, ["section", "action", "cycleIndex", "confirmedOpenChange"])
+      && Number.isInteger(value.cycleIndex) && typeof value.confirmedOpenChange === "boolean") {
+    return Object.freeze({ section: "cycleSchedule", action: "restore",
+      cycleIndex: value.cycleIndex, confirmedOpenChange: value.confirmedOpenChange });
   }
   if (typeof value.enabled !== "boolean") throw new BookingAdminValidationError();
   if (value.section === "booking" && exactKeys(value, ["section", "enabled"])) {
@@ -71,7 +115,73 @@ export function validateBookingAdminChange(value) {
   throw new BookingAdminValidationError();
 }
 
-export function bookingAdminModel(gameProfile, snapshot, now = new Date()) {
+export function validateCycleScheduleTiming(change, now = new Date(), existingOverride = null) {
+  const defaults = wosBookingCycleAtIndex(change.cycleIndex);
+  const targetEffective = existingOverride ? Object.freeze({
+    ...defaults,
+    opensAt: new Date(existingOverride.opens_at).toISOString(),
+    closesAt: new Date(existingOverride.closes_at).toISOString(),
+  }) : defaults;
+  if (automaticWosCycleStatus(targetEffective, now) === "closed") {
+    throw new BookingAdminValidationError("historical_cycle", "A closed historical cycle cannot be changed.");
+  }
+  const current = effectiveWosCycleForDisplay(now, existingOverride ? [existingOverride] : []);
+  if (change.cycleIndex !== current.index) {
+    throw new BookingAdminValidationError("cycle_not_current", "Only the displayed current booking cycle can be changed.");
+  }
+  const opensAt = change.action === "restore" ? new Date(defaults.opensAt) : new Date(change.opensAt);
+  const closesAt = change.action === "restore" ? new Date(defaults.closesAt) : new Date(change.closesAt);
+  const earliestOpen = new Date(new Date(defaults.opensAt).getTime() - (7 * 86_400_000));
+  const firstAppointment = new Date(`${defaults.dates.construction}T00:00:00.000Z`);
+  if (!(opensAt < closesAt) || opensAt < earliestOpen || closesAt >= firstAppointment) {
+    throw new BookingAdminValidationError("invalid_schedule",
+      "The override must open within seven days before the automatic opening and close before Construction begins.");
+  }
+  const currentEffective = existingOverride ? Object.freeze({
+    ...current,
+    opensAt: new Date(existingOverride.opens_at).toISOString(),
+    closesAt: new Date(existingOverride.closes_at).toISOString(),
+  }) : current;
+  const currentStatus = automaticWosCycleStatus(currentEffective, now);
+  if (currentStatus === "open") {
+    if (!change.confirmedOpenChange) {
+      throw new BookingAdminValidationError("confirmation_required",
+        "Changing an already-open cycle requires explicit confirmation.");
+    }
+    if (now < opensAt || now >= closesAt) {
+      throw new BookingAdminValidationError("unsafe_open_cycle_change",
+        "An already-open cycle must remain open after the change.");
+    }
+  }
+  return Object.freeze({ defaults, opensAt: opensAt.toISOString(), closesAt: closesAt.toISOString() });
+}
+
+export function effectiveWosCycleForDisplay(now, scheduleOverrides = []) {
+  const automatic = automaticWosCycleForDisplay(now);
+  const overrides = scheduleOverrides ?? [];
+  const prior = automatic.index > 1 ? overrides.find(
+    (override) => Number(override.cycle_index) === automatic.index - 1,
+  ) : null;
+  if (prior) {
+    const priorDefault = wosBookingCycleAtIndex(automatic.index - 1);
+    const priorEffective = Object.freeze({
+      ...priorDefault,
+      opensAt: new Date(prior.opens_at).toISOString(),
+      closesAt: new Date(prior.closes_at).toISOString(),
+    });
+    if (automaticWosCycleStatus(priorEffective, now) !== "closed") return priorEffective;
+  }
+  const selected = overrides.find((override) => Number(override.cycle_index) === automatic.index);
+  return selected ? Object.freeze({
+    ...automatic,
+    opensAt: new Date(selected.opens_at).toISOString(),
+    closesAt: new Date(selected.closes_at).toISOString(),
+  }) : automatic;
+}
+
+export function bookingAdminModel(gameProfile, snapshot, now = new Date(), ownership = new Map()) {
+  const guilds = snapshot.guilds ?? [];
+  const scheduleOverrides = snapshot.scheduleOverrides ?? [];
   const settings = snapshot.settings ?? {};
   const requirementsByService = new Map(snapshot.services.map((service) => [
     service.service_code,
@@ -81,7 +191,12 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date()) {
       enabled: Boolean(settings[BOOKING_ADMIN_REQUIREMENT_COLUMNS[service.service_code][code]]),
     }))),
   ]));
-  const automaticCycle = gameProfile === "wos" ? automaticWosCycleForDisplay(now) : null;
+  const automaticCycle = gameProfile === "wos" ? effectiveWosCycleForDisplay(now, scheduleOverrides) : null;
+  const automaticDefaults = automaticCycle ? wosBookingCycleAtIndex(automaticCycle.index) : null;
+  const scheduleOverride = automaticCycle ? scheduleOverrides.find(
+    (override) => Number(override.cycle_index) === automaticCycle.index,
+  ) : null;
+  const effectiveCycle = automaticCycle;
   const guestLink = snapshot.guestLink ?? null;
   const guestLinkActive = Boolean(guestLink && !guestLink.revoked_at
     && (!guestLink.expires_at || new Date(guestLink.expires_at) > now));
@@ -101,16 +216,36 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date()) {
     guestLink: Object.freeze({
       status: guestLinkActive ? "active" : guestLink?.revoked_at ? "revoked" : "inactive",
     }),
-    automaticCycle: automaticCycle ? Object.freeze({
-      status: automaticWosCycleStatus(automaticCycle, now),
-      opensAt: automaticCycle.opensAt,
-      closesAt: automaticCycle.closesAt,
+    discordAccess: Object.freeze({
+      stateGuildConfigured: guilds.some((guild) => guild.guild_kind === "state"
+        && guild.link_status === "active"),
+      unclassifiedGuilds: Object.freeze(guilds.filter((guild) => guild.guild_kind === "unclassified"
+        && guild.link_status === "active").map((guild) => Object.freeze({
+        id: guild.discord_guild_id,
+        displayName: guild.discord_guild_name,
+      }))),
+      guilds: Object.freeze(guilds.filter((guild) => guild.guild_kind === "alliance"
+        && guild.link_status === "active").map((guild) => Object.freeze({
+        id: guild.discord_guild_id,
+        displayName: guild.discord_guild_name,
+        canUnlink: ownership.get(guild.discord_guild_id) === true
+          || ownership.get("state") === true,
+      }))),
+    }),
+    automaticCycle: effectiveCycle ? Object.freeze({
+      cycleIndex: effectiveCycle.index,
+      status: automaticWosCycleStatus(effectiveCycle, now),
+      automaticOpensAt: automaticDefaults.opensAt,
+      automaticClosesAt: automaticDefaults.closesAt,
+      opensAt: effectiveCycle.opensAt,
+      closesAt: effectiveCycle.closesAt,
+      overridden: Boolean(scheduleOverride),
       appointments: Object.freeze(snapshot.services
-        .filter((service) => automaticCycle.dates[service.service_code])
+        .filter((service) => effectiveCycle.dates[service.service_code])
         .map((service) => Object.freeze({
           serviceCode: service.service_code,
           serviceName: service.display_label,
-          date: automaticCycle.dates[service.service_code],
+          date: effectiveCycle.dates[service.service_code],
         }))),
     }) : null,
     windows: Object.freeze(snapshot.windows.map((window) => Object.freeze({

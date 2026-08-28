@@ -57,6 +57,20 @@ async function findCycleWindow(client, communityId, cycle) {
   return result.rows[0]?.id ?? null;
 }
 
+async function effectiveCycleForCommunity(client, communityId, cycle) {
+  const override = (await client.query(
+    `SELECT opens_at,closes_at
+       FROM booking_cycle_schedule_overrides
+      WHERE game_profile=$1 AND community_id=$2 AND cycle_index=$3`,
+    [PROFILE, communityId, cycle.index],
+  )).rows[0];
+  return override ? Object.freeze({
+    ...cycle,
+    opensAt: new Date(override.opens_at).toISOString(),
+    closesAt: new Date(override.closes_at).toISOString(),
+  }) : cycle;
+}
+
 async function latestSlotTemplate(client, communityId, serviceCode, beforeDate) {
   const date = (await client.query(
     `SELECT service_date.id
@@ -111,6 +125,13 @@ async function reconcileWindowAnnouncement(client, community, windowId, cycle, a
        cycle.closesAt, current?.id ?? null, windowId],
     );
   }
+  await client.query(
+    `UPDATE booking_guest_share_links
+        SET expires_at=$3,updated_at=CASE WHEN expires_at IS DISTINCT FROM $3::timestamptz
+                                          THEN now() ELSE updated_at END
+      WHERE game_profile=$1 AND id=$2 AND revoked_at IS NULL`,
+    [PROFILE, linkId, cycle.closesAt],
+  );
   const inserted = await client.query(
     `INSERT INTO booking_discord_notifications
        (game_profile,id,community_id,notification_type,booking_window_id,
@@ -139,7 +160,7 @@ async function reconcileCycle(client, community, cycle, at, guestTokenSecret) {
   let windowId = await findCycleWindow(client, community.id, cycle);
   let windowsCreated = 0;
   if (!windowId) {
-    windowId = automaticBookingUuid(community.id, cycle.opensAt, "window");
+    windowId = automaticBookingUuid(community.id, cycle.index, "window");
     const inserted = await client.query(
       `INSERT INTO booking_windows
          (game_profile,id,community_id,status,opens_at,closes_at,opened_at,closed_at,
@@ -246,9 +267,12 @@ export async function reconcileAutomaticWosBookingCycles({
         [PROFILE, community.id, now, ACTOR_ID],
       );
       const reconciled = [];
-      for (const cycle of cycles) reconciled.push(await reconcileCycle(
-        client, community, cycle, now, guestTokenSecret,
-      ));
+      for (const cycle of cycles) {
+        const effectiveCycle = await effectiveCycleForCommunity(client, community.id, cycle);
+        reconciled.push(await reconcileCycle(
+          client, community, effectiveCycle, now, guestTokenSecret,
+        ));
+      }
       return reconciled;
     });
     results.push({ communityId: community.id, communityCode: community.location_code, cycles: communityResults });

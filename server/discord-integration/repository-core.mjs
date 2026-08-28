@@ -168,6 +168,7 @@ async function workPayload(client, profile, row, deliveryContext = {}) {
          LEFT JOIN booking_discord_guilds AS guild
            ON guild.game_profile=booking_window.game_profile
           AND guild.community_id=booking_window.community_id
+          AND guild.link_status='active'
         WHERE booking_window.game_profile=$1 AND booking_window.id=$2
         GROUP BY community.location_code,booking_window.opens_at,booking_window.closes_at`,
       [profile, row.booking_window_id],
@@ -191,6 +192,7 @@ async function workPayload(client, profile, row, deliveryContext = {}) {
     const guilds = await client.query(
       `SELECT discord_guild_id AS "guildId",bot_manager_role_id AS "managerRoleId"
          FROM booking_discord_guilds WHERE game_profile=$1 AND community_id=$2
+           AND link_status='active'
          ORDER BY discord_guild_id`, [profile, row.community_id],
     );
     return { ...base, requestId: row.request_id, guilds: guilds.rows };
@@ -320,7 +322,8 @@ class DiscordIntegrationSession {
       return true;
     }
     const guilds = await this.client.query(
-      `SELECT discord_guild_id FROM booking_discord_guilds WHERE game_profile=$1 AND community_id=$2`,
+      `SELECT discord_guild_id FROM booking_discord_guilds
+        WHERE game_profile=$1 AND community_id=$2 AND link_status='active'`,
       [this.profile, work.community_id],
     );
     const allowed = new Set(guilds.rows.map((row) => row.discord_guild_id));

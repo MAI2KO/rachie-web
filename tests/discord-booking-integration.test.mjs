@@ -43,14 +43,17 @@ async function withProfile(pool, profile, work) {
   } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
 }
 
-async function seedProfile(pool, profile, code) {
+async function seedProfile(pool, profile, code, guildKind = null) {
   const ids = { community: randomUUID(), window: randomUUID(), date: randomUUID(), slot: randomUUID(),
     participant: randomUUID(), booking: randomUUID(), share: randomUUID(), request: randomUUID() };
   await withProfile(pool, profile, async (client) => {
     await client.query("INSERT INTO booking_communities (game_profile,id,location_code,display_name,bookings_open) VALUES ($1,$2,$3,'Test Server',true)", [profile, ids.community, code]);
     await client.query("INSERT INTO booking_settings (game_profile,community_id) VALUES ($1,$2)", [profile, ids.community]);
     for (const guild of ["100000000000000001", "100000000000000002"]) await client.query(
-      "INSERT INTO booking_discord_guilds (game_profile,discord_guild_id,community_id,discord_guild_name,bot_manager_role_id) VALUES ($1,$2,$3,'Guild','200000000000000001')", [profile, guild, ids.community]);
+      guildKind
+        ? "INSERT INTO booking_discord_guilds (game_profile,discord_guild_id,community_id,discord_guild_name,bot_manager_role_id,guild_kind) VALUES ($1,$2,$3,'Guild','200000000000000001',$4)"
+        : "INSERT INTO booking_discord_guilds (game_profile,discord_guild_id,community_id,discord_guild_name,bot_manager_role_id) VALUES ($1,$2,$3,'Guild','200000000000000001')",
+      guildKind ? [profile, guild, ids.community, guildKind] : [profile, guild, ids.community]);
     await client.query("INSERT INTO booking_windows (game_profile,id,community_id,status,created_by_actor_type) VALUES ($1,$2,$3,'open','system')", [profile, ids.window, ids.community]);
     await client.query("INSERT INTO booking_service_dates (game_profile,id,community_id,window_id,service_code,booking_date) VALUES ($1,$2,$3,$4,'construction','2030-08-21')", [profile, ids.date, ids.community, ids.window]);
     await client.query(`INSERT INTO appointment_slots
@@ -109,7 +112,7 @@ test("migration 0006 preserves existing booking and multi-copy approval delivery
         }
       });
       assert.deepEqual((await runMigrations(pool, migrations)).applied,
-        ["0006", "0007", "0008"]);
+        ["0006", "0007", "0008", "0009"]);
       const preserved = await withProfile(pool, "wos", client => client.query(`SELECT
         (SELECT count(*)::int FROM minister_bookings WHERE id=$1) AS bookings,
         (SELECT count(*)::int FROM booking_approval_requests WHERE id=$2) AS requests,
@@ -134,8 +137,8 @@ test("durable Discord work is profile-isolated, deduplicated, retryable and remi
     let runtimePool;
     try {
       await runMigrations(pool, await loadMigrations(fileURLToPath(new URL("../db/migrations/", import.meta.url))));
-      const wos = await seedProfile(pool, "wos", "9999");
-      await seedProfile(pool, "kingshot", "9999");
+      const wos = await seedProfile(pool, "wos", "9999", "alliance");
+      await seedProfile(pool, "kingshot", "9999", "alliance");
       await admin.query(`CREATE ROLE ${runtimeRole} LOGIN PASSWORD '${runtimePassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`);
       await pool.query(`GRANT USAGE ON SCHEMA ${schema} TO ${runtimeRole}`);
       for (const sql of runtimePrivilegeStatements(runtimeRole)) await pool.query(sql);

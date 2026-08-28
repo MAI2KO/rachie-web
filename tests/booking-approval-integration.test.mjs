@@ -178,7 +178,7 @@ test("migration 0005 preserves existing confirmed booking data and defaults comm
     });
 
     assert.deepEqual((await runMigrations(pool, migrations)).applied,
-      ["0005", "0006", "0007", "0008"]);
+      ["0005", "0006", "0007", "0008", "0009"]);
     const preserved = await withProfile(pool, "wos", (client) => client.query(
       `SELECT booking.id,booking.status,booking.in_game_name_snapshot,
               booking.approval_request_id,settings.booking_approval_policy,
@@ -233,8 +233,8 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
         );
         await client.query(
           `INSERT INTO booking_discord_guilds
-             (game_profile,discord_guild_id,community_id,discord_guild_name,bot_manager_role_id)
-           VALUES ($1,$2,$3,'Approval Test Guild','333333333333333333')`,
+             (game_profile,discord_guild_id,community_id,discord_guild_name,bot_manager_role_id,guild_kind)
+           VALUES ($1,$2,$3,'Approval Test Guild','333333333333333333','alliance')`,
           [profile, guildId, communityId],
         );
         await client.query(

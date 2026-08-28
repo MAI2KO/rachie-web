@@ -101,6 +101,7 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
     const service = createBookingAdminService({
       gameProfile: "wos", communityId: sharedId, managerContext, repository: adminRepository,
       createGuestToken: () => guestTokens.shift(),
+      now: () => new Date("2026-08-27T12:00:00.000Z"),
     });
     const initial = await service.read();
     assert.equal(initial.community.bookingsEnabled, true);
@@ -108,6 +109,25 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       serviceCode: "construction", serviceName: "Construction",
       date: "2026-08-30", windowStatus: "open",
     }]);
+
+    const createdOverride = await service.updateCycleSchedule({
+      section: "cycleSchedule", action: "override", cycleIndex: 1,
+      opensAt: "2026-09-01T18:00:00.000Z", closesAt: "2026-09-06T18:00:00.000Z",
+      confirmedOpenChange: false,
+    });
+    assert.equal(createdOverride.changed, true);
+    assert.equal(createdOverride.configuration.automaticCycle.overridden, true);
+    assert.equal(createdOverride.configuration.automaticCycle.opensAt, "2026-09-01T18:00:00.000Z");
+    const changedOverride = await service.updateCycleSchedule({
+      section: "cycleSchedule", action: "override", cycleIndex: 1,
+      opensAt: "2026-09-01T17:00:00.000Z", closesAt: "2026-09-06T19:00:00.000Z",
+      confirmedOpenChange: false,
+    });
+    assert.equal(changedOverride.changed, true);
+    const restored = await service.updateCycleSchedule({
+      section: "cycleSchedule", action: "restore", cycleIndex: 1, confirmedOpenChange: false,
+    });
+    assert.equal(restored.configuration.automaticCycle.overridden, false);
 
     const guestPages = createGuestBookingPageService({
       gameProfile: "wos", repository: createProfileScopedApprovalRepository("wos", pool),
@@ -183,10 +203,13 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       `SELECT event_type,actor_id FROM booking_change_events
         WHERE community_id=$1 ORDER BY created_at,id`, [sharedId],
     ));
-    assert.equal(audits.rows.length, 11);
+    assert.equal(audits.rows.length, 14);
     assert.equal(audits.rows.every((row) => row.actor_id === managerContext.discordUserId), true);
     assert.deepEqual([...new Set(audits.rows.map((row) => row.event_type))].sort(), [
-      "booking_admin_updated", "guest_link_generate", "guest_link_revoke", "guest_link_rotate",
+      "booking_admin_updated",
+      "booking_cycle_override_changed", "booking_cycle_override_created",
+      "booking_cycle_override_removed",
+      "guest_link_generate", "guest_link_revoke", "guest_link_rotate",
     ]);
   } finally {
     await pool.end();
@@ -205,7 +228,7 @@ test("Booking Admin migration backfills existing communities through profile RLS
   const communityId = randomUUID();
   try {
     const migrations = await loadMigrations(migrationsDirectory);
-    await runMigrations(pool, migrations.slice(0, -2));
+    await runMigrations(pool, migrations.filter(({ version }) => version < "0007"));
     for (const profile of ["wos", "kingshot"]) {
       await withProfile(pool, profile, (client) => client.query(
         `INSERT INTO booking_communities

@@ -9,6 +9,10 @@ export const RUNTIME_READ_TABLES = Object.freeze([
   "appointment_slots",
   "booking_slot_blocks",
   "booking_guest_share_links",
+  "community_access_grants",
+  "booking_cycle_schedule_overrides",
+  "player_points_ledger",
+  "community_points_ledger",
 ]);
 
 export const RUNTIME_WRITE_TABLES = Object.freeze([
@@ -68,6 +72,12 @@ export function runtimePrivilegeStatements(role, { includeRowLockPrivileges = tr
     `GRANT INSERT, UPDATE ON booking_community_services TO ${grantee}`,
     `GRANT INSERT ON booking_discord_guilds TO ${grantee}`,
     `GRANT UPDATE (discord_guild_name, linked_by_actor_id, updated_at) ON booking_discord_guilds TO ${grantee}`,
+    `GRANT UPDATE (link_status, revoked_at, revoked_by_actor_id, revocation_reason, updated_at) ON booking_discord_guilds TO ${grantee}`,
+    `GRANT INSERT ON community_access_grants TO ${grantee}`,
+    `GRANT UPDATE (status, verified_at, revoked_at, revoked_by_actor_id, revocation_reason, updated_at) ON community_access_grants TO ${grantee}`,
+    `GRANT INSERT, DELETE ON booking_cycle_schedule_overrides TO ${grantee}`,
+    `GRANT UPDATE (opens_at, closes_at, updated_by_actor_id, updated_at) ON booking_cycle_schedule_overrides TO ${grantee}`,
+    `GRANT SELECT, INSERT ON player_points_ledger, community_points_ledger TO ${grantee}`,
     `GRANT INSERT ON booking_guest_share_links TO ${grantee}`,
     `GRANT UPDATE (revoked_at, revoked_by_actor_id, updated_at) ON booking_guest_share_links TO ${grantee}`,
     `GRANT INSERT ON booking_windows, booking_service_dates, appointment_slots TO ${grantee}`,

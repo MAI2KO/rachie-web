@@ -77,6 +77,7 @@ export interface BookingParticipantRecord {
   readonly player_id: string;
   readonly in_game_name: string;
   readonly alliance: string;
+  readonly source_discord_guild_id: string | null;
 }
 
 export interface ParticipantBookingRecord {
@@ -163,6 +164,7 @@ export interface NativeBookingSession {
     alliance: string;
     idempotencyKey: string;
     correlationId: string;
+    sourceGuildId?: string | null;
   }): Promise<BookingParticipantRecord>;
   updateWebsiteParticipant(input: {
     id: string;
@@ -173,7 +175,31 @@ export interface NativeBookingSession {
     alliance: string;
     idempotencyKey: string;
     correlationId: string;
+    sourceGuildId?: string | null;
   }): Promise<BookingParticipantRecord | null>;
+  insertPlayerPointsEntry(input: {
+    id: string;
+    participantId: string;
+    communityId: string;
+    discordUserId?: string | null;
+    pointsDelta: number;
+    reason: string;
+    bookingWindowId?: string | null;
+    bookingId?: string | null;
+    sourceGuildId?: string | null;
+    idempotencyKey: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<boolean>;
+  insertCommunityParticipationPoints(input: {
+    id: string;
+    communityId: string;
+    sourceGuildId: string;
+    bookingWindowId: string;
+    pointsDelta: number;
+    reason: string;
+    idempotencyKey: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<boolean>;
   insertParticipantChangeEvent(input: {
     id: string;
     communityId: string;

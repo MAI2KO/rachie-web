@@ -22,10 +22,26 @@ type BookingAdminConfiguration = {
   readonly guestLink: {
     readonly status: "active" | "inactive" | "revoked";
   };
+  readonly discordAccess: {
+    readonly stateGuildConfigured: boolean;
+    readonly unclassifiedGuilds: readonly {
+      readonly id: string;
+      readonly displayName: string;
+    }[];
+    readonly guilds: readonly {
+      readonly id: string;
+      readonly displayName: string;
+      readonly canUnlink: boolean;
+    }[];
+  };
   readonly automaticCycle: {
+    readonly cycleIndex: number;
     readonly status: "draft" | "open" | "closed";
+    readonly automaticOpensAt: string;
+    readonly automaticClosesAt: string;
     readonly opensAt: string;
     readonly closesAt: string;
+    readonly overridden: boolean;
     readonly appointments: readonly {
       readonly serviceCode: string;
       readonly serviceName: string;
@@ -72,6 +88,10 @@ function displayUtcInstant(instant: string) {
   }).format(new Date(instant))} UTC`;
 }
 
+function utcInputValue(instant: string) {
+  return new Date(instant).toISOString().slice(0, 16);
+}
+
 function SettingSwitch({ checked, disabled, label, onChange }: {
   readonly checked: boolean;
   readonly disabled: boolean;
@@ -93,6 +113,14 @@ export function BookingAdmin({ initialConfiguration }: {
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [newGuestUrl, setNewGuestUrl] = useState("");
+  const [cycleOpensAt, setCycleOpensAt] = useState(
+    initialConfiguration.automaticCycle ? utcInputValue(initialConfiguration.automaticCycle.opensAt) : "",
+  );
+  const [cycleClosesAt, setCycleClosesAt] = useState(
+    initialConfiguration.automaticCycle ? utcInputValue(initialConfiguration.automaticCycle.closesAt) : "",
+  );
+  const [confirmOpenChange, setConfirmOpenChange] = useState(false);
+  const [confirmedGuildId, setConfirmedGuildId] = useState("");
   const noun = configuration.profile === "kingshot" ? "Kingdom" : "State";
   const endpoint = `/api/v1/booking-admin/${encodeURIComponent(configuration.community.code)}`;
 
@@ -172,6 +200,70 @@ export function BookingAdmin({ initialConfiguration }: {
     }
   }
 
+  function adoptConfiguration(next: BookingAdminConfiguration) {
+    setConfiguration(next);
+    if (next.automaticCycle) {
+      setCycleOpensAt(utcInputValue(next.automaticCycle.opensAt));
+      setCycleClosesAt(utcInputValue(next.automaticCycle.closesAt));
+    }
+    setConfirmOpenChange(false);
+  }
+
+  async function changeCycleSchedule(action: "override" | "restore") {
+    const cycle = configuration.automaticCycle;
+    if (!cycle) return;
+    setBusy(`cycle:${action}`);
+    setNotice("");
+    try {
+      const body = action === "restore"
+        ? { section: "cycleSchedule", action, cycleIndex: cycle.cycleIndex,
+            confirmedOpenChange: confirmOpenChange }
+        : { section: "cycleSchedule", action, cycleIndex: cycle.cycleIndex,
+            opensAt: `${cycleOpensAt}:00.000Z`, closesAt: `${cycleClosesAt}:00.000Z`,
+            confirmedOpenChange: confirmOpenChange };
+      const response = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.configuration) {
+        throw new Error(payload.error ?? "The booking window could not be changed.");
+      }
+      adoptConfiguration(payload.configuration);
+      setNotice(action === "restore" ? "Automatic schedule restored for this cycle."
+        : "Booking window override saved for this cycle.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The booking window could not be changed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function unlinkGuild(guildId: string) {
+    setBusy(`guild:${guildId}`);
+    setNotice("");
+    try {
+      const response = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+        body: JSON.stringify({ section: "discordAccess", action: "unlink", guildId, confirmed: true }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.configuration) {
+        throw new Error(payload.error ?? "The alliance Discord could not be unlinked.");
+      }
+      adoptConfiguration(payload.configuration);
+      setConfirmedGuildId("");
+      const count = Number(payload.unlink?.affectedGrantCount ?? 0);
+      setNotice(`Alliance Discord unlinked. ${count} access grant${count === 1 ? "" : "s"} revoked.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The alliance Discord could not be unlinked.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   const controlsDisabled = !csrfToken;
   return <article className="booking-admin">
     <header>
@@ -239,15 +331,38 @@ export function BookingAdmin({ initialConfiguration }: {
 
     {configuration.automaticCycle ? <section className="booking-admin-section"
       aria-labelledby="booking-admin-automatic-cycle">
-      <div><h2 id="booking-admin-automatic-cycle">Automatic booking cycle</h2>
-        <p>Fixed 28-day Whiteout Survival schedule. Booking also requires the manager control above.</p></div>
+      <div><h2 id="booking-admin-automatic-cycle">Booking window</h2>
+        <p>Automatic 28-day Whiteout Survival schedule. Times below are UTC; the manual booking control above remains independent.</p></div>
       <dl className="booking-admin-cycle-summary">
         <div><dt>Schedule</dt><dd>{statusLabel(configuration.automaticCycle.status)}</dd></div>
+        <div><dt>Automatic opening</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticOpensAt)}</dd></div>
+        <div><dt>Automatic closing</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticClosesAt)}</dd></div>
         <div><dt>Opening</dt><dd><time dateTime={configuration.automaticCycle.opensAt}>
           {displayUtcInstant(configuration.automaticCycle.opensAt)}</time></dd></div>
         <div><dt>Closing</dt><dd><time dateTime={configuration.automaticCycle.closesAt}>
           {displayUtcInstant(configuration.automaticCycle.closesAt)}</time></dd></div>
       </dl>
+      <div className="booking-admin-settings-list">
+        <label>Open (UTC)
+          <input type="datetime-local" value={cycleOpensAt}
+            onChange={(event) => setCycleOpensAt(event.currentTarget.value)} />
+        </label>
+        <label>Close (UTC)
+          <input type="datetime-local" value={cycleClosesAt}
+            onChange={(event) => setCycleClosesAt(event.currentTarget.value)} />
+        </label>
+        {configuration.automaticCycle.status === "open" ? <label>
+          <input checked={confirmOpenChange} type="checkbox"
+            onChange={(event) => setConfirmOpenChange(event.currentTarget.checked)} />
+          I understand this changes an already-open booking cycle.
+        </label> : null}
+        <div className="booking-admin-actions">
+          <button disabled={controlsDisabled || Boolean(busy)}
+            onClick={() => void changeCycleSchedule("override")} type="button">Save override</button>
+          <button disabled={controlsDisabled || Boolean(busy) || !configuration.automaticCycle.overridden}
+            onClick={() => void changeCycleSchedule("restore")} type="button">Restore automatic schedule</button>
+        </div>
+      </div>
       <ul className="booking-admin-cycle-appointments">
         {configuration.automaticCycle.appointments.map((appointment) => <li key={appointment.serviceCode}>
           <strong>{appointment.serviceName}</strong>
@@ -255,6 +370,33 @@ export function BookingAdmin({ initialConfiguration }: {
         </li>)}
       </ul>
     </section> : null}
+
+    <section className="booking-admin-section" aria-labelledby="booking-admin-discord-access">
+      <div><h2 id="booking-admin-discord-access">Discord access</h2>
+        <p>Only the shared {noun} Discord owner or an alliance Discord owner can unlink that alliance.</p></div>
+      {configuration.discordAccess.guilds.length ? <div className="booking-admin-settings-list">
+        {configuration.discordAccess.guilds.map((guild) => <div className="booking-admin-setting" key={guild.id}>
+          <div><strong>{guild.displayName}</strong>
+            <span>Unlinking revokes all website access granted through this Discord, even for members of the shared {noun} Discord.</span>
+            {guild.canUnlink ? <label>
+              <input checked={confirmedGuildId === guild.id} type="checkbox"
+                onChange={(event) => setConfirmedGuildId(event.currentTarget.checked ? guild.id : "")} />
+              Confirm access revocation for this alliance Discord.
+            </label> : <span>Discord ownership is required.</span>}
+          </div>
+          <button disabled={controlsDisabled || Boolean(busy) || !guild.canUnlink
+              || confirmedGuildId !== guild.id}
+            onClick={() => void unlinkGuild(guild.id)} type="button">Unlink alliance</button>
+        </div>)}
+      </div> : <p>No active alliance Discord links are available.</p>}
+      {configuration.discordAccess.unclassifiedGuilds.length ? <div>
+        <p><strong>Explicit classification required</strong></p>
+        <ul>{configuration.discordAccess.unclassifiedGuilds.map((guild) => <li key={guild.id}>
+          {guild.displayName} ({guild.id}) — unclassified; it cannot be unlinked as an alliance or used as the shared {noun} Discord.
+        </li>)}</ul>
+      </div> : null}
+      <p>The shared {noun} Discord cannot be unlinked here.</p>
+    </section>
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-requirements">
       <div><h2 id="booking-admin-requirements">Booking requirements</h2>

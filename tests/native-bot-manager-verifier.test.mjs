@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createNativeBotManagerVerifier } from "../server/auth/native-bot-manager-verifier-core.mjs";
+import {
+  createNativeBotGuildOwnerVerifier,
+  createNativeBotManagerVerifier,
+} from "../server/auth/native-bot-manager-verifier-core.mjs";
 
 const userId = "200000000000000002";
 const guildId = "300000000000000003";
@@ -117,5 +120,36 @@ test("unrelated, cross-guild, and malformed bot decisions never authorize", asyn
   assert.equal((await verify({ gameProfile: "wos", discordUserId: userId,
     guildId: otherGuildId })).status, "denied");
   assert.equal((await verify({ gameProfile: "other", discordUserId: userId, guildId })).status,
+    "unavailable");
+});
+
+test("signed owner verification has no Administrator or manager-role fallback", async () => {
+  const requests = [];
+  let isOwner = true;
+  const verify = createNativeBotGuildOwnerVerifier({
+    resolveIntegrationConfig: config,
+    now: () => 1_800_000_000_000,
+    createNonce: () => "abcdefghijklmnop",
+    logger: { warn() {} },
+    fetchImplementation: async (url, options) => {
+      requests.push({ url, options });
+      return Response.json({ ok: true, isOwner });
+    },
+  });
+  assert.deepEqual(await verify({ gameProfile: "wos", discordUserId: userId, guildId }),
+    { status: "owner" });
+  isOwner = false;
+  assert.deepEqual(await verify({ gameProfile: "wos", discordUserId: userId, guildId }),
+    { status: "not_owner" });
+  assert.equal(requests.every(({ options }) => options.cache === "no-store"), true);
+  assert.match(new URL(requests[0].url).pathname,
+    new RegExp(`/guild-ownership/guild/${guildId}/user/${userId}$`));
+
+  const unavailable = createNativeBotGuildOwnerVerifier({
+    resolveIntegrationConfig: config, logger: { warn() {} },
+    fetchImplementation: async () => Response.json(
+      { ok: false, code: "guild_ownership_unavailable" }, { status: 503 }),
+  });
+  assert.equal((await unavailable({ gameProfile: "wos", discordUserId: userId, guildId })).status,
     "unavailable");
 });
