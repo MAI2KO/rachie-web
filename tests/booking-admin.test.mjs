@@ -255,6 +255,8 @@ const allianceOne = { discord_guild_id: "222222222222222222", discord_guild_name
   guild_kind: "alliance", link_status: "active" };
 const allianceTwo = { discord_guild_id: "333333333333333333", discord_guild_name: "Alliance Two",
   guild_kind: "alliance", link_status: "active" };
+const unclassifiedGuild = { discord_guild_id: "444444444444444444", discord_guild_name: "Legacy Guild",
+  guild_kind: "unclassified", link_status: "active" };
 
 function ownerVerifier(ownerGuildIds) {
   return async ({ guildId }) => ({ status: ownerGuildIds.includes(guildId) ? "owner" : "not_owner" });
@@ -273,11 +275,13 @@ test("guild unlink requires exact alliance or shared-State ownership, never mana
     assert.equal(repository.audits.length, 1);
   }
 
-  for (const ownedGuilds of [[], [allianceTwo.discord_guild_id]]) {
+  for (const ownedGuilds of [[], [allianceTwo.discord_guild_id],
+    [unclassifiedGuild.discord_guild_id]]) {
     await assert.rejects(createBookingAdminService({
       gameProfile: "wos", communityId, managerContext: {
         ...manager, authorization: { via: "bot_manager_role" },
-      }, repository: unlinkRepository([stateGuild, allianceOne, allianceTwo]),
+      }, repository: unlinkRepository([stateGuild, allianceOne, allianceTwo,
+        unclassifiedGuild]),
       verifyGuildOwner: ownerVerifier(ownedGuilds),
     }).unlinkAllianceGuild({ section: "discordAccess", action: "unlink",
       guildId: allianceOne.discord_guild_id, confirmed: true }), BookingAdminTopologyDeniedError);
@@ -293,11 +297,13 @@ test("alliance owner can self-unlink without a State Discord; topology scope fai
     guildId: allianceOne.discord_guild_id, confirmed: true });
   assert.equal(self.unlink.changed, true);
 
-  for (const target of [stateGuild.discord_guild_id, "444444444444444444"]) {
+  for (const target of [stateGuild.discord_guild_id, unclassifiedGuild.discord_guild_id,
+    "555555555555555555"]) {
     await assert.rejects(createBookingAdminService({
       gameProfile: "wos", communityId, managerContext: manager,
-      repository: unlinkRepository([stateGuild, allianceOne]),
-      verifyGuildOwner: ownerVerifier([stateGuild.discord_guild_id]),
+      repository: unlinkRepository([stateGuild, allianceOne, unclassifiedGuild]),
+      verifyGuildOwner: ownerVerifier([stateGuild.discord_guild_id,
+        unclassifiedGuild.discord_guild_id]),
     }).unlinkAllianceGuild({ section: "discordAccess", action: "unlink",
       guildId: target, confirmed: true }), BookingAdminTopologyDeniedError);
   }

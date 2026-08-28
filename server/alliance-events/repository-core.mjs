@@ -25,7 +25,7 @@ export function createProfileScopedAllianceEventsRepository(gameProfile, pool) {
           `SELECT discord_guild_id
             FROM booking_discord_guilds
             WHERE game_profile=$1 AND community_id=$2
-              AND guild_kind='alliance' AND link_status='active'
+              AND guild_kind IN ('unclassified','alliance') AND link_status='active'
             ORDER BY discord_guild_id`,
           [gameProfile, community.id],
         );

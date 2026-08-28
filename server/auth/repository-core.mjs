@@ -67,13 +67,18 @@ class ProfileScopedAuthSession {
     await this.client.query(
       `WITH matched AS (
          SELECT guild.game_profile,guild.community_id,guild.discord_guild_id,
+                CASE guild.guild_kind
+                  WHEN 'alliance' THEN 'alliance_discord'
+                  ELSE 'legacy_session'
+                END AS source_type,
                 md5(guild.game_profile || ':' || guild.community_id::text || ':'
                   || $2 || ':' || guild.discord_guild_id) AS digest
            FROM booking_discord_guilds AS guild
            JOIN booking_communities AS community
              ON community.game_profile=guild.game_profile AND community.id=guild.community_id
           WHERE guild.game_profile=$1 AND guild.discord_guild_id=ANY($3::text[])
-            AND guild.guild_kind='alliance' AND guild.link_status='active'
+            AND guild.guild_kind IN ('unclassified','alliance')
+            AND guild.link_status='active'
             AND community.status='active'
        )
        INSERT INTO community_access_grants
@@ -81,7 +86,7 @@ class ProfileScopedAuthSession {
        SELECT game_profile,
               (substr(digest,1,8) || '-' || substr(digest,9,4) || '-5' || substr(digest,14,3)
                || '-8' || substr(digest,18,3) || '-' || substr(digest,21,12))::uuid,
-              community_id,$2,discord_guild_id,'alliance_discord'
+              community_id,$2,discord_guild_id,source_type
          FROM matched
        ON CONFLICT (game_profile,community_id,discord_user_id,source_guild_id) DO UPDATE
          SET status='active',verified_at=now(),revoked_at=NULL,revoked_by_actor_id=NULL,
