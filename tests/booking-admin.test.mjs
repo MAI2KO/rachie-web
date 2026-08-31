@@ -297,6 +297,15 @@ test("guild unlink requires exact alliance or shared-State ownership, never mana
     assert.equal(repository.audits.length, 1);
   }
 
+  await assert.rejects(createBookingAdminService({
+    gameProfile: "wos", communityId,
+    managerContext: { ...manager, authorization: { via: "administrator" } },
+    repository: unlinkRepository([stateGuild, allianceOne, allianceTwo]),
+    verifyGuildOwner: ownerVerifier([]),
+  }).unlinkAllianceGuild({ section: "discordAccess", action: "unlink",
+    guildId: allianceOne.discord_guild_id, confirmed: true }),
+  BookingAdminTopologyDeniedError, "Administrator alone cannot unlink another alliance");
+
   for (const ownedGuilds of [[], [allianceTwo.discord_guild_id],
     [unclassifiedGuild.discord_guild_id]]) {
     await assert.rejects(createBookingAdminService({
@@ -408,6 +417,44 @@ test("without State, an active alliance owner can approve an explicit State requ
   assert.equal(result.guildLinkRequest.status, "approved");
   assert.equal(repository.state.guilds.at(-1).guild_kind, "state");
   assert.equal(repository.audits[0].afterData.guildKind, "state");
+
+  const administratorOnly = guildLinkDecisionRepository([allianceOne]);
+  administratorOnly.state.guildLinkRequests[0].requested_guild_kind = "state";
+  administratorOnly.state.guildLinkRequests[0].alliance_abbreviation = null;
+  await assert.rejects(createBookingAdminService({
+    gameProfile: "wos", communityId,
+    managerContext: { ...manager, authorization: { via: "administrator" } },
+    repository: administratorOnly, verifyGuildOwner: ownerVerifier([]),
+  }).decideGuildLinkRequest({ section: "guildLinkRequest", action: "approve",
+    requestId: linkRequestId, confirmed: true }), BookingAdminGuildLinkDecisionDeniedError);
+});
+
+test("State replacement cannot use ordinary approval and remains outside Administrator authority", async () => {
+  const repository = guildLinkDecisionRepository([stateGuild, allianceOne]);
+  repository.state.guildLinkRequests[0].requested_guild_kind = "state";
+  repository.state.guildLinkRequests[0].alliance_abbreviation = null;
+  repository.withTransaction = async (work) => work({
+    async readSnapshot() { return repository.state; },
+    async lockCommunity() { return repository.state.community; },
+    async lockDiscordTopology() { return repository.state.guilds; },
+    async lockGuildLinkRequest() { return repository.state.guildLinkRequests[0]; },
+    async activateRequestedGuildLink() { return { status: "state_conflict" }; },
+  });
+  await assert.rejects(createBookingAdminService({
+    gameProfile: "wos", communityId, managerContext: manager, repository,
+    verifyGuildOwner: ownerVerifier([stateGuild.discord_guild_id]),
+  }).decideGuildLinkRequest({ section: "guildLinkRequest", action: "approve",
+    requestId: linkRequestId, confirmed: true }),
+  (error) => error instanceof BookingAdminValidationError
+    && error.code === "state_guild_already_configured");
+
+  await assert.rejects(createBookingAdminService({
+    gameProfile: "wos", communityId,
+    managerContext: { ...manager, authorization: { via: "administrator" } },
+    repository: guildLinkDecisionRepository([stateGuild, allianceOne]),
+    verifyGuildOwner: ownerVerifier([]),
+  }).decideGuildLinkRequest({ section: "guildLinkRequest", action: "approve",
+    requestId: linkRequestId, confirmed: true }), BookingAdminGuildLinkDecisionDeniedError);
 });
 
 test("without State, an existing active alliance owner may approve or reject another alliance", async () => {
