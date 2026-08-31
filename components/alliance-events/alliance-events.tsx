@@ -1,5 +1,5 @@
 import { AllianceBadge } from "@/components/appointment-board/alliance-badge";
-import { CommunitySectionNavigation } from "@/components/community-section-navigation";
+import { CommunityHeaderActions, CommunitySectionNavigation } from "@/components/community-section-navigation";
 import type { GameProfile } from "@/brands/types";
 
 import { BrowserLocalTime } from "./browser-local-time";
@@ -56,9 +56,10 @@ export function AllianceEvents({ profile, community, alliances, unavailable }: {
   const noun = profile === "kingshot" ? "Kingdom" : "State";
   return (
     <article className="alliance-events-page">
-      <header className="alliance-events-page__heading">
-        <p className="booking-kicker">{noun} {community.code}</p>
-        <h1>{community.displayName}</h1>
+      <header className="alliance-events-page__heading community-page-heading">
+        <div><p className="booking-kicker">{noun} {community.code}</p>
+          <h1>{community.displayName}</h1></div>
+        <CommunityHeaderActions />
       </header>
       <CommunitySectionNavigation communityCode={community.code} current="events" profile={profile} />
       <section aria-labelledby="alliance-events-title" className="alliance-events-schedule">

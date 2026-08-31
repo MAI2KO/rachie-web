@@ -434,12 +434,17 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
     "GET and PATCH share the same scoped authorization helper");
   assert.match(handler, /verifyAuthenticatedMutationCsrf/);
   assert.match(handler, /bookingAdminMutation/);
-  assert.match(ui, /role="switch"/); assert.match(ui, /Read-only in Booking Admin v1/);
-  assert.match(ui, /Booking window/); assert.match(ui, /Save override/);
-  assert.match(ui, /Restore automatic schedule/); assert.match(ui, /Discord access/);
-  assert.match(ui, /Unlink alliance/); assert.match(ui, /Confirm access revocation/);
-  assert.match(ui, /Guest booking link/); assert.match(ui, /Generate/); assert.match(ui, /Rotate/);
-  assert.match(ui, /Revoke/); assert.match(ui, /Copy/); assert.match(ui, /only a hash is stored/);
+  assert.match(ui, /role="switch"/); assert.match(ui, /Member bookings/);
+  assert.match(ui, /Booking enabled/); assert.match(ui, /Booking window/);
+  assert.match(ui, /Save times/); assert.match(ui, /Use default times/);
+  assert.match(ui, /Discord access/); assert.match(ui, /Unlink alliance/);
+  assert.match(ui, /members may lose website access/);
+  assert.match(ui, /Guest booking link/); assert.match(ui, /Generate new link/);
+  assert.match(ui, /Replace link/); assert.match(ui, /Disable link/); assert.match(ui, /Copy/);
+  assert.match(ui, /current link cannot be shown again/);
+  assert.match(ui, /Appointment types/); assert.match(ui, /Troop Training/);
+  assert.match(ui, /Upcoming appointment dates/);
+  assert.doesNotMatch(ui, /Booking Admin v1|only a hash is stored|Resource requirement/);
   assert.doesNotMatch(ui, /create date|delete date|generate slot/i);
 });
 

@@ -5,7 +5,7 @@ import { WorldMap } from "@/components/world-map/world-map";
 import { readPublicWorldMap, type PublicWorldMapCommunity } from "@/server/world-map/read";
 
 export const metadata: Metadata = {
-  title: "World",
+  title: "World Map",
   description: "Explore registered States and Kingdoms and open their public appointment boards.",
 };
 

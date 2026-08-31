@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 
 import { AllianceBadge } from "./alliance-badge";
-import { CommunitySectionNavigation } from "@/components/community-section-navigation";
+import { CommunityHeaderActions, CommunitySectionNavigation } from "@/components/community-section-navigation";
 
 type PublicSlot = { time: string; state: "available" | "pending" | "confirmed"; playerName?: string; playerAlliance?: string };
 type PublicService = { name: string; date: string; slots: PublicSlot[] };
@@ -73,13 +73,21 @@ function activityLabel(action: string) {
   return action.replaceAll("_", " ");
 }
 
+function appointmentTypeName(value: string) {
+  return value.toLowerCase() === "troop" ? "Troop Training" : value;
+}
+
+function activityStateLabel(value: string) {
+  return value ? `${value[0].toUpperCase()}${value.slice(1).replaceAll("_", " ")}` : value;
+}
+
 function PublicPanels({ services }: { services: PublicService[] }) {
   return (
     <div aria-label="Appointment services" className="appointment-panels">
       {services.map((service) => (
         <section className="appointment-panel" key={`${service.name}:${service.date}`}>
           <header>
-            <h2>{service.name}</h2>
+            <h2>{appointmentTypeName(service.name)}</h2>
             <p>{readableDate(service.date)}</p>
           </header>
           <ol className="appointment-timeline">
@@ -141,8 +149,9 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onApprovalAction,
     <div aria-label="Manager appointment services" className="appointment-panels">
       {board.services.map((service) => (
         <section className="appointment-panel appointment-panel--manager" key={service.code}>
-          <header><h2>{service.name}</h2><p>{readableDate(service.date)}</p></header>
-          <div aria-label={`${service.name} operator appointments`} className="manager-table-scroll" role="region" tabIndex={0}>
+          <header><h2>{appointmentTypeName(service.name)}</h2><p>{readableDate(service.date)}</p></header>
+          <div aria-label={`${appointmentTypeName(service.name)} manager appointments`}
+            className="manager-table-scroll" role="region" tabIndex={0}>
             <table className="manager-table">
               <thead><tr>
                 <th scope="col">Time</th>
@@ -158,15 +167,15 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onApprovalAction,
                   return <Fragment key={slot.slotId}><tr className="manager-row manager-row--available">
                     <th scope="row"><time>{slot.time}</time></th>
                     <td colSpan={3 + service.requirementColumns.length}>Available</td>
-                    {editMode ? <td><button className="booking-button" onClick={() => onManualChoice(slot.slotId)}
-                      type="button">Book this slot</button></td> : null}
+                    {editMode ? <td><div className="manager-row__actions"><button className="booking-button"
+                      onClick={() => onManualChoice(slot.slotId)} type="button">Book this slot</button></div></td> : null}
                   </tr>{editMode && manualSlot === slot.slotId ? <tr className="manager-manual-booking-row">
                     <td colSpan={5 + service.requirementColumns.length}>
                       <form className="manager-manual-booking-form" onSubmit={(event) => {
                         event.preventDefault();
                         onManualSubmit(service, slot, new FormData(event.currentTarget));
                       }}>
-                        <p><strong>{service.name}</strong> · {readableDate(slot.date)} · {slot.time}</p>
+                        <p><strong>{appointmentTypeName(service.name)}</strong> · {readableDate(slot.date)} · {slot.time}</p>
                         <label>Player ID<input maxLength={32} name="playerId" required /></label>
                         <label>In-game name<input maxLength={100} name="inGameName" required /></label>
                         <label>Alliance<input maxLength={16} name="alliance" required /></label>
@@ -380,14 +389,17 @@ export function AppointmentBoard({ profile, initialBoard }: {
   const communityTerm = terms[profile].community;
   return (
     <article className="appointment-board">
-      <header className="appointment-board__heading">
+      <header className="appointment-board__heading community-page-heading">
         <div><p className="booking-kicker">{communityTerm} {initialBoard.community.code}</p><h1>{initialBoard.community.displayName}</h1></div>
-        {managerBoard ? <div className="manager-mode-control">
-          <span>{editMode ? "Edit Mode" : "Copy Mode"}</span>
-          <button className="booking-button booking-button--secondary" onClick={() => setEditMode((value) => !value)} type="button">
-            {editMode ? "Return to Copy Mode" : "Edit appointments"}
-          </button>
-        </div> : null}
+        <div className="community-page-header-tools">
+          <CommunityHeaderActions />
+          {managerBoard ? <div aria-label="Appointment manager mode" className="manager-mode-control">
+            <button aria-pressed={editMode} className="booking-button" onClick={() => setEditMode(true)}
+              type="button">Edit appointments</button>
+            <button aria-pressed={!editMode} className="booking-button booking-button--secondary"
+              onClick={() => setEditMode(false)} type="button">Copy mode</button>
+          </div> : null}
+        </div>
       </header>
       <CommunitySectionNavigation communityCode={initialBoard.community.code} current="appointments" profile={profile}
         showAdmin={Boolean(managerBoard)} />
@@ -402,7 +414,7 @@ export function AppointmentBoard({ profile, initialBoard }: {
           reschedulingBooking={reschedulingBooking} />
         : <PublicPanels services={initialBoard.services} />}
       {managerBoard ? <details className="manager-activity" open>
-        <summary>Activity / Audit Log</summary>
+        <summary>Recent activity</summary>
         <label>Filter activity <select onChange={(event) => setActivityFilter(event.target.value)}
           value={activityFilter}>
           <option value="all">All</option><option value="bookings">Bookings</option>
@@ -416,13 +428,13 @@ export function AppointmentBoard({ profile, initialBoard }: {
             <tbody>{managerBoard.activity.filter((event) => activityFilter === "all"
               || event.category === activityFilter).map((event, index) => <tr key={`${event.createdAt}:${index}`}>
               <td><time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time></td>
-              <td>{event.actorDisplayName ?? "System"}{event.actorDiscordUserId
-                ? <small className="manager-audit-id">Discord ID: {event.actorDiscordUserId}</small> : null}</td>
+              <td>{event.actorDisplayName ?? "System"}</td>
               <td>{activityLabel(event.action)}</td>
               <td>{event.playerName ?? "—"}{event.playerId
                 ? <small className="manager-audit-id">Player ID: {event.playerId}</small> : null}</td>
-              <td>{event.serviceCode ? `${event.serviceCode} · ` : ""}
-                {event.previousState ? `${event.previousState} → ${event.resultingState}` : event.resultingState}
+              <td>{event.serviceCode ? `${appointmentTypeName(event.serviceCode)} · ` : ""}
+                {event.previousState ? `${activityStateLabel(event.previousState)} → ${activityStateLabel(event.resultingState)}`
+                  : activityStateLabel(event.resultingState)}
                 {event.previousTime ? ` · ${event.previousTime}${event.newTime ? ` → ${event.newTime}` : ""}` : ""}</td>
             </tr>)}</tbody>
           </table></div> : <p>No matching activity.</p>}

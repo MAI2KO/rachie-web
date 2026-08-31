@@ -152,6 +152,8 @@ test("State and Kingdom share navigation and render UTC plus browser-local time 
   const kingdom = fs.readFileSync(new URL("../app/kingdom/[communityCode]/events/page.tsx", import.meta.url), "utf8");
   const topEvents = fs.readFileSync(new URL("../app/events/page.tsx", import.meta.url), "utf8");
   assert.match(nav, /Appointments/); assert.match(nav, /Alliance Events/);
+  assert.match(nav, /managerAuthorized[\s\S]*Booking Admin/);
+  assert.match(ui, /CommunityHeaderActions/);
   assert.match(ui, /Kingdom/); assert.match(ui, /State/); assert.match(ui, /UTC/); assert.match(ui, /occurrence\.group/);
   assert.match(local, /Intl\.DateTimeFormat/); assert.match(local, /timeZoneName/);
   assert.match(state, /requiredProfile="wos"/); assert.match(kingdom, /requiredProfile="kingshot"/);

@@ -307,7 +307,7 @@ export function WorldMap({
   }
 
   if (unavailable) {
-    return <p className="world-map__empty" role="alert">The World map is temporarily unavailable.</p>;
+    return <p className="world-map__empty" role="alert">The World Map is temporarily unavailable.</p>;
   }
   if (communities.length === 0) {
     return <p className="world-map__empty">No {noun}s are registered yet.</p>;
@@ -319,7 +319,7 @@ export function WorldMap({
       <header className="world-map__heading">
         <div>
           <p className="eyebrow">Public discovery</p>
-          <h1 id="world-map-title">{noun} World</h1>
+          <h1 id="world-map-title">{profile === "kingshot" ? "Kingshot" : "Whiteout Survival"} World Map</h1>
           <p>Drag to explore, zoom with the wheel or a pinch, or jump to a registered {noun.toLowerCase()}.</p>
         </div>
         <form className="world-map-search" onSubmit={search} role="search">

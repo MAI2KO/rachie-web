@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { CommunitySectionNavigation } from "@/components/community-section-navigation";
+import { CommunityHeaderActions, CommunitySectionNavigation } from "@/components/community-section-navigation";
 
 type Requirement = { readonly code: string; readonly label: string; readonly enabled: boolean };
 type Service = {
@@ -82,6 +82,16 @@ type Change =
 
 function statusLabel(status: string) {
   return status ? `${status[0].toUpperCase()}${status.slice(1)}` : "Unavailable";
+}
+
+function cycleStatusLabel(status: "draft" | "open" | "closed") {
+  if (status === "draft") return "Upcoming";
+  if (status === "open") return "Open now";
+  return "Closed";
+}
+
+function serviceDisplayName(service: { readonly code: string; readonly displayName: string }) {
+  return service.code === "troop" ? "Troop Training" : service.displayName;
 }
 
 function displayDate(date: string) {
@@ -189,9 +199,9 @@ export function BookingAdmin({ initialConfiguration }: {
       if (typeof payload.guestLinkPath === "string") {
         setNewGuestUrl(new URL(payload.guestLinkPath, window.location.origin).toString());
       }
-      setNotice(action === "revoke" ? "Guest link revoked."
-        : action === "rotate" ? "Guest link rotated. Copy the new link now."
-          : "Guest link generated. Copy it now.");
+      setNotice(action === "revoke" ? "Guest link disabled."
+        : action === "rotate" ? "Guest link replaced. Copy the new link now."
+          : "New guest link generated. Copy it now.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The guest link could not be changed.");
     } finally {
@@ -240,8 +250,8 @@ export function BookingAdmin({ initialConfiguration }: {
         throw new Error(payload.error ?? "The booking window could not be changed.");
       }
       adoptConfiguration(payload.configuration);
-      setNotice(action === "restore" ? "Automatic schedule restored for this cycle."
-        : "Booking window override saved for this cycle.");
+      setNotice(action === "restore" ? "Default booking times restored for this cycle."
+        : "Booking window times saved for this cycle.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The booking window could not be changed.");
     } finally {
@@ -264,8 +274,7 @@ export function BookingAdmin({ initialConfiguration }: {
       }
       adoptConfiguration(payload.configuration);
       setConfirmedGuildId("");
-      const count = Number(payload.unlink?.affectedGrantCount ?? 0);
-      setNotice(`Alliance Discord unlinked. ${count} access grant${count === 1 ? "" : "s"} revoked.`);
+      setNotice("Alliance Discord removed. Members who relied on it must use another connected Discord.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The alliance Discord could not be unlinked.");
     } finally {
@@ -298,46 +307,48 @@ export function BookingAdmin({ initialConfiguration }: {
 
   const controlsDisabled = !csrfToken;
   return <article className="booking-admin">
-    <header>
-      <p className="booking-kicker">{noun} {configuration.community.code}</p>
-      <h1>{configuration.community.displayName} Booking Admin</h1>
-      <p>Manage participant booking availability and requirements for this {noun.toLowerCase()}.</p>
+    <header className="community-page-heading">
+      <div><p className="booking-kicker">{noun} {configuration.community.code}</p>
+        <h1>{configuration.community.displayName} Booking Admin</h1>
+        <p>Manage bookings, appointment types and Discord access for this {noun.toLowerCase()}.</p></div>
+      <CommunityHeaderActions />
     </header>
     <CommunitySectionNavigation communityCode={configuration.community.code} current="admin"
       profile={configuration.profile} showAdmin />
     {notice ? <p aria-live="polite" className="booking-notice" role="status">{notice}</p> : null}
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-booking">
-      <div><h2 id="booking-admin-booking">Booking system</h2>
-        <p>Controls whether normal participant bookings are allowed for this community.</p></div>
+      <div><h2 id="booking-admin-booking">Member bookings</h2>
+        <p>Turn normal player bookings on or off for this {noun}.</p></div>
       <div className="booking-admin-setting">
-        <div><strong>Participant booking</strong><span>Independent of dates, windows, and slots.</span></div>
+        <div><strong>Booking enabled</strong>
+          <span>Players can book only while this is enabled and the booking window is open.</span></div>
         <SettingSwitch checked={configuration.community.bookingsEnabled}
-          disabled={controlsDisabled || busy === "booking"} label="Participant booking"
+          disabled={controlsDisabled || busy === "booking"} label="Member booking"
           onChange={() => void changeSetting("booking", {
             section: "booking", enabled: !configuration.community.bookingsEnabled,
-          }, `Participant booking ${configuration.community.bookingsEnabled ? "disabled" : "enabled"}.`)} />
+          }, `Member booking ${configuration.community.bookingsEnabled ? "disabled" : "enabled"}.`)} />
       </div>
     </section>
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-guest-link">
       <div><h2 id="booking-admin-guest-link">Guest booking link</h2>
-        <p>Allows in-game players to request a booking without Discord. Requests still require manager approval.</p></div>
+        <p>Create a link for players who cannot use the normal Discord login. Guest bookings still require manager approval.</p></div>
       <div className="booking-admin-guest-link">
-        <p><strong>Status:</strong> {configuration.guestLink.status === "active" ? "Active"
-          : configuration.guestLink.status === "revoked" ? "Revoked" : "No active link"}</p>
-        <p className="booking-admin-guest-explanation">For security, only a hash is stored. An existing link cannot be
-          recovered or copied; rotate it to receive a new link.</p>
+        <p><strong>Status:</strong> {configuration.guestLink.status === "active" ? "Link active"
+          : "No active link"}</p>
+        <p className="booking-admin-guest-explanation">For security, the current link cannot be shown again.
+          Generate a new link if you need another copy.</p>
         <div className="booking-admin-actions">
           {configuration.guestLink.status === "active"
             ? <>
               <button disabled={controlsDisabled || Boolean(busy)} onClick={() => void changeGuestLink("rotate")}
-                type="button">Rotate</button>
+                type="button">Replace link</button>
               <button disabled={controlsDisabled || Boolean(busy)} onClick={() => void changeGuestLink("revoke")}
-                type="button">Revoke</button>
+                type="button">Disable link</button>
             </>
             : <button disabled={controlsDisabled || Boolean(busy)} onClick={() => void changeGuestLink("generate")}
-              type="button">Generate</button>}
+              type="button">Generate new link</button>}
           <button disabled={!newGuestUrl || Boolean(busy)} onClick={() => void copyGuestLink()} type="button">Copy</button>
         </div>
         {newGuestUrl ? <label className="booking-admin-new-link">New link — shown for this page only
@@ -347,15 +358,16 @@ export function BookingAdmin({ initialConfiguration }: {
     </section>
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-services">
-      <div><h2 id="booking-admin-services">Services</h2><p>Disable a service without deleting its dates or slots.</p></div>
+      <div><h2 id="booking-admin-services">Appointment types</h2>
+        <p>Turn individual appointment types on or off.</p></div>
       <div className="booking-admin-settings-list">
         {configuration.services.map((service) => <div className="booking-admin-setting" key={service.code}>
-          <div><strong>{service.displayName}</strong><span>{service.code}</span></div>
+          <div><strong>{serviceDisplayName(service)}</strong></div>
           <SettingSwitch checked={service.enabled} disabled={controlsDisabled || busy === `service:${service.code}`}
-            label={`${service.displayName} service`} onChange={() => void changeSetting(
+            label={`${serviceDisplayName(service)} appointment type`} onChange={() => void changeSetting(
               `service:${service.code}`,
               { section: "service", serviceCode: service.code, enabled: !service.enabled },
-              `${service.displayName} ${service.enabled ? "disabled" : "enabled"}.`,
+              `${serviceDisplayName(service)} ${service.enabled ? "disabled" : "enabled"}.`,
             )} />
         </div>)}
       </div>
@@ -364,14 +376,15 @@ export function BookingAdmin({ initialConfiguration }: {
     {configuration.automaticCycle ? <section className="booking-admin-section"
       aria-labelledby="booking-admin-automatic-cycle">
       <div><h2 id="booking-admin-automatic-cycle">Booking window</h2>
-        <p>Automatic 28-day Whiteout Survival schedule. Times below are UTC; the manual booking control above remains independent.</p></div>
+        <p>Choose when players can sign up for the next appointment cycle. Times are shown in UTC.
+          The {noun}&apos;s main booking switch above can still close bookings at any time.</p></div>
       <dl className="booking-admin-cycle-summary">
-        <div><dt>Schedule</dt><dd>{statusLabel(configuration.automaticCycle.status)}</dd></div>
-        <div><dt>Automatic opening</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticOpensAt)}</dd></div>
-        <div><dt>Automatic closing</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticClosesAt)}</dd></div>
-        <div><dt>Opening</dt><dd><time dateTime={configuration.automaticCycle.opensAt}>
+        <div><dt>Next cycle</dt><dd>{cycleStatusLabel(configuration.automaticCycle.status)}</dd></div>
+        <div><dt>Default opening</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticOpensAt)}</dd></div>
+        <div><dt>Default closing</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticClosesAt)}</dd></div>
+        <div><dt>Current opening</dt><dd><time dateTime={configuration.automaticCycle.opensAt}>
           {displayUtcInstant(configuration.automaticCycle.opensAt)}</time></dd></div>
-        <div><dt>Closing</dt><dd><time dateTime={configuration.automaticCycle.closesAt}>
+        <div><dt>Current closing</dt><dd><time dateTime={configuration.automaticCycle.closesAt}>
           {displayUtcInstant(configuration.automaticCycle.closesAt)}</time></dd></div>
       </dl>
       <div className="booking-admin-settings-list">
@@ -390,14 +403,15 @@ export function BookingAdmin({ initialConfiguration }: {
         </label> : null}
         <div className="booking-admin-actions">
           <button disabled={controlsDisabled || Boolean(busy)}
-            onClick={() => void changeCycleSchedule("override")} type="button">Save override</button>
+            onClick={() => void changeCycleSchedule("override")} type="button">Save times</button>
           <button disabled={controlsDisabled || Boolean(busy) || !configuration.automaticCycle.overridden}
-            onClick={() => void changeCycleSchedule("restore")} type="button">Restore automatic schedule</button>
+            onClick={() => void changeCycleSchedule("restore")} type="button">Use default times</button>
         </div>
       </div>
       <ul className="booking-admin-cycle-appointments">
         {configuration.automaticCycle.appointments.map((appointment) => <li key={appointment.serviceCode}>
-          <strong>{appointment.serviceName}</strong>
+          <strong>{serviceDisplayName({ code: appointment.serviceCode,
+            displayName: appointment.serviceName })}</strong>
           <time dateTime={appointment.date}>{displayDate(appointment.date)}</time>
         </li>)}
       </ul>
@@ -405,30 +419,32 @@ export function BookingAdmin({ initialConfiguration }: {
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-discord-access">
       <div><h2 id="booking-admin-discord-access">Discord access</h2>
-        <p>Only the shared {noun} Discord owner or an alliance Discord owner can unlink that alliance.</p></div>
+        <p>Manage which alliance Discords are connected to this {noun}. Only the {noun} Discord owner
+          or the owner of an alliance Discord can remove an alliance.</p></div>
       {configuration.discordAccess.guilds.length ? <div className="booking-admin-settings-list">
         {configuration.discordAccess.guilds.map((guild) => <div className="booking-admin-setting" key={guild.id}>
           <div><strong>{guild.displayName}</strong>
-            <span>Unlinking revokes all website access granted through this Discord, even for members of the shared {noun} Discord.</span>
+            <span>Removing this alliance disconnects members who get website access through its Discord.
+              Access through other alliance Discords is not affected.</span>
             {guild.canUnlink ? <label>
               <input checked={confirmedGuildId === guild.id} type="checkbox"
                 onChange={(event) => setConfirmedGuildId(event.currentTarget.checked ? guild.id : "")} />
-              Confirm access revocation for this alliance Discord.
-            </label> : <span>Discord ownership is required.</span>}
+              I understand that members may lose website access.
+            </label> : <span>The Discord owner must remove this alliance.</span>}
           </div>
           <button disabled={controlsDisabled || Boolean(busy) || !guild.canUnlink
               || confirmedGuildId !== guild.id}
             onClick={() => void unlinkGuild(guild.id)} type="button">Unlink alliance</button>
         </div>)}
-      </div> : <p>No active alliance Discord links are available.</p>}
+      </div> : <p>No alliance Discords are currently connected.</p>}
       {configuration.discordAccess.pendingRequests.length ? <div>
-        <p><strong>Pending alliance Discord requests</strong></p>
+        <p><strong>Requests to join this {noun}</strong></p>
         <div className="booking-admin-settings-list">
           {configuration.discordAccess.pendingRequests.map((request) =>
             <div className="booking-admin-setting" key={request.id}>
               <div><strong>{request.guildName} ({request.alliance})</strong>
-                <span>Guild {request.guildId}; requested by Discord user {request.requestedByDiscordUserId} on {displayUtcInstant(request.requestedAt)}.</span>
-                {!request.canDecide ? <span>Eligible Discord ownership is required.</span> : null}
+                <span>Requested {displayUtcInstant(request.requestedAt)}.</span>
+                {!request.canDecide ? <span>Only an eligible Discord owner can decide this request.</span> : null}
               </div>
               <div className="booking-admin-actions">
                 <button disabled={controlsDisabled || Boolean(busy) || !request.canDecide}
@@ -440,9 +456,10 @@ export function BookingAdmin({ initialConfiguration }: {
         </div>
       </div> : null}
       {configuration.discordAccess.unclassifiedGuilds.length ? <div>
-        <p><strong>Explicit classification required</strong></p>
+        <p><strong>Discord type not set</strong></p>
         <ul>{configuration.discordAccess.unclassifiedGuilds.map((guild) => <li key={guild.id}>
-          {guild.displayName} ({guild.id}) — unclassified; it cannot be unlinked as an alliance or used as the shared {noun} Discord.
+          {guild.displayName} has not yet been marked as either the {noun} Discord or an alliance Discord.
+          Its connection will continue to work, but ownership controls are unavailable until its type is set.
         </li>)}</ul>
       </div> : null}
       <p>The shared {noun} Discord cannot be unlinked here.</p>
@@ -450,22 +467,21 @@ export function BookingAdmin({ initialConfiguration }: {
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-requirements">
       <div><h2 id="booking-admin-requirements">Booking requirements</h2>
-        <p>These existing per-service fields control the participant and guest booking forms.</p></div>
+        <p>Choose what information players must provide when booking each appointment type.</p></div>
       <div className="booking-admin-requirement-groups">
         {configuration.services.map((service) => <section key={service.code}>
-          <h3>{service.displayName}</h3>
+          <h3>{serviceDisplayName(service)}</h3>
           {service.requirements.map((requirement) => <div className="booking-admin-setting"
             key={`${service.code}:${requirement.code}`}>
-            <div><strong>{requirement.label}</strong>
-              <span>{requirement.code === "speedups" ? "Speed-ups requirement" : "Resource requirement"}</span></div>
+            <div><strong>{requirement.label}</strong></div>
             <SettingSwitch checked={requirement.enabled}
               disabled={controlsDisabled || busy === `requirement:${service.code}:${requirement.code}`}
-              label={`${service.displayName} ${requirement.label} requirement`}
+              label={`${serviceDisplayName(service)} ${requirement.label} requirement`}
               onChange={() => void changeSetting(
                 `requirement:${service.code}:${requirement.code}`,
                 { section: "requirement", serviceCode: service.code,
                   requirementCode: requirement.code, enabled: !requirement.enabled },
-                `${service.displayName} ${requirement.label} requirement ${requirement.enabled ? "disabled" : "enabled"}.`,
+                `${serviceDisplayName(service)} ${requirement.label} ${requirement.enabled ? "no longer required" : "now required"}.`,
               )} />
           </div>)}
         </section>)}
@@ -473,8 +489,8 @@ export function BookingAdmin({ initialConfiguration }: {
     </section>
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-dates">
-      <div><h2 id="booking-admin-dates">Current booking dates and windows</h2>
-        <p>Read-only in Booking Admin v1.</p></div>
+      <div><h2 id="booking-admin-dates">Upcoming appointment dates</h2>
+        <p>These dates are created automatically from the booking schedule.</p></div>
       <div className="booking-admin-window-status">
         {configuration.windows.length
           ? configuration.windows.map((window, index) => <p key={`${window.status}:${window.opensAt}:${index}`}>
@@ -486,7 +502,8 @@ export function BookingAdmin({ initialConfiguration }: {
         ? <ul className="booking-admin-dates">{configuration.dates.map((date) => <li
           key={`${date.date}:${date.serviceCode}:${date.windowStatus}`}>
           <time dateTime={date.date}>{displayDate(date.date)}</time>
-          <span>{date.serviceName}</span><strong>{statusLabel(date.windowStatus)}</strong>
+          <span>{serviceDisplayName({ code: date.serviceCode, displayName: date.serviceName })}</span>
+          <strong>{statusLabel(date.windowStatus)}</strong>
         </li>)}</ul>
         : <p>No service dates are currently configured.</p>}
     </section>

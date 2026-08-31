@@ -253,7 +253,9 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(source, /<CopyButton alliance/);
   assert.match(source, /onCopy\(value, `\$\{key\}:alliance`\)/);
   assert.match(source, /service\.requirementColumns\.map/);
-  assert.match(source, /Copy Mode/);
+  assert.match(source, /Copy mode/);
+  assert.match(source, /aria-pressed=\{editMode\}/);
+  assert.match(source, /aria-pressed=\{!editMode\}/);
   assert.match(source, /Edit appointments/);
   assert.match(source, /editMode \? <td>\{slot\.state === "pending"/);
   assert.match(source, /slot\.state === "confirmed" && slot\.bookingId/);
@@ -261,6 +263,8 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(source, />Cancel<\/button>/);
   assert.match(source, />Confirm cancel<\/button>/);
   assert.match(source, />Confirm move<\/button>/);
+  assert.match(source, /manager-row__actions"><button className="booking-button"[\s\S]*Book this slot/);
+  assert.match(source, /Troop Training/);
   assert.match(source, /candidate\.state === "available" && candidate\.date === slot\.date/);
   assert.match(source, /method: action === "cancel" \? "DELETE" : "PATCH"/);
   assert.match(source, /"idempotency-key": crypto\.randomUUID\(\)/);
@@ -271,6 +275,7 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(css, /\.alliance-badge--solid \{[^}]*background: var\(--brand-accent-strong\)/);
   assert.doesNotMatch(css, /\.manager-current-user-badge/);
   assert.match(css, /\.manager-table-scroll \{[^}]*overflow-x: auto/);
+  assert.match(css, /\.manager-row__actions \.booking-button \{[^}]*min-height: 2rem;[^}]*padding: 0\.25rem 0\.5rem;[^}]*font-size: 0\.75rem/);
   assert.doesNotMatch(css, /\.manager-row[^}]*flex-direction: column/);
 });
 

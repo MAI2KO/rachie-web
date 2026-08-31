@@ -223,7 +223,9 @@ test("world-map UI provides profile terminology, empty states, Pointer Events, s
   assert.match(source, /Browse all registered \{noun\}s/);
   assert.match(source, /<Link href=\{community\.href\}>/);
   assert.match(source, /is not currently registered/);
-  assert.match(navigation, /href: "\/world", label: "World"/);
+  assert.match(navigation, /href: "\/world", label: "World Map"/);
+  assert.match(source, /"Kingshot" : "Whiteout Survival"\} World Map/);
+  assert.doesNotMatch(source, /\{noun\} World/);
 });
 
 test("PostgreSQL world-map reads include only active communities and isolate identical codes by profile",

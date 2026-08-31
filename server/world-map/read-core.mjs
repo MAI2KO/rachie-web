@@ -12,7 +12,7 @@ export async function handlePublicWorldMapCore(request, dependencies) {
   const context = dependencies.resolveRequestContext(request);
   if (!context) {
     return Response.json(
-      { ok: false, error: "World map was not found.", code: "not_found" },
+      { ok: false, error: "World Map was not found.", code: "not_found" },
       { status: 404, headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -24,7 +24,7 @@ export async function handlePublicWorldMapCore(request, dependencies) {
     );
   } catch {
     return Response.json(
-      { ok: false, error: "World map is unavailable.", code: "unavailable" },
+      { ok: false, error: "World Map is unavailable.", code: "unavailable" },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }

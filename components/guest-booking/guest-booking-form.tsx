@@ -13,6 +13,8 @@ export interface GuestBookingPageModel {
 }
 
 const dateLabel = (date: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+const appointmentTypeName = (code: string, name: string) => code === "troop" || name.toLowerCase() === "troop"
+  ? "Troop Training" : name;
 
 export function GuestBookingLoader({ token, profile }: { token: string; profile: "wos" | "kingshot" }) {
   const [page, setPage] = useState<GuestBookingPageModel | null>(null);
@@ -65,7 +67,8 @@ export function GuestBookingForm({ token, profile, page }: { token: string; prof
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Booking request could not be submitted.");
-      setSuccess({ service: service?.name ?? body.request.service, date: body.request.date, time: body.request.time });
+      setSuccess({ service: appointmentTypeName(serviceCode, service?.name ?? body.request.service),
+        date: body.request.date, time: body.request.time });
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Booking request could not be submitted."); }
     finally { setSubmitting(false); }
   }
@@ -81,7 +84,7 @@ export function GuestBookingForm({ token, profile, page }: { token: string; prof
     <header><p className="booking-kicker">{term} {page.community.code}</p><h1>{page.community.displayName}</h1><p>Request an appointment without signing in to Discord.</p></header>
     <form onSubmit={submit}>
       <fieldset><legend>1. Choose a service</legend><div className="guest-service-options">
-        {page.services.map((item) => <button aria-pressed={serviceCode === item.code} key={item.code} onClick={() => { setServiceCode(item.code); setSlotId(""); setRequirements({}); }} type="button"><strong>{item.name}</strong><span>{dateLabel(item.date)}</span></button>)}
+        {page.services.map((item) => <button aria-pressed={serviceCode === item.code} key={item.code} onClick={() => { setServiceCode(item.code); setSlotId(""); setRequirements({}); }} type="button"><strong>{appointmentTypeName(item.code, item.name)}</strong><span>{dateLabel(item.date)}</span></button>)}
       </div></fieldset>
       {service ? <fieldset><legend>2. Choose an available time</legend><div className="guest-slot-options">
         {service.slots.map((slot) => <label key={slot.slotId}><input checked={slotId === slot.slotId} disabled={slot.state !== "available"} name="slot" onChange={() => setSlotId(slot.slotId)} type="radio" value={slot.slotId} /><span>{slot.time}<small>{slot.state === "available" ? "Available" : "Pending or booked"}</small></span></label>)}
