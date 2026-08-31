@@ -212,16 +212,15 @@ async function workPayload(client, profile, row, deliveryContext = {}) {
     const guestToken = manualGuestLinkToken(
       deliveryContext.guestTokenSecret, profile, row.community_id, row.guest_share_link_id,
     );
-    if (!details || !guestToken || hashGuestShareToken(guestToken) !== details.tokenHash
-        || !deliveryContext.publicBaseUrl) {
+    if (!details || !guestToken || hashGuestShareToken(guestToken) !== details.tokenHash) {
       throw new Error("manual_guest_link_configuration");
     }
     return { ...base, communityCode: details.communityCode, guilds: details.guilds ?? [],
-      guestUrl: `${deliveryContext.publicBaseUrl}/book/${guestToken}` };
+      guestPath: `/book/${guestToken}` };
   }
   if (row.notification_type === "manager_discovery") {
     const guilds = await client.query(
-      `SELECT discord_guild_id AS "guildId",bot_manager_role_id AS "managerRoleId"
+      `SELECT discord_guild_id AS "guildId"
          FROM booking_discord_guilds WHERE game_profile=$1 AND community_id=$2
            AND link_status='active'
          ORDER BY discord_guild_id`, [profile, row.community_id],

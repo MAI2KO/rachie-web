@@ -567,6 +567,19 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(detail.audit.filter((event) => ["approved", "expired"].includes(event.action)).length, 1);
     });
 
+    await t.test("native bot-manager-role authorization can approve and deny guest requests", async () => {
+      const actor = {
+        ...manager("wos", fixtures.wos.communityId, "manager-role-user"),
+        authorization: { via: "bot_manager_role", guildId: fixtures.wos.guildId },
+      };
+      const approvedId = await pendingForRace(10, 11, "guest-role-manager-approve-0001");
+      assert.equal((await approvalService("wos", actor, "2030-08-21T14:05:00.000Z")
+        .approve(approvedId)).outcome, "confirmed");
+      const deniedId = await pendingForRace(11, 12, "guest-role-manager-deny-0001");
+      assert.equal((await approvalService("wos", actor, "2030-08-21T14:05:00.000Z")
+        .deny(deniedId)).outcome, "denied");
+    });
+
     await t.test("Kingshot guest and native manager rows retain alliance while scope stays isolated", async () => {
       const kingshotGuest = await guestService("kingshot").create(
         tokens.kingshot, guestInput(fixtures.kingshot.slots[0], 11), "kingshot-guest-request-0001",

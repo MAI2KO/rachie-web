@@ -140,7 +140,8 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
     const generatedWork = (await discord.withTransaction((session) => session.claim(10, {
       guestTokenSecret, publicBaseUrl: "https://current.example",
     }))).find((work) => work.type === "manager_guest_link");
-    assert.equal(generatedWork.guestUrl, `https://current.example${generated.guestLinkPath}`);
+    assert.equal(generatedWork.guestPath, generated.guestLinkPath);
+    assert.equal("guestUrl" in generatedWork, false);
     assert.deepEqual(generatedWork.guilds, []);
     await discord.withTransaction((session) => session.finish(generatedWork.workId,
       generatedWork.claimToken, { status: "retry", errorCode: "temporary_dm_failure" }));
@@ -153,7 +154,7 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
     const rotatedWork = (await discord.withTransaction((session) => session.claim(10, {
       guestTokenSecret, publicBaseUrl: "https://current.example",
     }))).find((work) => work.type === "manager_guest_link");
-    assert.equal(rotatedWork.guestUrl, `https://current.example${rotated.guestLinkPath}`);
+    assert.equal(rotatedWork.guestPath, rotated.guestLinkPath);
     assert.equal((await service.updateGuestLink({ section: "guestLink", action: "revoke" }))
       .configuration.guestLink.status, "revoked");
     assert.equal(await discord.withTransaction((session) => session.finish(rotatedWork.workId,

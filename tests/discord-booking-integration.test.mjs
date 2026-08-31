@@ -157,11 +157,13 @@ test("durable Discord work is profile-isolated, deduplicated, retryable and remi
       assert.ok(claimed.every(item => item.profile === "wos"));
       const discovery = claimed.find(item => item.type === "manager_discovery");
       assert.equal(discovery.guilds.length, 2);
+      assert.equal(discovery.guilds.every((guild) => Object.keys(guild).join(",") === "guildId"), true);
       assert.equal(await repository.withTransaction(session => session.registerRecipients(
         discovery.workId, discovery.claimToken, [
           { discordUserId: "400000000000000001", sourceGuildId: "100000000000000001" },
           { discordUserId: "400000000000000001", sourceGuildId: "100000000000000002" },
           { discordUserId: "400000000000000002", sourceGuildId: "100000000000000002" },
+          { discordUserId: "400000000000000003", sourceGuildId: "999999999999999999" },
         ],
       )), true);
       const player = claimed.find(item => item.type === "player_confirmed");
