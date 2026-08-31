@@ -469,6 +469,8 @@ button:focus-visible,
 .booking-admin-dates { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .booking-admin-dates li { display: grid; grid-template-columns: minmax(8rem, auto) 1fr auto; gap: 0.75rem; padding: 0.55rem 0; border-top: 1px solid var(--brand-border); align-items: baseline; }
 .booking-admin-dates li strong { font-size: 0.75rem; text-transform: uppercase; }
+.booking-admin-activity > label { display: flex; gap: 0.5rem; align-items: center; font-weight: 700; }
+.booking-admin-activity select { min-height: 2.25rem; padding-inline: 0.5rem; border: 1px solid var(--brand-border); border-radius: 0.45rem; background: var(--brand-surface); color: var(--brand-text); }
 
 .guest-booking { max-width: 46rem; margin-inline: auto; }
 .guest-booking > header h1,
@@ -501,6 +503,11 @@ button:focus-visible,
 .guest-success dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; padding: 1rem; background: var(--brand-surface); }
 .guest-success dt { color: var(--brand-text-muted); font-size: 0.75rem; font-weight: 800; text-transform: uppercase; }
 .guest-success dd { margin: 0; font-weight: 800; }
+.guest-member-callout { margin-top: 1.5rem; padding: 1rem; border: 1px solid var(--brand-border); border-left: 4px solid var(--brand-accent-strong); border-radius: 0.5rem; background: var(--brand-surface-muted); }
+.guest-member-callout h2 { margin: 0; font-size: 1.2rem; }
+.guest-member-callout p { margin-block: 0.65rem; }
+.guest-member-callout ul { margin-block: 0.5rem 1rem; padding-left: 1.25rem; }
+.guest-member-callout li + li { margin-top: 0.35rem; }
 
 @media (min-width: 64rem) {
   .appointment-panels { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: row; grid-auto-columns: auto; overflow-x: visible; }

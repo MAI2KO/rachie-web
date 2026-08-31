@@ -134,6 +134,15 @@ Kingshot native booking community: supported cycle defaults do not yet exist.
 That is a Kingshot first-cycle blocker, but it does not block WOS or an already
 provisioned and linked Kingshot community.
 
+## First-cycle guest and member booking experience
+
+Guest booking remains an intentional fallback for the first cycle: one request is
+submitted at a time and requires manager approval. Registered Discord members keep
+the smoother path with eligible native confirmation, self-service appointment
+management, and registered Player ID account and gift-code benefits. Multi-appointment
+guest submission is deliberately deferred; the guest path is not artificially
+restricted, but it is not intended to duplicate the registered-member experience.
+
 ## Safe production order
 
 1. Back up production PostgreSQL and record current Railway variables/domains.

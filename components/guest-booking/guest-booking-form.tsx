@@ -78,6 +78,19 @@ export function GuestBookingForm({ token, profile, page }: { token: string; prof
     <p>Your slot is being held temporarily while a {term} administrator reviews it.</p>
     <dl><div><dt>{term}</dt><dd>{page.community.code}</dd></div><div><dt>Service</dt><dd>{success.service}</dd></div><div><dt>Date</dt><dd>{dateLabel(success.date)}</dd></div><div><dt>Time</dt><dd>{success.time}</dd></div></dl>
     <p><strong>The request is not confirmed until approved.</strong></p>
+    <aside className="guest-member-callout">
+      <h2>Want faster booking next time?</h2>
+      <p>Log in with Discord through your alliance to use the full {term} member booking system.</p>
+      <p>Registered members can:</p>
+      <ul>
+        <li>Have eligible bookings confirmed automatically without waiting for guest approval</li>
+        <li>Manage, reschedule and cancel their own appointments</li>
+        <li>Use automatic gift-code redemption with their registered Player ID</li>
+        <li>Earn account and VIP points from participation</li>
+        <li>Access additional member features as they are added</li>
+      </ul>
+      <a className="booking-button" href="/api/v1/auth/login?returnTo=%2Fbooking">Log in with Discord</a>
+    </aside>
   </section>;
 
   return <article className="guest-booking">

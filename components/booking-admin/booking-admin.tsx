@@ -11,6 +11,26 @@ type Service = {
   readonly enabled: boolean;
   readonly requirements: readonly Requirement[];
 };
+type Activity = {
+  readonly action: string;
+  readonly category: "bookings" | "approvals" | "cancellations" | "manager_actions" | "configuration";
+  readonly playerName: string | null;
+  readonly playerId: string | null;
+  readonly actorDiscordUserId: string | null;
+  readonly actorDisplayName: string | null;
+  readonly serviceCode: string | null;
+  readonly previousState: string | null;
+  readonly resultingState: string;
+  readonly previousTime: string | null;
+  readonly newTime: string | null;
+  readonly bookingDate: string | null;
+  readonly settingSection: string | null;
+  readonly requirementCode: string | null;
+  readonly enabled: boolean | null;
+  readonly guildName: string | null;
+  readonly cycleIndex: number | null;
+  readonly createdAt: string;
+};
 type BookingAdminConfiguration = {
   readonly profile: "wos" | "kingshot";
   readonly community: {
@@ -68,6 +88,7 @@ type BookingAdminConfiguration = {
     readonly date: string;
     readonly windowStatus: string;
   }[];
+  readonly activity: readonly Activity[];
 };
 
 type Change =
@@ -111,6 +132,71 @@ function utcInputValue(instant: string) {
   return new Date(instant).toISOString().slice(0, 16);
 }
 
+function activityActionLabel(activity: Activity) {
+  if (activity.action === "booking_created") return "Booked appointment";
+  if (activity.action === "manager_manual_booking") return "Added booking manually";
+  if (["booking_rescheduled", "manager_booking_rescheduled"].includes(activity.action)) {
+    return "Rescheduled booking";
+  }
+  if (["booking_cancelled", "manager_booking_cancelled"].includes(activity.action)) {
+    return "Cancelled booking";
+  }
+  if (activity.action === "submitted") return "Submitted guest request";
+  if (activity.action === "approved") return "Approved guest booking";
+  if (activity.action === "denied") return "Denied guest booking";
+  if (activity.action === "expired") return "Guest request expired";
+  if (activity.action === "booking_admin_updated") return "Changed booking settings";
+  if (activity.action === "guest_link_generate") return "Created guest booking link";
+  if (activity.action === "guest_link_rotate") return "Replaced guest booking link";
+  if (activity.action === "guest_link_revoke") return "Disabled guest booking link";
+  if (activity.action === "alliance_discord_unlinked") return "Removed alliance Discord";
+  if (activity.action === "alliance_guild_link_approved") return "Approved alliance Discord";
+  if (activity.action === "alliance_guild_link_rejected") return "Rejected alliance Discord";
+  if (activity.action.startsWith("booking_cycle_override_")) return "Changed booking window";
+  return activity.action.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function activityActorLabel(activity: Activity) {
+  if (activity.actorDisplayName) return activity.actorDisplayName;
+  if (activity.action === "submitted") return "Guest player";
+  if (activity.action === "expired") return "System";
+  if (activity.action === "booking_created") return "Player";
+  return activity.actorDiscordUserId ? "Discord member" : "System";
+}
+
+function readableSetting(value: string | null) {
+  if (!value) return "Booking settings";
+  if (value === "booking") return "Member bookings";
+  if (value === "service") return "Appointment type";
+  if (value === "requirement") return "Booking requirement";
+  return value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function activityDetails(activity: Activity) {
+  if (activity.action === "booking_admin_updated") {
+    const service = activity.serviceCode ? serviceDisplayName({ code: activity.serviceCode,
+      displayName: activity.serviceCode.replace(/^./, (letter) => letter.toUpperCase()) }) : null;
+    let target = readableSetting(activity.settingSection);
+    if (activity.settingSection === "service" && service) target = `${service} appointment type`;
+    if (activity.settingSection === "requirement" && activity.requirementCode) {
+      target = [service, `${activity.requirementCode.replaceAll("_", " ")} requirement`]
+        .filter(Boolean).join(" — ");
+    }
+    return activity.enabled === null ? target : `${target} — ${activity.enabled ? "Enabled" : "Disabled"}`;
+  }
+  if (activity.serviceCode) {
+    const service = serviceDisplayName({ code: activity.serviceCode,
+      displayName: activity.serviceCode.replace(/^./, (letter) => letter.toUpperCase()) });
+    const times = activity.previousTime && activity.newTime
+      ? `${activity.previousTime} → ${activity.newTime}`
+      : activity.newTime ?? activity.previousTime;
+    return [service, times].filter(Boolean).join(" — ");
+  }
+  if (activity.guildName) return activity.guildName;
+  if (activity.cycleIndex !== null) return `Booking cycle ${activity.cycleIndex}`;
+  return activity.resultingState.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
 function SettingSwitch({ checked, disabled, label, onChange }: {
   readonly checked: boolean;
   readonly disabled: boolean;
@@ -140,8 +226,12 @@ export function BookingAdmin({ initialConfiguration }: {
   );
   const [confirmOpenChange, setConfirmOpenChange] = useState(false);
   const [confirmedGuildId, setConfirmedGuildId] = useState("");
+  const [activityFilter, setActivityFilter] = useState<Activity["category"] | "all">("all");
   const noun = configuration.profile === "kingshot" ? "Kingdom" : "State";
   const endpoint = `/api/v1/booking-admin/${encodeURIComponent(configuration.community.code)}`;
+  const visibleActivity = configuration.activity.filter(
+    (activity) => activityFilter === "all" || activity.category === activityFilter,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -500,6 +590,43 @@ export function BookingAdmin({ initialConfiguration }: {
           <strong>{statusLabel(date.windowStatus)}</strong>
         </li>)}</ul>
         : <p>No service dates are currently configured.</p>}
+    </section>
+
+    <section className="booking-admin-section booking-admin-activity" aria-labelledby="booking-admin-activity">
+      <div><h2 id="booking-admin-activity">Recent activity</h2>
+        <p>The latest booking and configuration changes for this {noun}.</p></div>
+      <label>Show
+        <select onChange={(event) => setActivityFilter(event.currentTarget.value as typeof activityFilter)}
+          value={activityFilter}>
+          <option value="all">All</option>
+          <option value="bookings">Bookings</option>
+          <option value="approvals">Approvals</option>
+          <option value="cancellations">Cancellations</option>
+          <option value="manager_actions">Manager actions</option>
+          <option value="configuration">Settings</option>
+        </select>
+      </label>
+      {configuration.activity.length === 0
+        ? <p>No recent booking activity yet.</p>
+        : visibleActivity.length === 0
+          ? <p>No recent activity matches this filter.</p>
+          : <div className="manager-table-scroll" role="region" tabIndex={0}>
+            <table className="manager-table">
+              <thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Player</th><th>Details</th></tr></thead>
+              <tbody>{visibleActivity.map((activity, index) => <tr
+                key={`${activity.createdAt}:${activity.action}:${index}`}>
+                <td><time dateTime={activity.createdAt}>{displayUtcInstant(activity.createdAt)}</time></td>
+                <td>{activityActorLabel(activity)}
+                  {activity.actorDiscordUserId ? <small className="manager-audit-id">
+                    Discord ID: {activity.actorDiscordUserId}</small> : null}</td>
+                <td>{activityActionLabel(activity)}</td>
+                <td>{activity.playerName ?? "—"}
+                  {activity.playerId ? <small className="manager-audit-id">
+                    Player ID: {activity.playerId}</small> : null}</td>
+                <td>{activityDetails(activity)}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>}
     </section>
   </article>;
 }

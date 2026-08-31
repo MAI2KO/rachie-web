@@ -28,7 +28,8 @@ class BookingAdminSession {
       [this.gameProfile, communityId],
     )).rows[0] ?? null;
     if (!community || community.status !== "active") return null;
-    const [services, settings, windows, dates, guestLinks, guilds, scheduleOverrides, guildLinkRequests] = await Promise.all([
+    const [services, settings, windows, dates, guestLinks, guilds, scheduleOverrides,
+      guildLinkRequests, activity] = await Promise.all([
       this.client.query(
         `SELECT service.service_code,service.display_label,service.sort_order,
                 COALESCE(community_service.enabled,service.active) AS enabled
@@ -103,6 +104,7 @@ class BookingAdminSession {
           ORDER BY requested_at,id`,
         [this.gameProfile, communityId],
       ),
+      this.listRecentActivity(communityId, 100),
     ]);
     return {
       community,
@@ -114,7 +116,79 @@ class BookingAdminSession {
       guilds: guilds.rows,
       scheduleOverrides: scheduleOverrides.rows,
       guildLinkRequests: guildLinkRequests.rows,
+      activity,
     };
+  }
+
+  async listRecentActivity(communityId, limit) {
+    const result = await this.client.query(
+      `SELECT activity.* FROM (
+         SELECT event.id,event.action,'approvals'::text AS category,
+                request.in_game_name_snapshot AS player_name,
+                request.player_id_snapshot AS player_id,
+                event.acting_discord_user_id AS actor_discord_user_id,
+                event.acting_discord_display_name AS actor_display_name,
+                request.service_code,event.previous_state,event.resulting_state,
+                NULL::text AS previous_time,request.display_time_label_snapshot AS new_time,
+                request.booking_date::text AS booking_date,NULL::text AS setting_section,
+                NULL::text AS requirement_code,NULL::text AS enabled,
+                NULL::text AS guild_name,NULL::text AS cycle_index,event.created_at
+           FROM booking_approval_events AS event
+           JOIN booking_approval_requests AS request
+             ON request.game_profile=event.game_profile AND request.id=event.request_id
+          WHERE event.game_profile=$1 AND event.community_id=$2
+         UNION ALL
+         SELECT event.id,event.event_type AS action,
+                CASE
+                  WHEN event.event_type LIKE '%cancel%' THEN 'cancellations'
+                  WHEN event.event_type IN ('booking_created','booking_rescheduled',
+                    'manager_booking_rescheduled','manager_manual_booking') THEN 'bookings'
+                  WHEN event.event_type='booking_admin_updated'
+                    OR event.event_type LIKE 'booking_cycle_override_%'
+                    OR event.event_type LIKE 'guest_link_%' THEN 'configuration'
+                  ELSE 'manager_actions'
+                END AS category,
+                COALESCE(booking.in_game_name_snapshot,event.after_data->>'playerName',
+                  event.after_data#>>'{participant,inGameName}') AS player_name,
+                COALESCE(booking.player_id_snapshot,event.after_data->>'playerId',
+                  event.after_data#>>'{participant,playerId}') AS player_id,
+                event.actor_id AS actor_discord_user_id,
+                COALESCE(event.after_data->>'actorDisplayName',identity.global_name,
+                  identity.username) AS actor_display_name,
+                COALESCE(booking.service_code,event.after_data->>'serviceCode') AS service_code,
+                event.before_data->>'status' AS previous_state,
+                CASE event.event_type
+                  WHEN 'manager_booking_rescheduled' THEN 'rescheduled'
+                  WHEN 'booking_rescheduled' THEN 'rescheduled'
+                  WHEN 'manager_booking_cancelled' THEN 'cancelled'
+                  WHEN 'booking_cancelled' THEN 'cancelled'
+                  ELSE COALESCE(event.after_data->>'status',event.event_type)
+                END AS resulting_state,
+                event.before_data->>'displayTime' AS previous_time,
+                COALESCE(event.after_data->>'displayTime',
+                  CASE WHEN event.event_type IN ('booking_created','manager_manual_booking')
+                    THEN booking.display_time_label_snapshot END) AS new_time,
+                COALESCE(booking.booking_date::text,event.after_data->>'date',
+                  event.before_data->>'date') AS booking_date,
+                event.after_data->>'section' AS setting_section,
+                event.after_data->>'requirementCode' AS requirement_code,
+                event.after_data->>'enabled' AS enabled,
+                COALESCE(event.before_data->>'guildName',event.after_data->>'guildName') AS guild_name,
+                event.after_data->>'cycleIndex' AS cycle_index,event.created_at
+           FROM booking_change_events AS event
+           LEFT JOIN minister_bookings AS booking
+             ON event.aggregate_type='minister_booking'
+            AND booking.game_profile=event.game_profile AND booking.id=event.aggregate_id
+           LEFT JOIN website_discord_identities AS identity
+             ON identity.game_profile=event.game_profile
+            AND identity.discord_user_id=event.actor_id
+          WHERE event.game_profile=$1 AND event.community_id=$2
+       ) AS activity
+       ORDER BY activity.created_at DESC,activity.id DESC
+       LIMIT $3`,
+      [this.gameProfile, communityId, limit],
+    );
+    return result.rows;
   }
 
   async lockDiscordTopology(communityId) {

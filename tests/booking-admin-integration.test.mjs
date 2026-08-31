@@ -211,6 +211,14 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       "booking_cycle_override_removed",
       "guest_link_generate", "guest_link_revoke", "guest_link_rotate",
     ]);
+    const activity = (await service.read()).activity;
+    assert.equal(activity.length, 14);
+    assert.equal(activity.every((event) => event.actorDiscordUserId === managerContext.discordUserId), true);
+    assert.equal(activity.some((event) => event.action === "booking_admin_updated"
+      && event.category === "configuration"), true);
+    assert.equal(activity.some((event) => event.action === "guest_link_rotate"), true);
+    assert.equal(activity.every((event, index) => index === 0
+      || new Date(activity[index - 1].createdAt) >= new Date(event.createdAt)), true);
   } finally {
     await pool.end();
     await admin.query(`DROP SCHEMA ${schema} CASCADE`);

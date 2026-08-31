@@ -44,6 +44,7 @@ function snapshot() {
     guestLink: null,
     guilds: [],
     scheduleOverrides: [],
+    activity: [],
   };
 }
 
@@ -444,12 +445,60 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
   assert.match(ui, /current link cannot be shown again/);
   assert.match(ui, /Appointment types/); assert.match(ui, /Troop Training/);
   assert.match(ui, /Upcoming appointment dates/);
+  assert.match(ui, /<h2 id="booking-admin-activity">Recent activity<\/h2>/);
+  assert.match(ui, /No recent booking activity yet\./);
+  assert.match(ui, /Booked appointment/);
+  assert.match(ui, /Added booking manually/);
+  assert.match(ui, /Approved guest booking/); assert.match(ui, /Denied guest booking/);
+  assert.match(ui, /Rescheduled booking/); assert.match(ui, /Cancelled booking/);
+  assert.match(ui, /Discord ID:/); assert.match(ui, /Player ID:/);
+  assert.match(ui, /<option value="configuration">Settings<\/option>/);
   assert.doesNotMatch(ui, /Booking Admin v1|only a hash is stored|Resource requirement/);
   assert.doesNotMatch(ui, /create date|delete date|generate slot/i);
 });
 
 test("public admin model contains only display-safe configuration and linked guild choices", () => {
   const model = bookingAdminModel("wos", snapshot());
-  assert.doesNotMatch(JSON.stringify(model), /actor|audit|password|token|revoked_by|source_guild/i);
+  assert.doesNotMatch(JSON.stringify(model), /audit|password|token|revoked_by|source_guild/i);
+  assert.deepEqual(model.activity, []);
   assert.equal(bookingAdminModel("kingshot", snapshot()).automaticCycle, null);
+});
+
+test("Booking Admin activity preserves bounded event identity and display details", () => {
+  const source = snapshot();
+  source.activity = [{
+    action: "manager_manual_booking", category: "bookings", player_name: "Player One",
+    player_id: "987654", actor_discord_user_id: "111111111111111111",
+    actor_display_name: "Manager One", service_code: "construction",
+    previous_state: null, resulting_state: "manager_manual_booking", previous_time: null,
+    new_time: "19:30", booking_date: "2026-09-01", setting_section: null,
+    requirement_code: null, enabled: null, guild_name: null, cycle_index: null,
+    created_at: new Date("2026-09-01T12:00:00.000Z"),
+  }, {
+    action: "approved", category: "approvals", player_name: "Guest Player",
+    player_id: "123456", actor_discord_user_id: "222222222222222222",
+    actor_display_name: "Approver", service_code: "research", previous_state: "pending_approval",
+    resulting_state: "confirmed", previous_time: null, new_time: "18:30",
+    booking_date: "2026-09-02", setting_section: null, requirement_code: null,
+    enabled: null, guild_name: null, cycle_index: null,
+    created_at: new Date("2026-09-01T11:00:00.000Z"),
+  }];
+  const activity = bookingAdminModel("wos", source).activity;
+  assert.equal(activity[0].action, "manager_manual_booking");
+  assert.equal(activity[0].actorDiscordUserId, "111111111111111111");
+  assert.equal(activity[0].actorDisplayName, "Manager One");
+  assert.equal(activity[0].newTime, "19:30");
+  assert.equal(activity[1].action, "approved");
+  assert.equal(activity[1].playerId, "123456");
+});
+
+test("Booking Admin activity query is newest-first and hard-bounded to 100 rows", () => {
+  const repository = fs.readFileSync(
+    new URL("../server/booking-admin/repository-core.mjs", import.meta.url), "utf8",
+  );
+  assert.match(repository, /listRecentActivity\(communityId, 100\)/);
+  assert.match(repository, /ORDER BY activity\.created_at DESC,activity\.id DESC[\s\S]*LIMIT \$3/);
+  assert.match(repository, /booking_approval_events/);
+  assert.match(repository, /booking_change_events/);
+  assert.match(repository, /website_discord_identities/);
 });
