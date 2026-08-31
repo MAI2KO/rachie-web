@@ -148,9 +148,9 @@ restricted, but it is not intended to duplicate the registered-member experience
 1. Back up production PostgreSQL and record current Railway variables/domains.
 2. Run the full disposable-database acceptance harness above.
 3. From the exact website release, run `npm ci`, then run `npm run db:migrate`
-   with the migration-owner `DATABASE_URL`. This applies additive migrations
-   `0010_community_guild_link_requests.sql` and
-   `0011_manual_guest_link_notifications.sql`; deployed migration `0009` remains unchanged.
+   with the migration-owner `DATABASE_URL`. Production already has `0011`; this
+   applies additive migration `0012_state_guild_link_requests.sql` without editing
+   any deployed migration.
 4. As the migration owner, apply the documented runtime grants in
    `docs/staging-deployment.md`, including minimum request-table privileges.
 5. Deploy the website code with the runtime-role `DATABASE_URL` and verify

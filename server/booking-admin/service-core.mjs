@@ -233,7 +233,7 @@ export function createBookingAdminService({
     const request = (initial.guildLinkRequests ?? []).find((item) => item.id === change.requestId);
     if (!request) {
       throw new BookingAdminValidationError("guild_link_request_not_pending",
-        "That alliance Discord request is no longer pending.");
+        "That Discord link request is no longer pending.");
     }
     const active = initial.guilds.filter((guild) => guild.link_status === "active");
     const stateGuild = active.find((guild) => guild.guild_kind === "state");
@@ -256,15 +256,19 @@ export function createBookingAdminService({
       const locked = await session.lockGuildLinkRequest(communityId, change.requestId);
       if (!locked || locked.status !== "pending") {
         throw new BookingAdminValidationError("guild_link_request_not_pending",
-          "That alliance Discord request is no longer pending.");
+          "That Discord link request is no longer pending.");
       }
       if (change.action === "approve") {
-        const activation = await session.activateAllianceGuildLink({
+        const activation = await session.activateRequestedGuildLink({
           communityId, request: locked, actorId: actor.discordUserId,
         });
         if (activation.status === "conflict") {
           throw new BookingAdminValidationError("guild_link_conflict",
             "That Discord is already linked or classified elsewhere.");
+        }
+        if (activation.status === "state_conflict") {
+          throw new BookingAdminValidationError("state_guild_already_configured",
+            "This community already has a shared State/Kingdom Discord. Platform approval is required to replace it.");
         }
       }
       await session.decideGuildLinkRequest({ requestId: locked.id, decision,
@@ -273,9 +277,10 @@ export function createBookingAdminService({
         id: createId(), requestId: locked.id, communityId, decision,
         actorId: actor.discordUserId, correlationId: createId(),
         beforeData: { status: "pending", guildId: locked.requesting_discord_guild_id,
-          requestedByDiscordUserId: locked.requested_by_discord_user_id },
+          requestedByDiscordUserId: locked.requested_by_discord_user_id,
+          guildKind: locked.requested_guild_kind },
         afterData: { status: decision, guildId: locked.requesting_discord_guild_id,
-          guildKind: change.action === "approve" ? "alliance" : null },
+          guildKind: change.action === "approve" ? locked.requested_guild_kind : null },
       });
       const snapshot = await session.readSnapshot(communityId, community);
       if (!snapshot) throw new BookingAdminUnavailableError();

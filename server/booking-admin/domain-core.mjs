@@ -242,6 +242,7 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
         id: request.id,
         guildId: request.requesting_discord_guild_id,
         guildName: request.requesting_discord_guild_name,
+        kind: request.requested_guild_kind,
         alliance: request.alliance_abbreviation,
         requestedByDiscordUserId: request.requested_by_discord_user_id,
         requestedAt: new Date(request.requested_at).toISOString(),

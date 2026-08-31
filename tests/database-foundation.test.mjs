@@ -193,6 +193,7 @@ test("migration files are ordered and checksummed", async () => {
       { version: "0009", name: "access_overrides_points" },
       { version: "0010", name: "community_guild_link_requests" },
       { version: "0011", name: "manual_guest_link_notifications" },
+      { version: "0012", name: "state_guild_link_requests" },
     ],
   );
   assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));
@@ -383,4 +384,15 @@ test("manual guest-link manager notifications extend the durable queue without p
   assert.match(migration, /guest_share_link_id IS NOT NULL/);
   assert.match(migration, /recipient_discord_user_id IS NULL/);
   assert.doesNotMatch(migration, /CREATE TABLE|ADD COLUMN|DROP TABLE|TRUNCATE|ALTER COLUMN|SET NOT NULL/i);
+});
+
+test("State guild requests extend the existing queue without rewriting topology", () => {
+  const migration = fs.readFileSync(
+    path.join(migrationsDirectory, "0012_state_guild_link_requests.sql"), "utf8",
+  );
+  assert.match(migration, /ADD COLUMN requested_guild_kind text NOT NULL DEFAULT 'alliance'/);
+  assert.match(migration, /ALTER COLUMN alliance_abbreviation DROP NOT NULL/);
+  assert.match(migration, /requested_guild_kind IN \('state', 'alliance'\)/);
+  assert.match(migration, /requested_guild_kind = 'state' AND alliance_abbreviation IS NULL/);
+  assert.doesNotMatch(migration, /DROP TABLE|TRUNCATE|DELETE FROM|UPDATE community_guild_link_requests/i);
 });

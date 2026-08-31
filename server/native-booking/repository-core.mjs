@@ -37,7 +37,7 @@ class ProfileScopedBookingSession {
   async findCommunityForDiscordGuild(discordGuildId) {
     const result = await this.client.query(
       `SELECT c.game_profile, c.id, c.location_code, c.display_name,
-              c.status, c.bookings_open
+              c.status, c.bookings_open, guild.guild_kind
        FROM booking_discord_guilds AS guild
        JOIN booking_communities AS c
          ON c.game_profile = guild.game_profile
@@ -47,6 +47,16 @@ class ProfileScopedBookingSession {
       [this.gameProfile, discordGuildId],
     );
     return result.rows[0] ?? null;
+  }
+
+  async findActiveStateGuild(communityId) {
+    return (await this.client.query(
+      `SELECT discord_guild_id,discord_guild_name
+         FROM booking_discord_guilds
+        WHERE game_profile=$1 AND community_id=$2
+          AND guild_kind='state' AND link_status='active'`,
+      [this.gameProfile, communityId],
+    )).rows[0] ?? null;
   }
 
   async lockCommunitySetup(communityCode, discordGuildId) {
@@ -68,7 +78,7 @@ class ProfileScopedBookingSession {
 
   async findPendingCommunityGuildLinkRequest(communityId, discordGuildId) {
     return (await this.client.query(
-      `SELECT id,status FROM community_guild_link_requests
+      `SELECT id,status,requested_guild_kind FROM community_guild_link_requests
         WHERE game_profile=$1 AND community_id=$2 AND requesting_discord_guild_id=$3
           AND status='pending'`,
       [this.gameProfile, communityId, discordGuildId],
@@ -79,22 +89,25 @@ class ProfileScopedBookingSession {
     await this.client.query(
       `INSERT INTO community_guild_link_requests
          (game_profile,id,community_id,requesting_discord_guild_id,
-          requesting_discord_guild_name,alliance_abbreviation,requested_by_discord_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          requesting_discord_guild_name,requested_guild_kind,alliance_abbreviation,
+          requested_by_discord_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [this.gameProfile, input.id, input.communityId, input.discordGuildId,
-       input.discordGuildName, input.alliance, input.actorId],
+       input.discordGuildName, input.guildKind, input.alliance, input.actorId],
     );
   }
 
   async insertCommunityGuildLinkRequestAudit(input) {
+    const eventType = input.afterData.guildKind === "state"
+      ? "state_guild_link_requested" : "alliance_guild_link_requested";
     await this.client.query(
       `INSERT INTO booking_change_events
          (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,
           source,actor_type,actor_id,correlation_id,after_data)
-       VALUES ($1,$2,$3,'discord_guild_link_request',$4,'alliance_guild_link_requested',
-               'discord','discord_user',$5,$6,$7)`,
-      [this.gameProfile, input.id, input.communityId, input.requestId, input.actorId,
-       input.correlationId, input.afterData],
+       VALUES ($1,$2,$3,'discord_guild_link_request',$4,$5,
+               'discord','discord_user',$6,$7,$8)`,
+      [this.gameProfile, input.id, input.communityId, input.requestId, eventType,
+       input.actorId, input.correlationId, input.afterData],
     );
   }
 
@@ -135,32 +148,34 @@ class ProfileScopedBookingSession {
     );
   }
 
-  async linkDiscordGuild({ discordGuildId, communityId, discordGuildName, actorId }) {
+  async linkDiscordGuild({ discordGuildId, communityId, discordGuildName, actorId,
+    guildKind = "alliance" }) {
     const existing = await this.client.query(
-      `SELECT community_id FROM booking_discord_guilds
+      `SELECT community_id,guild_kind FROM booking_discord_guilds
         WHERE game_profile=$1 AND discord_guild_id=$2 FOR UPDATE`,
       [this.gameProfile, discordGuildId],
     );
-    if (existing.rows[0] && existing.rows[0].community_id !== communityId) {
+    if (existing.rows[0] && (existing.rows[0].community_id !== communityId
+        || existing.rows[0].guild_kind !== guildKind)) {
       return { status: "conflict" };
     }
     await this.client.query(
       `INSERT INTO booking_discord_guilds
          (game_profile,discord_guild_id,community_id,discord_guild_name,linked_by_actor_id,guild_kind)
-       VALUES ($1,$2,$3,$4,$5,'alliance')
+       VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (game_profile,discord_guild_id) DO UPDATE
          SET discord_guild_name=EXCLUDED.discord_guild_name,
              linked_by_actor_id=EXCLUDED.linked_by_actor_id,
-             link_status=CASE WHEN booking_discord_guilds.guild_kind='alliance'
+             link_status=CASE WHEN booking_discord_guilds.guild_kind=EXCLUDED.guild_kind
                               THEN 'active' ELSE booking_discord_guilds.link_status END,
-             revoked_at=CASE WHEN booking_discord_guilds.guild_kind='alliance'
+             revoked_at=CASE WHEN booking_discord_guilds.guild_kind=EXCLUDED.guild_kind
                              THEN NULL ELSE booking_discord_guilds.revoked_at END,
-             revoked_by_actor_id=CASE WHEN booking_discord_guilds.guild_kind='alliance'
+             revoked_by_actor_id=CASE WHEN booking_discord_guilds.guild_kind=EXCLUDED.guild_kind
                                       THEN NULL ELSE booking_discord_guilds.revoked_by_actor_id END,
-             revocation_reason=CASE WHEN booking_discord_guilds.guild_kind='alliance'
+             revocation_reason=CASE WHEN booking_discord_guilds.guild_kind=EXCLUDED.guild_kind
                                     THEN NULL ELSE booking_discord_guilds.revocation_reason END,
              updated_at=now()`,
-      [this.gameProfile, discordGuildId, communityId, discordGuildName, actorId],
+      [this.gameProfile, discordGuildId, communityId, discordGuildName, actorId, guildKind],
     );
     return { status: existing.rowCount ? "updated" : "created" };
   }

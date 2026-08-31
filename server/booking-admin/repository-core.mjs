@@ -98,7 +98,8 @@ class BookingAdminSession {
       ),
       this.client.query(
         `SELECT id,requesting_discord_guild_id,requesting_discord_guild_name,
-                alliance_abbreviation,requested_by_discord_user_id,requested_at
+                requested_guild_kind,alliance_abbreviation,
+                requested_by_discord_user_id,requested_at
            FROM community_guild_link_requests
           WHERE game_profile=$1 AND community_id=$2 AND status='pending'
           ORDER BY requested_at,id`,
@@ -204,32 +205,43 @@ class BookingAdminSession {
   async lockGuildLinkRequest(communityId, requestId) {
     return (await this.client.query(
       `SELECT id,community_id,requesting_discord_guild_id,requesting_discord_guild_name,
-              alliance_abbreviation,requested_by_discord_user_id,status,requested_at
+              requested_guild_kind,alliance_abbreviation,
+              requested_by_discord_user_id,status,requested_at
          FROM community_guild_link_requests
         WHERE game_profile=$1 AND community_id=$2 AND id=$3 FOR UPDATE`,
       [this.gameProfile, communityId, requestId],
     )).rows[0] ?? null;
   }
 
-  async activateAllianceGuildLink({ communityId, request, actorId }) {
+  async activateRequestedGuildLink({ communityId, request, actorId }) {
     const existing = (await this.client.query(
       `SELECT community_id,guild_kind FROM booking_discord_guilds
         WHERE game_profile=$1 AND discord_guild_id=$2 FOR UPDATE`,
       [this.gameProfile, request.requesting_discord_guild_id],
     )).rows[0] ?? null;
-    if (existing && (existing.community_id !== communityId || existing.guild_kind !== "alliance")) {
+    if (existing && (existing.community_id !== communityId
+        || existing.guild_kind !== request.requested_guild_kind)) {
       return { status: "conflict" };
+    }
+    if (request.requested_guild_kind === "state") {
+      const otherState = (await this.client.query(
+        `SELECT 1 FROM booking_discord_guilds
+          WHERE game_profile=$1 AND community_id=$2 AND guild_kind='state'
+            AND link_status='active' AND discord_guild_id<>$3`,
+        [this.gameProfile, communityId, request.requesting_discord_guild_id],
+      )).rowCount;
+      if (otherState) return { status: "state_conflict" };
     }
     await this.client.query(
       `INSERT INTO booking_discord_guilds
          (game_profile,discord_guild_id,community_id,discord_guild_name,linked_by_actor_id,guild_kind)
-       VALUES ($1,$2,$3,$4,$5,'alliance')
+       VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (game_profile,discord_guild_id) DO UPDATE
          SET discord_guild_name=EXCLUDED.discord_guild_name,
              linked_by_actor_id=EXCLUDED.linked_by_actor_id,link_status='active',
              revoked_at=NULL,revoked_by_actor_id=NULL,revocation_reason=NULL,updated_at=now()`,
       [this.gameProfile, request.requesting_discord_guild_id, communityId,
-       request.requesting_discord_guild_name, actorId],
+       request.requesting_discord_guild_name, actorId, request.requested_guild_kind],
     );
     return { status: existing ? "reactivated" : "created" };
   }
@@ -244,13 +256,14 @@ class BookingAdminSession {
   }
 
   async insertGuildLinkDecisionAudit(input) {
+    const eventType = `${input.beforeData.guildKind === "state" ? "state" : "alliance"}_guild_link_${input.decision}`;
     await this.client.query(
       `INSERT INTO booking_change_events
          (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,source,
           actor_type,actor_id,correlation_id,before_data,after_data)
        VALUES ($1,$2,$3,'discord_guild_link_request',$4,$5,'website','discord_user',$6,$7,$8,$9)`,
       [this.gameProfile, input.id, input.communityId, input.requestId,
-       `alliance_guild_link_${input.decision}`, input.actorId, input.correlationId,
+       eventType, input.actorId, input.correlationId,
        input.beforeData, input.afterData],
     );
   }

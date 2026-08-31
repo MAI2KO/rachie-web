@@ -264,7 +264,7 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
       });
       const setupInput = {
         communityCode: "8888", guildId: "777777777777777888",
-        guildName: "New Native State", alliance: "NEW",
+        guildName: "New Native State", guildKind: "alliance", alliance: "NEW",
         actorId: "999999999999999888", dryRun: false,
       };
       const created = await setup.reconcile(setupInput);
@@ -336,6 +336,32 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
       ));
       assert.deepEqual(decisions.rows.map(({ event_type }) => event_type),
         ["alliance_guild_link_approved", "alliance_guild_link_rejected"]);
+
+      const stateInput = { ...setupInput, communityCode: "7777",
+        guildId: "777777777777777704", guildName: "Shared State",
+        guildKind: "state", alliance: null };
+      assert.equal((await setup.reconcile(stateInput)).status,
+        "State Discord link approval requested");
+      const stateRequest = await withProfile(runtime, "wos", (client) => client.query(
+        `SELECT id,requested_guild_kind,alliance_abbreviation,status
+           FROM community_guild_link_requests
+          WHERE requesting_discord_guild_id=$1 AND status='pending'`, [stateInput.guildId],
+      ));
+      assert.deepEqual(stateRequest.rows[0], { id: stateRequest.rows[0].id,
+        requested_guild_kind: "state", alliance_abbreviation: null, status: "pending" });
+      await approval.decideGuildLinkRequest({ section: "guildLinkRequest", action: "approve",
+        requestId: stateRequest.rows[0].id, confirmed: true });
+      assert.equal((await setup.reconcile(stateInput)).status, "linked and reconciled");
+      const stateTopology = await withProfile(runtime, "wos", (client) => client.query(
+        `SELECT discord_guild_id,guild_kind FROM booking_discord_guilds
+          WHERE community_id=$1 AND link_status='active' ORDER BY discord_guild_id`,
+        [raceCommunity.id],
+      ));
+      assert.equal(stateTopology.rows.filter(({ guild_kind }) => guild_kind === "state").length, 1);
+      assert.equal(stateTopology.rows.filter(({ guild_kind }) => guild_kind === "alliance").length, 2);
+      const secondState = await setup.reconcile({ ...stateInput,
+        guildId: "777777777777777705", guildName: "Hostile replacement" });
+      assert.deepEqual(secondState, { error: "state_guild_already_configured" });
       assert.equal((await withProfile(runtime, "kingshot", (client) => client.query(
         "SELECT count(*)::int AS count FROM community_guild_link_requests",
       ))).rows[0].count, 0, "forced RLS isolates link requests by profile");

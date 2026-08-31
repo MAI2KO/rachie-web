@@ -340,6 +340,7 @@ function guildLinkDecisionRepository(guilds) {
     id: linkRequestId, community_id: communityId,
     requesting_discord_guild_id: "555555555555555555",
     requesting_discord_guild_name: "Alliance Five", alliance_abbreviation: "FIV",
+    requested_guild_kind: "alliance",
     requested_by_discord_user_id: "888888888888888888", status: "pending",
     requested_at: "2026-08-29T12:00:00.000Z",
   }];
@@ -352,9 +353,10 @@ function guildLinkDecisionRepository(guilds) {
     async lockGuildLinkRequest(_communityId, requestId) {
       return state.guildLinkRequests.find((request) => request.id === requestId) ?? null;
     },
-    async activateAllianceGuildLink({ request, actorId }) {
+    async activateRequestedGuildLink({ request, actorId }) {
       state.guilds.push({ discord_guild_id: request.requesting_discord_guild_id,
-        discord_guild_name: request.requesting_discord_guild_name, guild_kind: "alliance",
+        discord_guild_name: request.requesting_discord_guild_name,
+        guild_kind: request.requested_guild_kind,
         link_status: "active", linked_by_actor_id: actorId });
       return { status: "created" };
     },
@@ -392,6 +394,20 @@ test("State ownership exclusively decides pending alliance links when State is c
     }).decideGuildLinkRequest({ section: "guildLinkRequest", action: "approve",
       requestId: linkRequestId, confirmed: true }), BookingAdminGuildLinkDecisionDeniedError);
   }
+});
+
+test("without State, an active alliance owner can approve an explicit State request", async () => {
+  const repository = guildLinkDecisionRepository([allianceOne]);
+  repository.state.guildLinkRequests[0].requested_guild_kind = "state";
+  repository.state.guildLinkRequests[0].alliance_abbreviation = null;
+  const result = await createBookingAdminService({
+    gameProfile: "wos", communityId, managerContext: manager, repository,
+    verifyGuildOwner: ownerVerifier([allianceOne.discord_guild_id]),
+  }).decideGuildLinkRequest({ section: "guildLinkRequest", action: "approve",
+    requestId: linkRequestId, confirmed: true });
+  assert.equal(result.guildLinkRequest.status, "approved");
+  assert.equal(repository.state.guilds.at(-1).guild_kind, "state");
+  assert.equal(repository.audits[0].afterData.guildKind, "state");
 });
 
 test("without State, an existing active alliance owner may approve or reject another alliance", async () => {

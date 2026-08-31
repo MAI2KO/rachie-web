@@ -48,7 +48,8 @@ type BookingAdminConfiguration = {
       readonly id: string;
       readonly guildId: string;
       readonly guildName: string;
-      readonly alliance: string;
+      readonly kind: "state" | "alliance";
+      readonly alliance: string | null;
       readonly requestedByDiscordUserId: string;
       readonly requestedAt: string;
       readonly canDecide: boolean;
@@ -526,8 +527,14 @@ export function BookingAdmin({ initialConfiguration }: {
         <div className="booking-admin-settings-list">
           {configuration.discordAccess.pendingRequests.map((request) =>
             <div className="booking-admin-setting" key={request.id}>
-              <div><strong>{request.guildName} ({request.alliance})</strong>
-                <span>Requested {displayUtcInstant(request.requestedAt)}.</span>
+              <div><strong>{request.kind === "state"
+                ? `${request.guildName} wants to become the shared ${noun} Discord for ${noun} ${configuration.community.code}.`
+                : `${request.alliance} alliance wants to connect ${request.guildName} to ${noun} ${configuration.community.code}.`}</strong>
+                <span>Requested type: {request.kind === "state" ? `${noun} Discord` : "Alliance Discord"}.</span>
+                <span>Requested by Discord user {request.requestedByDiscordUserId} on {displayUtcInstant(request.requestedAt)}.</span>
+                <span>{request.kind === "state"
+                  ? `Approval links only this server as the shared ${noun} Discord.`
+                  : "Approval links only this server as an alliance Discord."}</span>
                 {!request.canDecide ? <span>Only an eligible Discord owner can decide this request.</span> : null}
               </div>
               <div className="booking-admin-actions">

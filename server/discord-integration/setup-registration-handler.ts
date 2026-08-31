@@ -32,9 +32,12 @@ export async function handleDiscordCommunitySetup(request: Request) {
     const discordUserId = String(body.discordUserId ?? "");
     const communityCode = String(body.communityCode ?? "");
     const guildName = text(body.guildName, 100);
+    const guildKind = body.guildKind === "state" || body.guildKind === "alliance"
+      ? body.guildKind : null;
     const alliance = String(body.allianceAbbreviation ?? "").trim().toUpperCase();
     if (!SNOWFLAKE.test(guildId) || !SNOWFLAKE.test(discordUserId)
-        || !COMMUNITY.test(communityCode) || !guildName || !ALLIANCE.test(alliance)
+        || !COMMUNITY.test(communityCode) || !guildName || !guildKind
+        || (guildKind === "alliance" ? !ALLIANCE.test(alliance) : alliance !== "")
         || typeof body.dryRun !== "boolean") throw new TypeError("invalid_setup");
     const repository = createNativeBookingRepository(scope.profile);
     if (!repository) throw new Error("booking_database_unavailable");
@@ -45,7 +48,7 @@ export async function handleDiscordCommunitySetup(request: Request) {
       communityCode,
       guildId,
       guildName,
-      alliance,
+      guildKind, alliance: guildKind === "alliance" ? alliance : null,
       actorId: discordUserId,
       dryRun: body.dryRun,
     });
@@ -54,10 +57,14 @@ export async function handleDiscordCommunitySetup(request: Request) {
         return json({ ok: false, code: result.error,
           error: "Automatic Kingshot booking-cycle defaults are not configured yet." }, 409);
       }
-      const message = result.error === "community_claim_conflict"
+      const message = result.error === "state_guild_already_configured"
+        ? `This community already has a shared ${scope.profile === "wos" ? "State" : "Kingdom"} Discord. Platform approval is required to replace it.`
+        : result.error === "community_claim_conflict"
         ? "That community is already linked. Platform approval is required before adding another Discord server."
         : result.error === "community_inactive" ? "Native booking community is inactive."
-          : "Discord server is linked to another community.";
+          : result.error === "guild_kind_conflict" || result.error === "guild_request_kind_conflict"
+            ? "Discord server is already linked or pending with a different topology type."
+            : "Discord server is linked to another community.";
       return json({ ok: false, code: result.error, error: message }, 409);
     }
     return json({ ok: true, ...result });

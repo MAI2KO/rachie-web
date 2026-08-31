@@ -51,6 +51,11 @@ existing booking-open setup for the exact profile/community and the same owner,
 Administrator, and configured bot-manager-role rules, with users deduplicated
 across alliance guilds.
 
+Migration `0012` adds an explicit `state`/`alliance` kind to pending Discord
+topology requests. State requests carry no alliance abbreviation, remain subject
+to the same one-pending-request-per-requesting-guild constraint, and are approved
+only from the trusted existing community side.
+
 ## Manager discovery and buttons
 
 The bot fetches current members of every Discord guild linked to the community. It selects the guild owner, members whose current permissions include Administrator, and members holding that guild's configured `bot_manager_role_id`, then deduplicates Discord users across guilds. Successfully sent copies are recorded in `booking_approval_discord_messages`.

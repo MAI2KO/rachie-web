@@ -4,13 +4,23 @@ import test from "node:test";
 import { createDiscordCommunitySetupService } from "../server/discord-integration/community-setup-service-core.mjs";
 
 function fixture(gameProfile = "wos") {
-  const state = { communities: new Map(), links: new Map(), requests: [], creates: 0, audits: [] };
+  const state = { communities: new Map(), links: new Map(), linkKinds: new Map(),
+    requests: [], creates: 0, audits: [] };
   const session = {
     async lockCommunitySetup() {},
     async findCommunityByLocationCode(code) { return state.communities.get(code) ?? null; },
     async findCommunityForDiscordGuild(guildId) {
       const code = state.links.get(guildId);
-      return code ? state.communities.get(code) ?? null : null;
+      const community = code ? state.communities.get(code) ?? null : null;
+      return community ? { ...community, guild_kind: state.linkKinds.get(guildId) ?? "alliance" } : null;
+    },
+    async findActiveStateGuild(communityId) {
+      for (const [guildId, code] of state.links) {
+        if (state.communities.get(code)?.id === communityId && state.linkKinds.get(guildId) === "state") {
+          return { discord_guild_id: guildId, discord_guild_name: "State guild" };
+        }
+      }
+      return null;
     },
     async countActiveCommunityGuilds(communityId) {
       return [...state.links.values()].filter((code) =>
@@ -21,7 +31,7 @@ function fixture(gameProfile = "wos") {
         && request.discordGuildId === guildId && request.status === "pending") ?? null;
     },
     async insertCommunityGuildLinkRequest(input) {
-      state.requests.push({ ...input, status: "pending" });
+      state.requests.push({ ...input, requested_guild_kind: input.guildKind, status: "pending" });
     },
     async insertCommunityGuildLinkRequestAudit(input) { state.audits.push(input); },
     async createWosCommunityDefaults({ id, locationCode, displayName }) {
@@ -38,11 +48,12 @@ function fixture(gameProfile = "wos") {
       return community;
     },
     async insertCommunitySetupAudit(input) { state.audits.push(input); },
-    async linkDiscordGuild({ discordGuildId, communityId }) {
+    async linkDiscordGuild({ discordGuildId, communityId, guildKind }) {
       const existingCode = state.links.get(discordGuildId);
       const community = [...state.communities.values()].find((row) => row.id === communityId);
       if (existingCode && existingCode !== community?.location_code) return { status: "conflict" };
       state.links.set(discordGuildId, community.location_code);
+      state.linkKinds.set(discordGuildId, guildKind);
       return { status: existingCode ? "updated" : "created" };
     },
   };
@@ -59,6 +70,7 @@ const input = Object.freeze({
   communityCode: "9999",
   guildId: "700000000000000001",
   guildName: "HoboswithCandy",
+  guildKind: "alliance",
   alliance: "HWC",
   actorId: "700000000000000002",
 });
@@ -75,6 +87,7 @@ test("WOS setup preview is read-only and apply is creation-idempotent", async ()
     status: "ready to create native community",
     bookingsOpen: false,
     created: true,
+    guildKind: "alliance",
   });
   assert.equal(state.creates, 0);
   assert.equal(state.links.size, 0);
@@ -89,6 +102,46 @@ test("WOS setup preview is read-only and apply is creation-idempotent", async ()
   assert.equal(state.creates, 1);
   assert.equal(state.audits.length, 1);
   assert.equal(state.audits[0].actorId, input.actorId);
+});
+
+test("State setup has no alliance identity and existing alliances require trusted approval", async () => {
+  const { state, repository } = fixture();
+  const service = createDiscordCommunitySetupService({ gameProfile: "wos", repository,
+    createId: (() => { let id = 0; return () => `state-id-${++id}`; })() });
+  const stateInput = { ...input, guildId: "700000000000000010", guildKind: "state",
+    alliance: null };
+
+  const created = await service.reconcile({ ...stateInput, communityCode: "8888", dryRun: false });
+  assert.equal(created.status, "native community created and linked");
+  assert.equal(state.linkKinds.get(stateInput.guildId), "state");
+  assert.equal(state.audits[0].afterData.allianceAbbreviation, null);
+
+  state.communities.set("9999", { id: "community-nine", location_code: "9999",
+    display_name: "Nine", status: "active", bookings_open: false });
+  state.links.set("700000000000000099", "9999");
+  state.linkKinds.set("700000000000000099", "alliance");
+  const requested = await service.reconcile({ ...stateInput,
+    guildId: "700000000000000011", dryRun: false });
+  assert.equal(requested.status, "State Discord link approval requested");
+  assert.equal(state.requests.at(-1).guildKind, "state");
+  assert.equal(state.requests.at(-1).alliance, null);
+});
+
+test("an existing shared State Discord is idempotent and a second State is blocked", async () => {
+  const { state, repository } = fixture();
+  state.communities.set("9999", { id: "community-nine", location_code: "9999",
+    display_name: "Nine", status: "active", bookings_open: false });
+  state.links.set(input.guildId, "9999");
+  state.linkKinds.set(input.guildId, "state");
+  const service = createDiscordCommunitySetupService({ gameProfile: "wos", repository });
+  const stateInput = { ...input, guildKind: "state", alliance: null };
+  assert.equal((await service.reconcile({ ...stateInput, dryRun: false })).status,
+    "linked and reconciled");
+  assert.deepEqual(await service.reconcile({ ...stateInput,
+    guildId: "700000000000000003", dryRun: false }),
+  { error: "state_guild_already_configured" });
+  assert.deepEqual(await service.reconcile({ ...input, dryRun: false }),
+  { error: "guild_kind_conflict" });
 });
 
 test("setup rejects cross-community conflicts and requests approval for an additional alliance", async () => {
