@@ -2,6 +2,7 @@ import {
   automaticBookingUuid,
   automaticWosCyclesToReconcile,
   automaticWosCycleStatus,
+  resolveWosBookingCycleWindow,
 } from "./domain-core.mjs";
 import { automaticWindowGuestTokenRecord } from "./announcement-core.mjs";
 
@@ -37,8 +38,14 @@ async function transaction(pool, work) {
 
 async function listCommunities(pool) {
   return transaction(pool, async (client) => (await client.query(
-    `SELECT id,location_code FROM booking_communities
-      WHERE game_profile=$1 AND status='active' ORDER BY id`,
+    `SELECT community.id,community.location_code,
+            defaults.open_minute_utc,defaults.close_offset_minutes
+       FROM booking_communities AS community
+       LEFT JOIN booking_community_window_defaults AS defaults
+         ON defaults.game_profile=community.game_profile
+        AND defaults.community_id=community.id
+      WHERE community.game_profile=$1 AND community.status='active'
+      ORDER BY community.id`,
     [PROFILE],
   )).rows);
 }
@@ -67,18 +74,23 @@ async function findCycleWindow(client, communityId, cycle) {
   return result.rows[0]?.id ?? null;
 }
 
-async function effectiveCycleForCommunity(client, communityId, cycle) {
+async function effectiveCycleForCommunity(client, community, cycle) {
+  const recurring = community.open_minute_utc == null ? null : {
+    openMinuteUtc: Number(community.open_minute_utc),
+    closeOffsetMinutes: Number(community.close_offset_minutes),
+  };
+  const recurringCycle = resolveWosBookingCycleWindow(cycle, recurring);
   const override = (await client.query(
     `SELECT opens_at,closes_at
        FROM booking_cycle_schedule_overrides
       WHERE game_profile=$1 AND community_id=$2 AND cycle_index=$3`,
-    [PROFILE, communityId, cycle.index],
+    [PROFILE, community.id, cycle.index],
   )).rows[0];
   return override ? Object.freeze({
-    ...cycle,
+    ...recurringCycle,
     opensAt: new Date(override.opens_at).toISOString(),
     closesAt: new Date(override.closes_at).toISOString(),
-  }) : cycle;
+  }) : recurringCycle;
 }
 
 async function latestSlotTemplate(client, communityId, serviceCode, beforeDate) {
@@ -278,7 +290,7 @@ export async function reconcileAutomaticWosBookingCycles({
       );
       const reconciled = [];
       for (const cycle of cycles) {
-        const effectiveCycle = await effectiveCycleForCommunity(client, community.id, cycle);
+        const effectiveCycle = await effectiveCycleForCommunity(client, community, cycle);
         reconciled.push(await reconcileCycle(
           client, community, effectiveCycle, now, guestTokenSecret,
         ));

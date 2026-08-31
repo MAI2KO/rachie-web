@@ -167,6 +167,7 @@ GRANT SELECT ON
   booking_community_services,
   appointment_slots, booking_slot_blocks, booking_guest_share_links,
   community_access_grants, booking_cycle_schedule_overrides,
+  booking_community_window_defaults,
   player_points_ledger, community_points_ledger,
   community_guild_link_requests
 TO rachie_peggie_runtime;
@@ -205,6 +206,9 @@ GRANT UPDATE (
 GRANT INSERT, DELETE ON booking_cycle_schedule_overrides TO rachie_peggie_runtime;
 GRANT UPDATE (opens_at, closes_at, updated_by_actor_id, updated_at)
 ON booking_cycle_schedule_overrides TO rachie_peggie_runtime;
+GRANT INSERT ON booking_community_window_defaults TO rachie_peggie_runtime;
+GRANT UPDATE (open_minute_utc, close_offset_minutes, updated_by_actor_id, updated_at)
+ON booking_community_window_defaults TO rachie_peggie_runtime;
 GRANT SELECT, INSERT ON player_points_ledger, community_points_ledger
 TO rachie_peggie_runtime;
 GRANT INSERT ON community_guild_link_requests TO rachie_peggie_runtime;
@@ -345,6 +349,7 @@ ledger insert is transactional.
 | `0010` | `community_guild_link_requests` | `7920fefc9b498d4b7a01ef0840acbd0fa2ccf350c6a104ab402155b88f5780f3` |
 | `0011` | `manual_guest_link_notifications` | `1fe4b696cc9548b146a31477b7d8dad685a1efa9ab64d5080e4d352a2329d52b` |
 | `0012` | `state_guild_link_requests` | `ea2518045766a3cccf6ee25cf610d161d2d19b3f65ccfb99d9254603b656a01c` |
+| `0013` | `community_booking_window_defaults` | `5ff1fbecdae54338d523ceb09a2c071149dd541732c5ecfb2fded41fb66e7ee8` |
 
 Reruns are safe through the ledger. Individual SQL files are not standalone
 idempotent and must never be manually rerun or edited after application.
@@ -355,7 +360,7 @@ Staging procedure:
 2. From the exact release commit, run `npm ci`.
 3. Run `npm run db:migrate` through the release job with its direct private
    migration-role `DATABASE_URL`, without echoing it.
-4. Confirm `app_schema_migrations` contains exactly `0001`–`0012` with the hashes
+4. Confirm `app_schema_migrations` contains exactly `0001`–`0013` with the hashes
    above.
 5. Apply runtime grants, then validate `rolsuper=false`, `rolbypassrls=false` and
    forced-RLS integration tests.

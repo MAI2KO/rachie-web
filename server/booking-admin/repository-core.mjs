@@ -29,7 +29,7 @@ class BookingAdminSession {
     )).rows[0] ?? null;
     if (!community || community.status !== "active") return null;
     const [services, settings, windows, dates, guestLinks, guilds, scheduleOverrides,
-      guildLinkRequests, activity] = await Promise.all([
+      recurringDefaults, guildLinkRequests, activity] = await Promise.all([
       this.client.query(
         `SELECT service.service_code,service.display_label,service.sort_order,
                 COALESCE(community_service.enabled,service.active) AS enabled
@@ -97,6 +97,12 @@ class BookingAdminSession {
         [this.gameProfile, communityId],
       ),
       this.client.query(
+        `SELECT open_minute_utc,close_offset_minutes,created_at,updated_at
+           FROM booking_community_window_defaults
+          WHERE game_profile=$1 AND community_id=$2`,
+        [this.gameProfile, communityId],
+      ),
+      this.client.query(
         `SELECT id,requesting_discord_guild_id,requesting_discord_guild_name,
                 requested_guild_kind,alliance_abbreviation,
                 requested_by_discord_user_id,requested_at
@@ -116,6 +122,7 @@ class BookingAdminSession {
       guestLink: guestLinks.rows[0] ?? null,
       guilds: guilds.rows,
       scheduleOverrides: scheduleOverrides.rows,
+      recurringDefault: recurringDefaults.rows[0] ?? null,
       guildLinkRequests: guildLinkRequests.rows,
       activity,
     };
@@ -146,6 +153,7 @@ class BookingAdminSession {
                     'manager_booking_rescheduled','manager_manual_booking') THEN 'bookings'
                   WHEN event.event_type='booking_admin_updated'
                     OR event.event_type LIKE 'booking_cycle_override_%'
+                    OR event.event_type LIKE 'booking_recurring_window_default_%'
                     OR event.event_type LIKE 'guest_link_%' THEN 'configuration'
                   ELSE 'manager_actions'
                 END AS category,
@@ -360,6 +368,33 @@ class BookingAdminSession {
          (game_profile,id,community_id,aggregate_type,event_type,source,actor_type,
           actor_id,correlation_id,before_data,after_data)
        VALUES ($1,$2,$3,'booking_cycle_schedule',$4,'website','discord_user',$5,$6,$7,$8)`,
+      [this.gameProfile, input.id, input.communityId, input.eventType, input.actorId,
+       input.correlationId, input.beforeData, input.afterData],
+    );
+  }
+
+  async upsertRecurringWindowDefault({ communityId, openMinuteUtc, closeOffsetMinutes, actorId }) {
+    return (await this.client.query(
+      `INSERT INTO booking_community_window_defaults
+         (game_profile,community_id,open_minute_utc,close_offset_minutes,
+          created_by_actor_id,updated_by_actor_id)
+       VALUES ($1,$2,$3,$4,$5,$5)
+       ON CONFLICT (game_profile,community_id) DO UPDATE
+         SET open_minute_utc=EXCLUDED.open_minute_utc,
+             close_offset_minutes=EXCLUDED.close_offset_minutes,
+             updated_by_actor_id=EXCLUDED.updated_by_actor_id,updated_at=now()
+       RETURNING open_minute_utc,close_offset_minutes`,
+      [this.gameProfile, communityId, openMinuteUtc, closeOffsetMinutes, actorId],
+    )).rows[0];
+  }
+
+  async insertRecurringWindowDefaultAudit(input) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,event_type,source,actor_type,
+          actor_id,correlation_id,before_data,after_data)
+       VALUES ($1,$2,$3,'booking_community_window_default',$4,'website','discord_user',
+               $5,$6,$7,$8)`,
       [this.gameProfile, input.id, input.communityId, input.eventType, input.actorId,
        input.correlationId, input.beforeData, input.afterData],
     );

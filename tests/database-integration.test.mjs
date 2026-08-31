@@ -135,6 +135,7 @@ test(
             "booking_change_events",
             "booking_communities",
             "booking_community_services",
+            "booking_community_window_defaults",
             "booking_cycle_schedule_overrides",
             "booking_discord_guilds",
             "booking_discord_notifications",

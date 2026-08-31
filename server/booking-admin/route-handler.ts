@@ -113,6 +113,10 @@ export async function handleBookingAdminMutation(request: Request, communityCode
         && (body as { section?: unknown }).section === "cycleSchedule") {
       return json({ ok: true, ...(await authorized.service.updateCycleSchedule(body)) });
     }
+    if (body && typeof body === "object" && !Array.isArray(body)
+        && (body as { section?: unknown }).section === "recurringWindowDefault") {
+      return json({ ok: true, ...(await authorized.service.updateRecurringWindowDefault(body)) });
+    }
     return json({ ok: true, configuration: await authorized.service.update(body) });
   } catch (error) {
     return bookingAdminError(error);

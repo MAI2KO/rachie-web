@@ -44,6 +44,7 @@ function snapshot() {
     guestLink: null,
     guilds: [],
     scheduleOverrides: [],
+    recurringDefault: null,
     activity: [],
   };
 }
@@ -85,6 +86,12 @@ function fakeRepository() {
       notifications.push({ ...input, status: "pending" });
     },
     async insertGuestLinkAudit(input) { audits.push(input); },
+    async upsertRecurringWindowDefault(input) {
+      state.recurringDefault = { open_minute_utc: input.openMinuteUtc,
+        close_offset_minutes: input.closeOffsetMinutes };
+      return state.recurringDefault;
+    },
+    async insertRecurringWindowDefaultAudit(input) { audits.push(input); },
   };
   return {
     gameProfile: "wos", state, audits, notifications,
@@ -499,6 +506,41 @@ test("cycle override validation is cycle-scoped, bounded, historical-safe, and e
   }), (error) => error.code === "historical_cycle");
 });
 
+test("recurring community window validates bounds and becomes the default without changing appointments", async () => {
+  assert.deepEqual(validateBookingAdminChange({ section: "recurringWindowDefault",
+    openMinuteUtc: 0, closeOffsetMinutes: (5 * 1440) + 1439 }), {
+    section: "recurringWindowDefault", openMinuteUtc: 0,
+    closeOffsetMinutes: (5 * 1440) + 1439,
+  });
+  for (const closeOffsetMinutes of [0, (14 * 1440) + 1]) {
+    assert.throws(() => validateBookingAdminChange({ section: "recurringWindowDefault",
+      openMinuteUtc: 0, closeOffsetMinutes }),
+    (error) => error.code === "invalid_recurring_window");
+  }
+  assert.doesNotThrow(() => validateBookingAdminChange({ section: "recurringWindowDefault",
+    openMinuteUtc: 60, closeOffsetMinutes: 60 + (14 * 1440) }));
+
+  const repository = fakeRepository();
+  const service = createBookingAdminService({ gameProfile: "wos", communityId,
+    managerContext: manager, repository, now: () => new Date("2026-08-26T12:00:00Z") });
+  const result = await service.updateRecurringWindowDefault({
+    section: "recurringWindowDefault", openMinuteUtc: 0,
+    closeOffsetMinutes: (5 * 1440) + 1439,
+  });
+  assert.deepEqual(result.configuration.defaultWindow, {
+    openMinuteUtc: 0, closeOffsetMinutes: 8639, source: "community",
+  });
+  assert.equal(result.configuration.automaticCycle.closesAt, "2026-09-07T23:59:00.000Z");
+  assert.deepEqual(result.configuration.automaticCycle.appointments.map(({ serviceCode, date }) => ({
+    serviceCode, date,
+  })), [
+    { serviceCode: "construction", date: "2026-09-07" },
+    { serviceCode: "research", date: "2026-09-08" },
+    { serviceCode: "troop", date: "2026-09-10" },
+  ]);
+  assert.equal(repository.audits.at(-1).eventType, "booking_recurring_window_default_created");
+});
+
 test("admin routes and UI reuse manager authorization and expose no destructive date controls", () => {
   const stateRoute = fs.readFileSync(new URL("../app/state/[communityCode]/admin/page.tsx", import.meta.url), "utf8");
   const kingdomRoute = fs.readFileSync(new URL("../app/kingdom/[communityCode]/admin/page.tsx", import.meta.url), "utf8");
@@ -520,6 +562,7 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
   assert.match(handler, /bookingAdminMutation/);
   assert.match(ui, /role="switch"/); assert.match(ui, /Member bookings/);
   assert.match(ui, /Booking enabled/); assert.match(ui, /Booking window/);
+  assert.match(ui, /Default booking window/); assert.match(ui, /Save default window/);
   assert.match(ui, /Save times/); assert.match(ui, /Use default times/);
   assert.match(ui, /Discord access/); assert.match(ui, /Unlink alliance/);
   assert.match(ui, /members may lose website access/);

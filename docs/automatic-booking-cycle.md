@@ -2,15 +2,21 @@
 
 The website reconciles Whiteout Survival booking cycles from the fixed
 `2026-08-05T00:00:00Z` historical anchor at exact 28-day intervals. Automated
-generation starts with the 2 September 2026 cycle. Every cycle opens Wednesday
-at 00:00 UTC, closes Sunday at 12:00 UTC, and assigns Construction, Research,
-and Troop appointments to the following Monday, Tuesday, and Thursday.
+generation starts with the 2 September 2026 cycle. The platform fallback opens
+Wednesday at 00:00 UTC and closes Sunday at 12:00 UTC. A community may store a
+recurring opening minute and closing offset from that same Wednesday anchor in
+`booking_community_window_defaults`; absence of a row preserves the fallback.
+Construction, Research, and Troop appointments remain fixed to the following
+Monday, Tuesday, and Thursday.
 
-Booking Admin can store one explicit `opens_at`/`closes_at` override for the
-displayed WOS cycle. It cannot edit service dates or a global schedule. An
+Booking Admin can store a community recurring default and one explicit
+`opens_at`/`closes_at` override for the displayed WOS cycle. It cannot edit
+service dates or a global schedule. A recurring close must be after opening and
+at most 14 days later. An
 override is bounded to the cycle's pre-appointment interval, cannot rewrite a
 closed cycle, and requires confirmation when the cycle is already open. The
-following cycle uses deterministic defaults unless it has its own row.
+following cycle uses the community recurring default, or the platform fallback
+when no community row exists, unless it has its own override row.
 
 At Node.js server startup and every minute thereafter, the reconciler ensures
 the current and next cycle exist for each active WOS community. It clones that
@@ -36,7 +42,8 @@ override. Reconciliation never changes it. Participant availability therefore
 requires both manager enablement and an automatically open window. Kingshot is
 not reconciled by this WOS-specific rule.
 
-Migrations `0008_booking_window_announcements.sql` and
-`0009_access_overrides_points.sql` are required. Deployment must refresh the documented runtime
+Migrations `0008_booking_window_announcements.sql`,
+`0009_access_overrides_points.sql`, and
+`0013_community_booking_window_defaults.sql` are required. Deployment must refresh the documented runtime
 role grants so the website can insert windows, service dates, and slots and can
 update only the reviewed booking-window lifecycle columns.

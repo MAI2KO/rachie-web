@@ -110,6 +110,23 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       serviceCode: "construction", serviceName: "Construction",
       date: "2026-08-30", windowStatus: "open",
     }]);
+    assert.deepEqual(initial.defaultWindow, {
+      openMinuteUtc: 0, closeOffsetMinutes: 6480, source: "system",
+    });
+    const recurring = await service.updateRecurringWindowDefault({
+      section: "recurringWindowDefault", openMinuteUtc: 0,
+      closeOffsetMinutes: (5 * 1440) + 1439,
+    });
+    assert.equal(recurring.configuration.automaticCycle.closesAt,
+      "2026-09-07T23:59:00.000Z");
+    const otherCommunityAdmin = createBookingAdminService({
+      gameProfile: "wos", communityId: otherCommunityId,
+      managerContext: { ...managerContext, authorizedCommunityId: otherCommunityId },
+      repository: adminRepository, now: () => new Date("2026-08-27T12:00:00.000Z"),
+    });
+    assert.deepEqual((await otherCommunityAdmin.read()).defaultWindow, {
+      openMinuteUtc: 0, closeOffsetMinutes: 6480, source: "system",
+    });
 
     const createdOverride = await service.updateCycleSchedule({
       section: "cycleSchedule", action: "override", cycleIndex: 1,
@@ -125,6 +142,14 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       confirmedOpenChange: false,
     });
     assert.equal(changedOverride.changed, true);
+    const changedRecurring = await service.updateRecurringWindowDefault({
+      section: "recurringWindowDefault", openMinuteUtc: 0,
+      closeOffsetMinutes: (5 * 1440) + (22 * 60),
+    });
+    assert.equal(changedRecurring.configuration.automaticCycle.opensAt,
+      "2026-09-01T17:00:00.000Z", "the explicit cycle override still wins");
+    assert.equal(changedRecurring.configuration.automaticCycle.closesAt,
+      "2026-09-06T19:00:00.000Z", "changing the recurring default preserves the override");
     const restored = await service.updateCycleSchedule({
       section: "cycleSchedule", action: "restore", cycleIndex: 1, confirmedOpenChange: false,
     });
@@ -232,16 +257,17 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       `SELECT event_type,actor_id FROM booking_change_events
         WHERE community_id=$1 ORDER BY created_at,id`, [sharedId],
     ));
-    assert.equal(audits.rows.length, 14);
+    assert.equal(audits.rows.length, 16);
     assert.equal(audits.rows.every((row) => row.actor_id === managerContext.discordUserId), true);
     assert.deepEqual([...new Set(audits.rows.map((row) => row.event_type))].sort(), [
       "booking_admin_updated",
       "booking_cycle_override_changed", "booking_cycle_override_created",
       "booking_cycle_override_removed",
+      "booking_recurring_window_default_changed", "booking_recurring_window_default_created",
       "guest_link_generate", "guest_link_revoke", "guest_link_rotate",
     ]);
     const activity = (await service.read()).activity;
-    assert.equal(activity.length, 14);
+    assert.equal(activity.length, 16);
     assert.equal(activity.every((event) => event.actorDiscordUserId === managerContext.discordUserId), true);
     assert.equal(activity.some((event) => event.action === "booking_admin_updated"
       && event.category === "configuration"), true);

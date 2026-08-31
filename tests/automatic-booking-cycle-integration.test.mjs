@@ -72,6 +72,13 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
          VALUES ('wos',$1,1,'2026-09-01T18:00:00Z','2026-09-06T18:00:00Z','manager','manager')`,
         [wosCommunityId],
       );
+      await client.query(
+        `INSERT INTO booking_community_window_defaults
+           (game_profile,community_id,open_minute_utc,close_offset_minutes,
+            created_by_actor_id,updated_by_actor_id)
+         VALUES ('wos',$1,0,$2,'manager','manager')`,
+        [wosCommunityId, (5 * 1440) + 1439],
+      );
       for (const [serviceCode, bookingDate] of [
         ["construction", "2026-08-10"], ["research", "2026-08-11"], ["troop", "2026-08-13"],
       ]) {
@@ -223,8 +230,8 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
     ));
     assert.deepEqual(nextCycle.rows, [{
       opens_at: new Date("2026-09-30T00:00:00.000Z"),
-      closes_at: new Date("2026-10-04T12:00:00.000Z"),
-    }], "the following cycle returns to its deterministic defaults");
+      closes_at: new Date("2026-10-05T23:59:00.000Z"),
+    }], "the following cycle uses the community recurring default");
 
     await withProfile(pool, "wos", (client) => client.query(
       "UPDATE booking_communities SET bookings_open=false WHERE id=$1", [wosCommunityId],
@@ -241,6 +248,17 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
     ));
     assert.equal(finalState.rows[0].windows, 5);
     assert.equal(finalState.rows[0].existing_bookings, 1);
+    const repeatedDefault = await withProfile(pool, "wos", (client) => client.query(
+      `SELECT opens_at,closes_at FROM booking_windows AS booking_window
+        WHERE community_id=$1 AND EXISTS (
+          SELECT 1 FROM booking_service_dates AS date
+           WHERE date.window_id=booking_window.id AND date.service_code='construction'
+             AND date.booking_date='2026-11-02')`, [wosCommunityId],
+    ));
+    assert.deepEqual(repeatedDefault.rows, [{
+      opens_at: new Date("2026-10-28T00:00:00.000Z"),
+      closes_at: new Date("2026-11-02T23:59:00.000Z"),
+    }]);
     const kingshotWindows = await withProfile(pool, "kingshot", (client) => client.query(
       "SELECT count(*)::int AS count FROM booking_windows WHERE community_id=$1",
       [kingshotCommunityId],

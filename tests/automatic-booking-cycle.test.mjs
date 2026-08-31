@@ -6,6 +6,7 @@ import {
   automaticWosCycleForDisplay,
   automaticWosCyclesToReconcile,
   automaticWosCycleStatus,
+  resolveWosBookingCycleWindow,
   wosBookingCycleAtIndex,
   wosBookingCycleIndexAtOrBefore,
 } from "../server/automatic-booking-cycle/domain-core.mjs";
@@ -40,6 +41,36 @@ test("cycles advance exactly 28 days across month and year boundaries", () => {
   });
   assert.equal(wosBookingCycleIndexAtOrBefore(new Date("2026-09-29T23:59:59.999Z")), 1);
   assert.equal(wosBookingCycleIndexAtOrBefore(new Date("2026-09-30T00:00:00.000Z")), 2);
+});
+
+test("community defaults repeat every 28 days without moving Minister service days", () => {
+  const recurring = { openMinuteUtc: 0, closeOffsetMinutes: (5 * 1440) + 1439 };
+  const first = resolveWosBookingCycleWindow(wosBookingCycleAtIndex(1), recurring);
+  const second = resolveWosBookingCycleWindow(wosBookingCycleAtIndex(2), recurring);
+  assert.equal(first.opensAt, "2026-09-02T00:00:00.000Z");
+  assert.equal(first.closesAt, "2026-09-07T23:59:00.000Z");
+  assert.equal(second.opensAt, "2026-09-30T00:00:00.000Z");
+  assert.equal(second.closesAt, "2026-10-05T23:59:00.000Z");
+  assert.deepEqual(first.dates, {
+    construction: "2026-09-07", research: "2026-09-08", troop: "2026-09-10",
+  });
+  assert.deepEqual(second.dates, {
+    construction: "2026-10-05", research: "2026-10-06", troop: "2026-10-08",
+  });
+  assert.equal(automaticWosCycleForDisplay(
+    new Date("2026-09-07T12:00:00.000Z"), recurring,
+  ).index, 1);
+});
+
+test("community default resolver rejects closed, inverted, and over-14-day windows", () => {
+  const cycle = wosBookingCycleAtIndex(1);
+  assert.throws(() => resolveWosBookingCycleWindow(cycle,
+    { openMinuteUtc: 60, closeOffsetMinutes: 60 }), /invalid/);
+  assert.throws(() => resolveWosBookingCycleWindow(cycle,
+    { openMinuteUtc: 60, closeOffsetMinutes: 60 + (14 * 1440) + 1 }), /invalid/);
+  assert.equal(resolveWosBookingCycleWindow(cycle,
+    { openMinuteUtc: 60, closeOffsetMinutes: 60 + (14 * 1440) }).closesAt,
+  "2026-09-16T01:00:00.000Z");
 });
 
 test("reconciliation candidates are deterministic current and future cycles", () => {

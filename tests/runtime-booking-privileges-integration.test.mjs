@@ -232,6 +232,10 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
         section: "requirement", serviceCode: "construction", requirementCode: "fc", enabled: true,
       })).services.find(({ code }) => code === "construction")
         .requirements.find(({ code }) => code === "fc").enabled, true);
+      assert.equal((await adminService.updateRecurringWindowDefault({
+        section: "recurringWindowDefault", openMinuteUtc: 0,
+        closeOffsetMinutes: (5 * 1440) + 1439,
+      })).configuration.defaultWindow.source, "community");
       const generated = await adminService.updateGuestLink({
         section: "guestLink", action: "generate",
       });

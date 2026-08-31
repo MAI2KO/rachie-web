@@ -194,6 +194,7 @@ test("migration files are ordered and checksummed", async () => {
       { version: "0010", name: "community_guild_link_requests" },
       { version: "0011", name: "manual_guest_link_notifications" },
       { version: "0012", name: "state_guild_link_requests" },
+      { version: "0013", name: "community_booking_window_defaults" },
     ],
   );
   assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));
@@ -361,6 +362,20 @@ test("access provenance, cycle overrides, and points migration is scoped and app
   assert.doesNotMatch(migration, /INSERT INTO community_points_ledger[\s\S]*SELECT/);
   assert.match(migration, /BEFORE UPDATE OR DELETE ON player_points_ledger/);
   assert.match(migration, /BEFORE UPDATE OR DELETE ON community_points_ledger/);
+});
+
+test("recurring booking-window defaults are additive, bounded, community-scoped, and forced-RLS", () => {
+  const migration = fs.readFileSync(
+    path.join(migrationsDirectory, "0013_community_booking_window_defaults.sql"), "utf8",
+  );
+  assert.match(migration, /CREATE TABLE booking_community_window_defaults/);
+  assert.match(migration, /PRIMARY KEY \(game_profile, community_id\)/);
+  assert.match(migration, /REFERENCES booking_communities \(game_profile, id\) ON DELETE CASCADE/);
+  assert.match(migration, /close_offset_minutes > open_minute_utc/);
+  assert.match(migration, /close_offset_minutes <= open_minute_utc \+ 20160/);
+  assert.match(migration, /ALTER TABLE booking_community_window_defaults FORCE ROW LEVEL SECURITY/);
+  assert.match(migration, /booking_community_window_defaults_profile_policy/);
+  assert.doesNotMatch(migration, /DROP TABLE|TRUNCATE|ALTER TABLE booking_communities/i);
 });
 
 test("community guild link requests are additive, profile-scoped, and concurrency-safe", () => {

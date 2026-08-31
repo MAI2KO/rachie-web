@@ -3,6 +3,8 @@ import { isKnownMinisterServiceCode } from "../native-booking/service-codes.mjs"
 import {
   automaticWosCycleForDisplay,
   automaticWosCycleStatus,
+  resolveWosBookingCycleWindow,
+  WOS_DEFAULT_WINDOW,
   wosBookingCycleAtIndex,
 } from "../automatic-booking-cycle/domain-core.mjs";
 
@@ -108,6 +110,18 @@ export function validateBookingAdminChange(value) {
     return Object.freeze({ section: "cycleSchedule", action: "restore",
       cycleIndex: value.cycleIndex, confirmedOpenChange: value.confirmedOpenChange });
   }
+  if (value.section === "recurringWindowDefault"
+      && exactKeys(value, ["section", "openMinuteUtc", "closeOffsetMinutes"])
+      && Number.isInteger(value.openMinuteUtc) && Number.isInteger(value.closeOffsetMinutes)) {
+    if (value.openMinuteUtc < 0 || value.openMinuteUtc > 1439
+        || value.closeOffsetMinutes <= value.openMinuteUtc
+        || value.closeOffsetMinutes > value.openMinuteUtc + (14 * 24 * 60)) {
+      throw new BookingAdminValidationError("invalid_recurring_window",
+        "Closing must be after opening and no more than 14 days later.");
+    }
+    return Object.freeze({ section: "recurringWindowDefault",
+      openMinuteUtc: value.openMinuteUtc, closeOffsetMinutes: value.closeOffsetMinutes });
+  }
   if (typeof value.enabled !== "boolean") throw new BookingAdminValidationError();
   if (value.section === "booking" && exactKeys(value, ["section", "enabled"])) {
     return Object.freeze({ section: "booking", enabled: value.enabled });
@@ -130,8 +144,11 @@ export function validateBookingAdminChange(value) {
   throw new BookingAdminValidationError();
 }
 
-export function validateCycleScheduleTiming(change, now = new Date(), existingOverride = null) {
-  const defaults = wosBookingCycleAtIndex(change.cycleIndex);
+export function validateCycleScheduleTiming(change, now = new Date(), existingOverride = null,
+  recurringDefault = null) {
+  const defaults = resolveWosBookingCycleWindow(
+    wosBookingCycleAtIndex(change.cycleIndex), recurringDefault,
+  );
   const targetEffective = existingOverride ? Object.freeze({
     ...defaults,
     opensAt: new Date(existingOverride.opens_at).toISOString(),
@@ -148,7 +165,8 @@ export function validateCycleScheduleTiming(change, now = new Date(), existingOv
   const closesAt = change.action === "restore" ? new Date(defaults.closesAt) : new Date(change.closesAt);
   const earliestOpen = new Date(new Date(defaults.opensAt).getTime() - (7 * 86_400_000));
   const firstAppointment = new Date(`${defaults.dates.construction}T00:00:00.000Z`);
-  if (!(opensAt < closesAt) || opensAt < earliestOpen || closesAt >= firstAppointment) {
+  if (!(opensAt < closesAt) || opensAt < earliestOpen
+      || (change.action !== "restore" && closesAt >= firstAppointment)) {
     throw new BookingAdminValidationError("invalid_schedule",
       "The override must open within seven days before the automatic opening and close before Construction begins.");
   }
@@ -171,14 +189,16 @@ export function validateCycleScheduleTiming(change, now = new Date(), existingOv
   return Object.freeze({ defaults, opensAt: opensAt.toISOString(), closesAt: closesAt.toISOString() });
 }
 
-export function effectiveWosCycleForDisplay(now, scheduleOverrides = []) {
-  const automatic = automaticWosCycleForDisplay(now);
+export function effectiveWosCycleForDisplay(now, scheduleOverrides = [], recurringDefault = null) {
+  const automatic = automaticWosCycleForDisplay(now, recurringDefault);
   const overrides = scheduleOverrides ?? [];
   const prior = automatic.index > 1 ? overrides.find(
     (override) => Number(override.cycle_index) === automatic.index - 1,
   ) : null;
   if (prior) {
-    const priorDefault = wosBookingCycleAtIndex(automatic.index - 1);
+    const priorDefault = resolveWosBookingCycleWindow(
+      wosBookingCycleAtIndex(automatic.index - 1), recurringDefault,
+    );
     const priorEffective = Object.freeze({
       ...priorDefault,
       opensAt: new Date(prior.opens_at).toISOString(),
@@ -206,8 +226,17 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
       enabled: Boolean(settings[BOOKING_ADMIN_REQUIREMENT_COLUMNS[service.service_code][code]]),
     }))),
   ]));
-  const automaticCycle = gameProfile === "wos" ? effectiveWosCycleForDisplay(now, scheduleOverrides) : null;
-  const automaticDefaults = automaticCycle ? wosBookingCycleAtIndex(automaticCycle.index) : null;
+  const recurringDefault = gameProfile === "wos" ? Object.freeze({
+    openMinuteUtc: Number(snapshot.recurringDefault?.open_minute_utc
+      ?? WOS_DEFAULT_WINDOW.openMinuteUtc),
+    closeOffsetMinutes: Number(snapshot.recurringDefault?.close_offset_minutes
+      ?? WOS_DEFAULT_WINDOW.closeOffsetMinutes),
+  }) : null;
+  const automaticCycle = gameProfile === "wos"
+    ? effectiveWosCycleForDisplay(now, scheduleOverrides, recurringDefault) : null;
+  const automaticDefaults = automaticCycle ? resolveWosBookingCycleWindow(
+    wosBookingCycleAtIndex(automaticCycle.index), recurringDefault,
+  ) : null;
   const scheduleOverride = automaticCycle ? scheduleOverrides.find(
     (override) => Number(override.cycle_index) === automaticCycle.index,
   ) : null;
@@ -261,6 +290,10 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
           || ownership.get("state") === true,
       }))),
     }),
+    defaultWindow: recurringDefault ? Object.freeze({
+      ...recurringDefault,
+      source: snapshot.recurringDefault ? "community" : "system",
+    }) : null,
     automaticCycle: effectiveCycle ? Object.freeze({
       cycleIndex: effectiveCycle.index,
       status: automaticWosCycleStatus(effectiveCycle, now),

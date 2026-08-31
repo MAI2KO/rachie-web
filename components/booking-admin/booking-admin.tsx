@@ -64,6 +64,11 @@ type BookingAdminConfiguration = {
       readonly canUnlink: boolean;
     }[];
   };
+  readonly defaultWindow: {
+    readonly openMinuteUtc: number;
+    readonly closeOffsetMinutes: number;
+    readonly source: "community" | "system";
+  } | null;
   readonly automaticCycle: {
     readonly cycleIndex: number;
     readonly status: "draft" | "open" | "closed";
@@ -133,6 +138,23 @@ function utcInputValue(instant: string) {
   return new Date(instant).toISOString().slice(0, 16);
 }
 
+function minuteOfDayValue(minutes: number) {
+  const normalized = Math.max(0, Math.min(1439, minutes));
+  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
+}
+
+function parseMinuteOfDay(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return (hours * 60) + minutes;
+}
+
+const CLOSE_DAY_LABELS = Object.freeze([
+  "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday",
+  "Wednesday (+1 week)", "Thursday (+1 week)", "Friday (+1 week)",
+  "Saturday (+1 week)", "Sunday (+1 week)", "Monday (+1 week)", "Tuesday (+1 week)",
+  "Wednesday (+2 weeks)",
+]);
+
 function activityActionLabel(activity: Activity) {
   if (activity.action === "booking_created") return "Booked appointment";
   if (activity.action === "manager_manual_booking") return "Added booking manually";
@@ -154,6 +176,9 @@ function activityActionLabel(activity: Activity) {
   if (activity.action === "alliance_guild_link_approved") return "Approved alliance Discord";
   if (activity.action === "alliance_guild_link_rejected") return "Rejected alliance Discord";
   if (activity.action.startsWith("booking_cycle_override_")) return "Changed booking window";
+  if (activity.action.startsWith("booking_recurring_window_default_")) {
+    return "Changed default booking window";
+  }
   return activity.action.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
 }
 
@@ -226,6 +251,18 @@ export function BookingAdmin({ initialConfiguration }: {
     initialConfiguration.automaticCycle ? utcInputValue(initialConfiguration.automaticCycle.closesAt) : "",
   );
   const [confirmOpenChange, setConfirmOpenChange] = useState(false);
+  const [defaultOpenTime, setDefaultOpenTime] = useState(
+    initialConfiguration.defaultWindow
+      ? minuteOfDayValue(initialConfiguration.defaultWindow.openMinuteUtc) : "00:00",
+  );
+  const [defaultCloseDay, setDefaultCloseDay] = useState(
+    initialConfiguration.defaultWindow
+      ? String(Math.floor(initialConfiguration.defaultWindow.closeOffsetMinutes / 1440)) : "4",
+  );
+  const [defaultCloseTime, setDefaultCloseTime] = useState(
+    initialConfiguration.defaultWindow
+      ? minuteOfDayValue(initialConfiguration.defaultWindow.closeOffsetMinutes % 1440) : "12:00",
+  );
   const [confirmedGuildId, setConfirmedGuildId] = useState("");
   const [activityFilter, setActivityFilter] = useState<Activity["category"] | "all">("all");
   const noun = configuration.profile === "kingshot" ? "Kingdom" : "State";
@@ -316,7 +353,39 @@ export function BookingAdmin({ initialConfiguration }: {
       setCycleOpensAt(utcInputValue(next.automaticCycle.opensAt));
       setCycleClosesAt(utcInputValue(next.automaticCycle.closesAt));
     }
+    if (next.defaultWindow) {
+      setDefaultOpenTime(minuteOfDayValue(next.defaultWindow.openMinuteUtc));
+      setDefaultCloseDay(String(Math.floor(next.defaultWindow.closeOffsetMinutes / 1440)));
+      setDefaultCloseTime(minuteOfDayValue(next.defaultWindow.closeOffsetMinutes % 1440));
+    }
     setConfirmOpenChange(false);
+  }
+
+  async function saveDefaultWindow() {
+    if (!configuration.defaultWindow) return;
+    setBusy("default-window");
+    setNotice("");
+    try {
+      const response = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+        body: JSON.stringify({ section: "recurringWindowDefault",
+          openMinuteUtc: parseMinuteOfDay(defaultOpenTime),
+          closeOffsetMinutes: (Number(defaultCloseDay) * 1440)
+            + parseMinuteOfDay(defaultCloseTime) }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.configuration) {
+        throw new Error(payload.error ?? "The default booking window could not be changed.");
+      }
+      adoptConfiguration(payload.configuration);
+      setNotice("Default booking window saved for future cycles.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message
+        : "The default booking window could not be changed.");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function changeCycleSchedule(action: "override" | "restore") {
@@ -461,18 +530,49 @@ export function BookingAdmin({ initialConfiguration }: {
     {configuration.automaticCycle ? <section className="booking-admin-section"
       aria-labelledby="booking-admin-automatic-cycle">
       <div><h2 id="booking-admin-automatic-cycle">Booking window</h2>
-        <p>Choose when players can sign up for the next appointment cycle. Times are shown in UTC.
+        <p>Choose when players can sign up for each appointment cycle. Times are shown in UTC.
           The {noun}&apos;s main booking switch above can still close bookings at any time.</p></div>
+      {configuration.defaultWindow ? <div className="booking-admin-settings-list">
+        <div><h3>Default booking window</h3>
+          <p>This repeats automatically every 28 days. Closing can be no more than 14 days after opening.</p></div>
+        <label>Opens Wednesday
+          <input type="time" value={defaultOpenTime}
+            onChange={(event) => setDefaultOpenTime(event.currentTarget.value)} />
+          <span>UTC</span>
+        </label>
+        <label>Closes
+          <select value={defaultCloseDay}
+            onChange={(event) => setDefaultCloseDay(event.currentTarget.value)}>
+            {CLOSE_DAY_LABELS.map((label, offset) => <option key={label} value={offset}>{label}</option>)}
+          </select>
+        </label>
+        <label>Closing time
+          <input type="time" value={defaultCloseTime}
+            onChange={(event) => setDefaultCloseTime(event.currentTarget.value)} />
+          <span>UTC</span>
+        </label>
+        <div className="booking-admin-actions">
+          <button disabled={controlsDisabled || Boolean(busy)}
+            onClick={() => void saveDefaultWindow()} type="button">Save default window</button>
+        </div>
+      </div> : null}
+      <div><h3>Current booking window</h3>
+        <p>{configuration.automaticCycle.overridden
+          ? "Using an explicit override for this cycle."
+          : configuration.defaultWindow?.source === "community"
+            ? `Using this ${noun}'s default window.` : "Using the platform default window."}</p></div>
       <dl className="booking-admin-cycle-summary">
-        <div><dt>Next cycle</dt><dd>{cycleStatusLabel(configuration.automaticCycle.status)}</dd></div>
+        <div><dt>Cycle</dt><dd>{cycleStatusLabel(configuration.automaticCycle.status)}</dd></div>
         <div><dt>Default opening</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticOpensAt)}</dd></div>
         <div><dt>Default closing</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticClosesAt)}</dd></div>
-        <div><dt>Current opening</dt><dd><time dateTime={configuration.automaticCycle.opensAt}>
+        <div><dt>Opens</dt><dd><time dateTime={configuration.automaticCycle.opensAt}>
           {displayUtcInstant(configuration.automaticCycle.opensAt)}</time></dd></div>
-        <div><dt>Current closing</dt><dd><time dateTime={configuration.automaticCycle.closesAt}>
+        <div><dt>Closes</dt><dd><time dateTime={configuration.automaticCycle.closesAt}>
           {displayUtcInstant(configuration.automaticCycle.closesAt)}</time></dd></div>
       </dl>
       <div className="booking-admin-settings-list">
+        <div><h3>Override this cycle</h3>
+          <p>These dates affect only the cycle shown above and take priority over the recurring default.</p></div>
         <label>Open (UTC)
           <input type="datetime-local" value={cycleOpensAt}
             onChange={(event) => setCycleOpensAt(event.currentTarget.value)} />
