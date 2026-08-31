@@ -13,7 +13,7 @@ test("Discord setup and registration routes reuse signed profile scope and nativ
     "../app/api/internal/v1/discord/registration/route.ts", import.meta.url,
   ), "utf8");
   assert.match(handler, /authenticateDiscordIntegrationRequest/);
-  assert.match(handler, /findCommunityByLocationCode/);
+  assert.match(handler, /createDiscordCommunitySetupService/);
   assert.match(handler, /findCommunityForDiscordGuild/);
   assert.match(handler, /community\.location_code !== communityCode/);
   assert.match(handler, /createRegistrationService/);

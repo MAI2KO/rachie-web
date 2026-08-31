@@ -24,6 +24,15 @@ type BookingAdminConfiguration = {
   };
   readonly discordAccess: {
     readonly stateGuildConfigured: boolean;
+    readonly pendingRequests: readonly {
+      readonly id: string;
+      readonly guildId: string;
+      readonly guildName: string;
+      readonly alliance: string;
+      readonly requestedByDiscordUserId: string;
+      readonly requestedAt: string;
+      readonly canDecide: boolean;
+    }[];
     readonly unclassifiedGuilds: readonly {
       readonly id: string;
       readonly displayName: string;
@@ -264,6 +273,29 @@ export function BookingAdmin({ initialConfiguration }: {
     }
   }
 
+  async function decideGuildLinkRequest(requestId: string, action: "approve" | "reject") {
+    setBusy(`guild-request:${requestId}`);
+    setNotice("");
+    try {
+      const response = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+        body: JSON.stringify({ section: "guildLinkRequest", action, requestId, confirmed: true }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.configuration) {
+        throw new Error(payload.error ?? "The alliance Discord request could not be decided.");
+      }
+      adoptConfiguration(payload.configuration);
+      setNotice(action === "approve" ? "Alliance Discord approved and linked."
+        : "Alliance Discord request rejected.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The alliance Discord request could not be decided.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   const controlsDisabled = !csrfToken;
   return <article className="booking-admin">
     <header>
@@ -389,6 +421,24 @@ export function BookingAdmin({ initialConfiguration }: {
             onClick={() => void unlinkGuild(guild.id)} type="button">Unlink alliance</button>
         </div>)}
       </div> : <p>No active alliance Discord links are available.</p>}
+      {configuration.discordAccess.pendingRequests.length ? <div>
+        <p><strong>Pending alliance Discord requests</strong></p>
+        <div className="booking-admin-settings-list">
+          {configuration.discordAccess.pendingRequests.map((request) =>
+            <div className="booking-admin-setting" key={request.id}>
+              <div><strong>{request.guildName} ({request.alliance})</strong>
+                <span>Guild {request.guildId}; requested by Discord user {request.requestedByDiscordUserId} on {displayUtcInstant(request.requestedAt)}.</span>
+                {!request.canDecide ? <span>Eligible Discord ownership is required.</span> : null}
+              </div>
+              <div className="booking-admin-actions">
+                <button disabled={controlsDisabled || Boolean(busy) || !request.canDecide}
+                  onClick={() => void decideGuildLinkRequest(request.id, "approve")} type="button">Approve</button>
+                <button disabled={controlsDisabled || Boolean(busy) || !request.canDecide}
+                  onClick={() => void decideGuildLinkRequest(request.id, "reject")} type="button">Reject</button>
+              </div>
+            </div>)}
+        </div>
+      </div> : null}
       {configuration.discordAccess.unclassifiedGuilds.length ? <div>
         <p><strong>Explicit classification required</strong></p>
         <ul>{configuration.discordAccess.unclassifiedGuilds.map((guild) => <li key={guild.id}>

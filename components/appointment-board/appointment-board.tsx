@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
 import { AllianceBadge } from "./alliance-badge";
 import { CommunitySectionNavigation } from "@/components/community-section-navigation";
@@ -32,8 +32,12 @@ type ManagerBoard = {
   }>;
   activity: Array<{
     action: string;
-    playerName: string;
-    managerDisplayName: string | null;
+    category: "bookings" | "approvals" | "cancellations" | "manager_actions" | "configuration";
+    playerName: string | null;
+    playerId: string | null;
+    actorDiscordUserId: string | null;
+    actorDisplayName: string | null;
+    serviceCode: string | null;
     previousState: string | null;
     resultingState: string;
     previousTime?: string;
@@ -58,9 +62,15 @@ function publicSlotLabel(slot: PublicSlot) {
 }
 
 function activityLabel(action: string) {
+  if (action === "manager_manual_booking") return "Manager manual booking";
+  if (action === "booking_created") return "Player booking created";
+  if (action === "submitted") return "Guest request submitted";
+  if (action === "approved") return "Guest request approved";
+  if (action === "denied") return "Guest request denied";
+  if (action === "expired") return "Guest request expired";
   if (action === "manager_booking_rescheduled") return "Booking rescheduled";
   if (action === "manager_booking_cancelled") return "Booking cancelled";
-  return action;
+  return action.replaceAll("_", " ");
 }
 
 function PublicPanels({ services }: { services: PublicService[] }) {
@@ -106,7 +116,8 @@ function CopyButton({ value, label, copied, onCopy, alliance = false }: {
 
 function ManagerPanels({ board, editMode, copiedKey, onCopy, onApprovalAction,
   onBookingAction, busyRequest, busyBooking, cancellingBooking, reschedulingBooking,
-  rescheduleSlot, onCancelChoice, onRescheduleChoice }: {
+  rescheduleSlot, onCancelChoice, onRescheduleChoice, manualSlot, busyManual,
+  onManualChoice, onManualSubmit }: {
   board: ManagerBoard;
   editMode: boolean;
   copiedKey: string;
@@ -120,6 +131,11 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onApprovalAction,
   rescheduleSlot: string;
   onCancelChoice(bookingId: string): void;
   onRescheduleChoice(bookingId: string, slotId?: string): void;
+  manualSlot: string;
+  busyManual: string;
+  onManualChoice(slotId: string): void;
+  onManualSubmit(service: ManagerBoard["services"][number], slot: ManagerSlot,
+    form: FormData): void;
 }) {
   return (
     <div aria-label="Manager appointment services" className="appointment-panels">
@@ -139,10 +155,35 @@ function ManagerPanels({ board, editMode, copiedKey, onCopy, onApprovalAction,
               <tbody>{service.slots.map((slot) => {
                 const key = slot.requestId ?? slot.bookingId ?? slot.slotId;
                 if (!slot.player) {
-                  return <tr className="manager-row manager-row--available" key={slot.slotId}>
+                  return <Fragment key={slot.slotId}><tr className="manager-row manager-row--available">
                     <th scope="row"><time>{slot.time}</time></th>
-                    <td colSpan={3 + service.requirementColumns.length + (editMode ? 1 : 0)}>Available</td>
-                  </tr>;
+                    <td colSpan={3 + service.requirementColumns.length}>Available</td>
+                    {editMode ? <td><button className="booking-button" onClick={() => onManualChoice(slot.slotId)}
+                      type="button">Book this slot</button></td> : null}
+                  </tr>{editMode && manualSlot === slot.slotId ? <tr className="manager-manual-booking-row">
+                    <td colSpan={5 + service.requirementColumns.length}>
+                      <form className="manager-manual-booking-form" onSubmit={(event) => {
+                        event.preventDefault();
+                        onManualSubmit(service, slot, new FormData(event.currentTarget));
+                      }}>
+                        <p><strong>{service.name}</strong> · {readableDate(slot.date)} · {slot.time}</p>
+                        <label>Player ID<input maxLength={32} name="playerId" required /></label>
+                        <label>In-game name<input maxLength={100} name="inGameName" required /></label>
+                        <label>Alliance<input maxLength={16} name="alliance" required /></label>
+                        {service.requirementColumns.map((requirement) => <label key={requirement.code}>
+                          {requirement.label}{requirement.unit ? ` (${requirement.unit})` : ""}
+                          <input max={999999} min={1} name={`requirement:${requirement.code}`}
+                            required type="number" />
+                        </label>)}
+                        <div className="manager-row__actions">
+                          <button className="booking-button" disabled={busyManual === slot.slotId}
+                            type="submit">Confirm booking</button>
+                          <button className="booking-button booking-button--secondary"
+                            onClick={() => onManualChoice("")} type="button">Back</button>
+                        </div>
+                      </form>
+                    </td>
+                  </tr> : null}</Fragment>;
                 }
                 return <tr className={`manager-row manager-row--${slot.state}`} key={slot.slotId}>
                   <th scope="row"><time>{slot.time}</time></th>
@@ -201,7 +242,10 @@ export function AppointmentBoard({ profile, initialBoard }: {
   const [cancellingBooking, setCancellingBooking] = useState("");
   const [reschedulingBooking, setReschedulingBooking] = useState("");
   const [rescheduleSlot, setRescheduleSlot] = useState("");
+  const [manualSlot, setManualSlot] = useState("");
+  const [busyManual, setBusyManual] = useState("");
   const [notice, setNotice] = useState("");
+  const [activityFilter, setActivityFilter] = useState("all");
   const endpoint = `/api/v1/appointment-board/${encodeURIComponent(initialBoard.community.code)}/manager`;
 
   const loadManagerBoard = useCallback(async () => {
@@ -257,12 +301,53 @@ export function AppointmentBoard({ profile, initialBoard }: {
     setCancellingBooking(bookingId);
     setReschedulingBooking("");
     setRescheduleSlot("");
+    setManualSlot("");
   }
 
   function rescheduleChoice(bookingId: string, slotId = "") {
     setReschedulingBooking(bookingId);
     setRescheduleSlot(slotId);
     setCancellingBooking("");
+    setManualSlot("");
+  }
+
+  function manualChoice(slotId: string) {
+    setManualSlot(slotId);
+    setCancellingBooking("");
+    setReschedulingBooking("");
+    setRescheduleSlot("");
+  }
+
+  async function manualBookingAction(
+    service: ManagerBoard["services"][number], slot: ManagerSlot, form: FormData,
+  ) {
+    setBusyManual(slot.slotId);
+    setNotice("");
+    const requirements = Object.fromEntries(service.requirementColumns.map((requirement) => [
+      requirement.code, String(form.get(`requirement:${requirement.code}`) ?? ""),
+    ]));
+    try {
+      const response = await fetch(`${endpoint.replace(/\/manager$/, "")}/bookings`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-csrf-token": csrfToken,
+          "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({
+          playerId: String(form.get("playerId") ?? ""),
+          inGameName: String(form.get("inGameName") ?? ""),
+          alliance: String(form.get("alliance") ?? ""),
+          serviceCode: service.code, slotId: slot.slotId, requirements,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "The appointment could not be created.");
+      setNotice("Appointment created by manager.");
+      setManualSlot("");
+      await loadManagerBoard();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The appointment could not be created.");
+    } finally {
+      setBusyManual("");
+    }
   }
 
   async function bookingAction(bookingId: string, action: "reschedule" | "cancel", slotId?: string) {
@@ -309,22 +394,38 @@ export function AppointmentBoard({ profile, initialBoard }: {
       {notice ? <p aria-live="polite" className="booking-notice">{notice}</p> : null}
       {managerBoard
         ? <ManagerPanels board={managerBoard} busyBooking={busyBooking} busyRequest={busyRequest}
-          cancellingBooking={cancellingBooking} copiedKey={copiedKey} editMode={editMode}
+          busyManual={busyManual} cancellingBooking={cancellingBooking} copiedKey={copiedKey}
+          editMode={editMode} manualSlot={manualSlot}
           onApprovalAction={approvalAction} onBookingAction={bookingAction} onCancelChoice={cancelChoice}
-          onCopy={copy} onRescheduleChoice={rescheduleChoice} rescheduleSlot={rescheduleSlot}
+          onCopy={copy} onManualChoice={manualChoice} onManualSubmit={manualBookingAction}
+          onRescheduleChoice={rescheduleChoice} rescheduleSlot={rescheduleSlot}
           reschedulingBooking={reschedulingBooking} />
         : <PublicPanels services={initialBoard.services} />}
-      {managerBoard ? <details className="manager-activity">
-        <summary>Recent manager activity</summary>
-        {managerBoard.activity.length ? <ol>
-          {managerBoard.activity.map((event, index) => <li key={`${event.createdAt}:${index}`}>
-            <strong>{activityLabel(event.action)}</strong> · {event.playerName}
-            {event.managerDisplayName ? ` by ${event.managerDisplayName}` : ""}
-            {event.previousState ? ` · ${event.previousState} → ${event.resultingState}` : ` · ${event.resultingState}`}
-            {event.previousTime ? ` · ${event.previousTime}${event.newTime ? ` → ${event.newTime}` : ""}` : ""}
-            <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time>
-          </li>)}
-        </ol> : <p>No activity yet.</p>}
+      {managerBoard ? <details className="manager-activity" open>
+        <summary>Activity / Audit Log</summary>
+        <label>Filter activity <select onChange={(event) => setActivityFilter(event.target.value)}
+          value={activityFilter}>
+          <option value="all">All</option><option value="bookings">Bookings</option>
+          <option value="approvals">Approvals</option><option value="cancellations">Cancellations</option>
+          <option value="manager_actions">Manager actions</option>
+          <option value="configuration">Configuration</option>
+        </select></label>
+        {managerBoard.activity.some((event) => activityFilter === "all" || event.category === activityFilter)
+          ? <div className="manager-table-scroll" role="region" tabIndex={0}><table className="manager-table">
+            <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Player</th><th>Details</th></tr></thead>
+            <tbody>{managerBoard.activity.filter((event) => activityFilter === "all"
+              || event.category === activityFilter).map((event, index) => <tr key={`${event.createdAt}:${index}`}>
+              <td><time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time></td>
+              <td>{event.actorDisplayName ?? "System"}{event.actorDiscordUserId
+                ? <small className="manager-audit-id">Discord ID: {event.actorDiscordUserId}</small> : null}</td>
+              <td>{activityLabel(event.action)}</td>
+              <td>{event.playerName ?? "—"}{event.playerId
+                ? <small className="manager-audit-id">Player ID: {event.playerId}</small> : null}</td>
+              <td>{event.serviceCode ? `${event.serviceCode} · ` : ""}
+                {event.previousState ? `${event.previousState} → ${event.resultingState}` : event.resultingState}
+                {event.previousTime ? ` · ${event.previousTime}${event.newTime ? ` → ${event.newTime}` : ""}` : ""}</td>
+            </tr>)}</tbody>
+          </table></div> : <p>No matching activity.</p>}
       </details> : null}
     </article>
   );

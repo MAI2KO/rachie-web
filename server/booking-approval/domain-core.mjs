@@ -205,6 +205,7 @@ export function managerAppointmentBoard(
     const pending = !confirmed && Boolean(row.pending_request_id);
     service.slots.push(Object.freeze({
       slotId: row.slot_id,
+      date: approvalDateOnly(row.booking_date),
       time: row.display_time_label,
       state: confirmed ? "confirmed" : pending ? "pending" : "available",
       ...(confirmed ? {
@@ -235,8 +236,12 @@ export function managerAppointmentBoard(
     }))),
     activity: Object.freeze(activity.map((event) => Object.freeze({
       action: event.action,
+      category: event.category,
       playerName: event.player_name,
-      managerDisplayName: event.acting_discord_display_name,
+      playerId: event.player_id,
+      actorDiscordUserId: event.actor_discord_user_id,
+      actorDisplayName: event.actor_display_name,
+      serviceCode: event.service_code,
       previousState: event.previous_state,
       resultingState: event.resulting_state,
       ...(event.previous_time ? { previousTime: event.previous_time } : {}),

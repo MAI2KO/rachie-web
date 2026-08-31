@@ -191,6 +191,7 @@ test("migration files are ordered and checksummed", async () => {
       { version: "0007", name: "booking_admin_v1" },
       { version: "0008", name: "booking_window_announcements" },
       { version: "0009", name: "access_overrides_points" },
+      { version: "0010", name: "community_guild_link_requests" },
     ],
   );
   assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));
@@ -358,4 +359,17 @@ test("access provenance, cycle overrides, and points migration is scoped and app
   assert.doesNotMatch(migration, /INSERT INTO community_points_ledger[\s\S]*SELECT/);
   assert.match(migration, /BEFORE UPDATE OR DELETE ON player_points_ledger/);
   assert.match(migration, /BEFORE UPDATE OR DELETE ON community_points_ledger/);
+});
+
+test("community guild link requests are additive, profile-scoped, and concurrency-safe", () => {
+  const migration = fs.readFileSync(
+    path.join(migrationsDirectory, "0010_community_guild_link_requests.sql"), "utf8",
+  );
+  assert.match(migration, /CREATE TABLE community_guild_link_requests/);
+  assert.match(migration, /REFERENCES booking_communities \(game_profile, id\) ON DELETE RESTRICT/);
+  assert.match(migration, /CREATE UNIQUE INDEX community_guild_link_requests_one_pending_guild/);
+  assert.match(migration, /WHERE status = 'pending'/);
+  assert.match(migration, /FORCE ROW LEVEL SECURITY/);
+  assert.match(migration, /community_guild_link_requests_profile_policy/);
+  assert.doesNotMatch(migration, /DROP|TRUNCATE|ALTER COLUMN|SET NOT NULL/i);
 });

@@ -28,7 +28,7 @@ class BookingAdminSession {
       [this.gameProfile, communityId],
     )).rows[0] ?? null;
     if (!community || community.status !== "active") return null;
-    const [services, settings, windows, dates, guestLinks, guilds, scheduleOverrides] = await Promise.all([
+    const [services, settings, windows, dates, guestLinks, guilds, scheduleOverrides, guildLinkRequests] = await Promise.all([
       this.client.query(
         `SELECT service.service_code,service.display_label,service.sort_order,
                 COALESCE(community_service.enabled,service.active) AS enabled
@@ -95,6 +95,14 @@ class BookingAdminSession {
           ORDER BY cycle_index`,
         [this.gameProfile, communityId],
       ),
+      this.client.query(
+        `SELECT id,requesting_discord_guild_id,requesting_discord_guild_name,
+                alliance_abbreviation,requested_by_discord_user_id,requested_at
+           FROM community_guild_link_requests
+          WHERE game_profile=$1 AND community_id=$2 AND status='pending'
+          ORDER BY requested_at,id`,
+        [this.gameProfile, communityId],
+      ),
     ]);
     return {
       community,
@@ -105,6 +113,7 @@ class BookingAdminSession {
       guestLink: guestLinks.rows[0] ?? null,
       guilds: guilds.rows,
       scheduleOverrides: scheduleOverrides.rows,
+      guildLinkRequests: guildLinkRequests.rows,
     };
   }
 
@@ -116,6 +125,60 @@ class BookingAdminSession {
         ORDER BY discord_guild_id FOR UPDATE`,
       [this.gameProfile, communityId],
     )).rows;
+  }
+
+  async lockGuildLinkRequest(communityId, requestId) {
+    return (await this.client.query(
+      `SELECT id,community_id,requesting_discord_guild_id,requesting_discord_guild_name,
+              alliance_abbreviation,requested_by_discord_user_id,status,requested_at
+         FROM community_guild_link_requests
+        WHERE game_profile=$1 AND community_id=$2 AND id=$3 FOR UPDATE`,
+      [this.gameProfile, communityId, requestId],
+    )).rows[0] ?? null;
+  }
+
+  async activateAllianceGuildLink({ communityId, request, actorId }) {
+    const existing = (await this.client.query(
+      `SELECT community_id,guild_kind FROM booking_discord_guilds
+        WHERE game_profile=$1 AND discord_guild_id=$2 FOR UPDATE`,
+      [this.gameProfile, request.requesting_discord_guild_id],
+    )).rows[0] ?? null;
+    if (existing && (existing.community_id !== communityId || existing.guild_kind !== "alliance")) {
+      return { status: "conflict" };
+    }
+    await this.client.query(
+      `INSERT INTO booking_discord_guilds
+         (game_profile,discord_guild_id,community_id,discord_guild_name,linked_by_actor_id,guild_kind)
+       VALUES ($1,$2,$3,$4,$5,'alliance')
+       ON CONFLICT (game_profile,discord_guild_id) DO UPDATE
+         SET discord_guild_name=EXCLUDED.discord_guild_name,
+             linked_by_actor_id=EXCLUDED.linked_by_actor_id,link_status='active',
+             revoked_at=NULL,revoked_by_actor_id=NULL,revocation_reason=NULL,updated_at=now()`,
+      [this.gameProfile, request.requesting_discord_guild_id, communityId,
+       request.requesting_discord_guild_name, actorId],
+    );
+    return { status: existing ? "reactivated" : "created" };
+  }
+
+  async decideGuildLinkRequest({ requestId, decision, actorId }) {
+    await this.client.query(
+      `UPDATE community_guild_link_requests
+          SET status=$3,decided_by_discord_user_id=$4,decided_at=now(),updated_at=now()
+        WHERE game_profile=$1 AND id=$2 AND status='pending'`,
+      [this.gameProfile, requestId, decision, actorId],
+    );
+  }
+
+  async insertGuildLinkDecisionAudit(input) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,source,
+          actor_type,actor_id,correlation_id,before_data,after_data)
+       VALUES ($1,$2,$3,'discord_guild_link_request',$4,$5,'website','discord_user',$6,$7,$8,$9)`,
+      [this.gameProfile, input.id, input.communityId, input.requestId,
+       `alliance_guild_link_${input.decision}`, input.actorId, input.correlationId,
+       input.beforeData, input.afterData],
+    );
   }
 
   async revokeAllianceGuildAccess({ communityId, guildId, actorId }) {

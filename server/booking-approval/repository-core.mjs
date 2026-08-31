@@ -135,6 +135,16 @@ class ProfileScopedApprovalSession {
     return result.rows[0].exists;
   }
 
+  async hasConfirmedBookingForPlayerService(communityId, windowId, serviceCode, playerId) {
+    const result = await this.client.query(
+      `SELECT EXISTS (SELECT 1 FROM minister_bookings
+        WHERE game_profile=$1 AND community_id=$2 AND window_id=$3
+          AND service_code=$4 AND player_id_snapshot=$5 AND status='confirmed') AS exists`,
+      [this.gameProfile, communityId, windowId, serviceCode, playerId],
+    );
+    return result.rows[0].exists;
+  }
+
   async expirePendingForSlot(slotId, at) {
     const result = await this.client.query(
       `UPDATE booking_approval_requests
@@ -547,9 +557,13 @@ class ProfileScopedApprovalSession {
   async listRecentApprovalActivity(communityId, limit) {
     const result = await this.client.query(
       `SELECT activity.* FROM (
-         SELECT event.id,event.action,request.in_game_name_snapshot AS player_name,
-                event.acting_discord_display_name,event.previous_state,
+         SELECT event.id,event.action,'approvals'::text AS category,
+                request.in_game_name_snapshot AS player_name,
+                request.player_id_snapshot AS player_id,
+                event.acting_discord_user_id AS actor_discord_user_id,
+                event.acting_discord_display_name AS actor_display_name,event.previous_state,
                 event.resulting_state,NULL::text AS previous_time,NULL::text AS new_time,
+                request.service_code AS service_code,
                 event.created_at
          FROM booking_approval_events AS event
          JOIN booking_approval_requests AS request
@@ -557,20 +571,37 @@ class ProfileScopedApprovalSession {
          WHERE event.game_profile=$1 AND event.community_id=$2
          UNION ALL
          SELECT event.id,event.event_type AS action,
-                booking.in_game_name_snapshot AS player_name,
-                event.after_data->>'actorDisplayName' AS acting_discord_display_name,
+                CASE
+                  WHEN event.event_type LIKE '%cancel%' THEN 'cancellations'
+                  WHEN event.event_type IN ('booking_created','booking_rescheduled',
+                    'manager_booking_rescheduled','manager_manual_booking') THEN 'bookings'
+                  WHEN event.event_type='booking_admin_updated'
+                    OR event.event_type LIKE 'booking_cycle_override_%' THEN 'configuration'
+                  ELSE 'manager_actions'
+                END AS category,
+                COALESCE(booking.in_game_name_snapshot,
+                  event.after_data->>'playerName',event.after_data#>>'{participant,inGameName}') AS player_name,
+                COALESCE(booking.player_id_snapshot,
+                  event.after_data->>'playerId',event.after_data#>>'{participant,playerId}') AS player_id,
+                event.actor_id AS actor_discord_user_id,
+                event.after_data->>'actorDisplayName' AS actor_display_name,
                 event.before_data->>'status' AS previous_state,
                 CASE event.event_type
                   WHEN 'manager_booking_rescheduled' THEN 'rescheduled'
-                  ELSE 'cancelled'
+                  WHEN 'booking_rescheduled' THEN 'rescheduled'
+                  WHEN 'manager_booking_cancelled' THEN 'cancelled'
+                  WHEN 'booking_cancelled' THEN 'cancelled'
+                  ELSE COALESCE(event.after_data->>'status',event.event_type)
                 END AS resulting_state,
                 event.before_data->>'displayTime' AS previous_time,
-                event.after_data->>'displayTime' AS new_time,event.created_at
+                event.after_data->>'displayTime' AS new_time,
+                COALESCE(booking.service_code,event.after_data->>'serviceCode') AS service_code,
+                event.created_at
          FROM booking_change_events AS event
-         JOIN minister_bookings AS booking
-           ON booking.game_profile=event.game_profile AND booking.id=event.aggregate_id
+         LEFT JOIN minister_bookings AS booking
+           ON event.aggregate_type='minister_booking'
+          AND booking.game_profile=event.game_profile AND booking.id=event.aggregate_id
          WHERE event.game_profile=$1 AND event.community_id=$2
-           AND event.event_type IN ('manager_booking_rescheduled','manager_booking_cancelled')
        ) AS activity
        ORDER BY activity.created_at DESC,activity.id DESC
        LIMIT $3`,

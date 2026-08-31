@@ -96,7 +96,7 @@ test("0008 upgrades to corrected 0009 conservatively", {
       );
     });
 
-    const result = await runMigrations(pool, migrations);
+    const result = await runMigrations(pool, migrations.slice(0, 9));
     assert.deepEqual(result.applied, ["0009"]);
     const upgraded = await withProfile(pool, "wos", async (client) => ({
       guild: (await client.query(
@@ -127,7 +127,7 @@ test("0008 upgrades to corrected 0009 conservatively", {
     assert.equal(upgraded.participants, 1, "existing participants remain intact");
     assert.equal(upgraded.playerPoints, 0);
     assert.equal(upgraded.communityPoints, 0);
-    assert.deepEqual((await runMigrations(pool, migrations)).applied, []);
+    assert.deepEqual((await runMigrations(pool, migrations.slice(0, 9))).applied, []);
   } finally {
     await pool.end();
     await admin.query(`DROP SCHEMA ${schema} CASCADE`);

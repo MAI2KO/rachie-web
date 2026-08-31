@@ -41,6 +41,14 @@ export class BookingAdminTopologyDeniedError extends Error {
   }
 }
 
+export class BookingAdminGuildLinkDecisionDeniedError extends Error {
+  constructor(message = "Only the shared State/Kingdom Discord owner, or an existing alliance Discord owner when no shared Discord is configured, may decide this request.") {
+    super(message);
+    this.name = "BookingAdminGuildLinkDecisionDeniedError";
+    this.code = "guild_link_decision_forbidden";
+  }
+}
+
 export class BookingAdminTopologyUnavailableError extends Error {
   constructor(message = "Discord ownership could not be verified right now.") {
     super(message);
@@ -74,6 +82,13 @@ export function validateBookingAdminChange(value) {
       && value.action === "unlink" && value.confirmed === true
       && /^\d{15,22}$/.test(String(value.guildId))) {
     return Object.freeze({ section: "discordAccess", action: "unlink", guildId: String(value.guildId) });
+  }
+  if (value.section === "guildLinkRequest"
+      && exactKeys(value, ["section", "action", "requestId", "confirmed"])
+      && ["approve", "reject"].includes(value.action) && value.confirmed === true
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value.requestId))) {
+    return Object.freeze({ section: "guildLinkRequest", action: value.action,
+      requestId: String(value.requestId) });
   }
   if (value.section === "cycleSchedule" && value.action === "override"
       && exactKeys(value, ["section", "action", "cycleIndex", "opensAt", "closesAt", "confirmedOpenChange"])
@@ -200,6 +215,11 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
   const guestLink = snapshot.guestLink ?? null;
   const guestLinkActive = Boolean(guestLink && !guestLink.revoked_at
     && (!guestLink.expires_at || new Date(guestLink.expires_at) > now));
+  const activeGuilds = guilds.filter((guild) => guild.link_status === "active");
+  const stateGuildConfigured = activeGuilds.some((guild) => guild.guild_kind === "state");
+  const canDecideGuildLinks = stateGuildConfigured ? ownership.get("state") === true
+    : activeGuilds.some((guild) => guild.guild_kind === "alliance"
+      && ownership.get(guild.discord_guild_id) === true);
   return Object.freeze({
     profile: gameProfile,
     community: Object.freeze({
@@ -217,8 +237,16 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
       status: guestLinkActive ? "active" : guestLink?.revoked_at ? "revoked" : "inactive",
     }),
     discordAccess: Object.freeze({
-      stateGuildConfigured: guilds.some((guild) => guild.guild_kind === "state"
-        && guild.link_status === "active"),
+      stateGuildConfigured,
+      pendingRequests: Object.freeze((snapshot.guildLinkRequests ?? []).map((request) => Object.freeze({
+        id: request.id,
+        guildId: request.requesting_discord_guild_id,
+        guildName: request.requesting_discord_guild_name,
+        alliance: request.alliance_abbreviation,
+        requestedByDiscordUserId: request.requested_by_discord_user_id,
+        requestedAt: new Date(request.requested_at).toISOString(),
+        canDecide: canDecideGuildLinks,
+      }))),
       unclassifiedGuilds: Object.freeze(guilds.filter((guild) => guild.guild_kind === "unclassified"
         && guild.link_status === "active").map((guild) => Object.freeze({
         id: guild.discord_guild_id,

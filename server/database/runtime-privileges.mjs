@@ -13,6 +13,7 @@ export const RUNTIME_READ_TABLES = Object.freeze([
   "booking_cycle_schedule_overrides",
   "player_points_ledger",
   "community_points_ledger",
+  "community_guild_link_requests",
 ]);
 
 export const RUNTIME_WRITE_TABLES = Object.freeze([
@@ -70,6 +71,7 @@ export function runtimePrivilegeStatements(role, { includeRowLockPrivileges = tr
     `GRANT SELECT, INSERT, UPDATE ON ${RUNTIME_DISCORD_NOTIFICATION_TABLE} TO ${grantee}`,
     `GRANT SELECT, INSERT, DELETE ON ${RUNTIME_INTEGRATION_NONCE_TABLE} TO ${grantee}`,
     `GRANT INSERT, UPDATE ON booking_community_services TO ${grantee}`,
+    `GRANT INSERT ON booking_communities, booking_settings TO ${grantee}`,
     `GRANT INSERT ON booking_discord_guilds TO ${grantee}`,
     `GRANT UPDATE (discord_guild_name, linked_by_actor_id, updated_at) ON booking_discord_guilds TO ${grantee}`,
     `GRANT UPDATE (link_status, revoked_at, revoked_by_actor_id, revocation_reason, updated_at) ON booking_discord_guilds TO ${grantee}`,
@@ -78,6 +80,8 @@ export function runtimePrivilegeStatements(role, { includeRowLockPrivileges = tr
     `GRANT INSERT, DELETE ON booking_cycle_schedule_overrides TO ${grantee}`,
     `GRANT UPDATE (opens_at, closes_at, updated_by_actor_id, updated_at) ON booking_cycle_schedule_overrides TO ${grantee}`,
     `GRANT SELECT, INSERT ON player_points_ledger, community_points_ledger TO ${grantee}`,
+    `GRANT INSERT ON community_guild_link_requests TO ${grantee}`,
+    `GRANT UPDATE (status, decided_by_discord_user_id, decided_at, updated_at) ON community_guild_link_requests TO ${grantee}`,
     `GRANT INSERT ON booking_guest_share_links TO ${grantee}`,
     `GRANT UPDATE (revoked_at, revoked_by_actor_id, updated_at) ON booking_guest_share_links TO ${grantee}`,
     `GRANT INSERT ON booking_windows, booking_service_dates, appointment_slots TO ${grantee}`,

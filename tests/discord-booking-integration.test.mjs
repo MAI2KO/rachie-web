@@ -112,7 +112,7 @@ test("migration 0006 preserves existing booking and multi-copy approval delivery
         }
       });
       assert.deepEqual((await runMigrations(pool, migrations)).applied,
-        ["0006", "0007", "0008", "0009"]);
+        ["0006", "0007", "0008", "0009", "0010"]);
       const preserved = await withProfile(pool, "wos", client => client.query(`SELECT
         (SELECT count(*)::int FROM minister_bookings WHERE id=$1) AS bookings,
         (SELECT count(*)::int FROM booking_approval_requests WHERE id=$2) AS requests,

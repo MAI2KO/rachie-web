@@ -89,6 +89,24 @@ export interface ParticipantBookingRecord {
 }
 
 export interface NativeBookingSession {
+  lockCommunitySetup(communityCode: string, discordGuildId: string): Promise<void>;
+  countActiveCommunityGuilds(communityId: string): Promise<number>;
+  findPendingCommunityGuildLinkRequest(communityId: string, discordGuildId: string): Promise<unknown | null>;
+  insertCommunityGuildLinkRequest(input: {
+    id: string; communityId: string; discordGuildId: string; discordGuildName: string;
+    alliance: string; actorId: string;
+  }): Promise<void>;
+  insertCommunityGuildLinkRequestAudit(input: {
+    id: string; requestId: string; communityId: string; actorId: string; correlationId: string;
+    afterData: Record<string, unknown>;
+  }): Promise<void>;
+  createWosCommunityDefaults(input: {
+    id: string; locationCode: string; displayName: string; actorId: string;
+  }): Promise<BookingCommunityRecord | null>;
+  insertCommunitySetupAudit(input: {
+    id: string; communityId: string; actorId: string; correlationId: string;
+    afterData: Record<string, unknown>;
+  }): Promise<void>;
   linkDiscordGuild(input: {
     discordGuildId: string; communityId: string; discordGuildName: string; actorId: string;
   }): Promise<{ status: "created" | "updated" | "conflict" }>;

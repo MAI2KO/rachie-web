@@ -9,6 +9,16 @@ const PROFILE = "wos";
 const ACTOR_ID = "automatic-wos-28-day-cycle-v1";
 const SERVICE_CODES = Object.freeze(["construction", "research", "troop"]);
 
+function defaultSlotTemplate() {
+  return Array.from({ length: 48 }, (_, ordinal) => {
+    const hour = String(Math.floor(ordinal / 2)).padStart(2, "0");
+    const minute = ordinal % 2 ? "30" : "00";
+    const time = `${hour}:${minute}`;
+    return Object.freeze({ ordinal, display_time_label: time,
+      local_start_time: time, time_zone: "UTC", status: "available" });
+  });
+}
+
 async function transaction(pool, work) {
   const client = await pool.connect();
   try {
@@ -83,7 +93,7 @@ async function latestSlotTemplate(client, communityId, serviceCode, beforeDate) 
       LIMIT 1`,
     [PROFILE, communityId, serviceCode, beforeDate],
   )).rows[0];
-  if (!date) return [];
+  if (!date) return defaultSlotTemplate();
   return (await client.query(
     `SELECT ordinal,display_time_label,local_start_time::text AS local_start_time,
             time_zone,status

@@ -149,6 +149,7 @@ test(
             "booking_slot_blocks",
             "booking_windows",
             "community_access_grants",
+            "community_guild_link_requests",
             "community_points_ledger",
             "minister_bookings",
             "minister_services",

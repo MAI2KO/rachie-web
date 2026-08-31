@@ -157,6 +157,14 @@ export function createGuestBookingRequestService({
               "This Player ID already has a pending request for this service.",
             );
           }
+          if (await session.hasConfirmedBookingForPlayerService(
+            link.community_id, slot.window_id, input.serviceCode, input.playerId,
+          )) {
+            throw new GuestBookingRequestError(
+              "booking_already_exists",
+              "This Player ID already has an appointment for this service and cycle.",
+            );
+          }
 
           const settings = await session.findSettings(link.community_id);
           const answers = validateGuestRequirementAnswers(gameProfile, input, settings);
@@ -280,7 +288,8 @@ export function createBookingApprovalService({
 
   return Object.freeze({
     async approve(requestId) {
-      return repository.withTransaction(async (session) => {
+      try {
+        return await repository.withTransaction(async (session) => {
         const at = now();
         const request = await lockedActionRequest(session, communityId, requestId);
         if (request.status !== APPROVAL_REQUEST_STATES.PENDING_APPROVAL) {
@@ -293,6 +302,12 @@ export function createBookingApprovalService({
         if (await session.hasActiveSlotBlock(request.slot_id)
             || await session.hasConfirmedBooking(request.slot_id)) {
           throw new BookingApprovalTransitionError("slot_unavailable", "The held slot is no longer available.");
+        }
+        if (await session.hasConfirmedBookingForPlayerService(
+          communityId, request.window_id, request.service_code, request.player_id_snapshot,
+        )) {
+          throw new BookingApprovalTransitionError("booking_already_exists",
+            "This Player ID already has an appointment for this service and cycle.");
         }
         const correlationId = createId();
         const bookingId = createId();
@@ -353,7 +368,21 @@ export function createBookingApprovalService({
             playerName: booking.in_game_name_snapshot,
           },
         };
-      });
+        });
+      } catch (error) {
+        if (error?.code === "23505"
+            && ["minister_bookings_one_active_player_service",
+              "minister_bookings_one_active_participant_service"].includes(error.constraint)) {
+          throw new BookingApprovalTransitionError("booking_already_exists",
+            "This Player ID already has an appointment for this service and cycle.");
+        }
+        if (error?.code === "23505"
+            && error.constraint === "minister_bookings_one_active_per_slot") {
+          throw new BookingApprovalTransitionError("slot_unavailable",
+            "The held slot is no longer available.");
+        }
+        throw error;
+      }
     },
 
     async deny(requestId) {

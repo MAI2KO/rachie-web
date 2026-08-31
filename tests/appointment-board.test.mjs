@@ -51,8 +51,10 @@ test("manager board serializer includes operational fields and bounded human-rea
     pending_hold_expires_at: "2030-08-21T14:30:00Z",
     pending_requirements: [{ code: "speedups", label: "Speed-ups (days)", value: 12, unit: "days" }],
   }], [{
-    action: "submitted", player_name: "Guest Player", acting_discord_display_name: null,
-    previous_state: null, resulting_state: "pending_approval", created_at: "2030-08-21T14:00:00Z",
+    action: "submitted", category: "approvals", player_name: "Guest Player",
+    player_id: "87654321", actor_discord_user_id: null, actor_display_name: null,
+    service_code: "construction", previous_state: null,
+    resulting_state: "pending_approval", created_at: "2030-08-21T14:00:00Z",
   }], {
     gameProfile: "wos",
     currentDiscordUserId: "111111111111111111",
@@ -65,10 +67,11 @@ test("manager board serializer includes operational fields and bounded human-rea
   assert.deepEqual(board.services[0].requirementColumns, [
     { code: "speedups", label: "Speed-ups (days)", unit: "days" },
   ]);
-  assert.doesNotMatch(JSON.stringify(board), /111111111111111111/);
   assert.deepEqual(Object.keys(board.activity[0]).sort(), [
-    "action", "createdAt", "managerDisplayName", "playerName", "previousState", "resultingState",
+    "action", "actorDiscordUserId", "actorDisplayName", "category", "createdAt", "playerId",
+    "playerName", "previousState", "resultingState", "serviceCode",
   ]);
+  assert.equal(board.activity[0].playerId, "87654321");
 });
 
 test("manager requirement columns follow enabled, disabled, and service-specific configuration", () => {

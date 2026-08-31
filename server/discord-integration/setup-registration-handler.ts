@@ -5,6 +5,8 @@ import { createHash } from "node:crypto";
 import { createNativeBookingRepository } from "@/server/native-booking/repository";
 import { createRegistrationService } from "@/server/native-booking/registration-service-core.mjs";
 
+import { createDiscordCommunitySetupService } from "./community-setup-service-core.mjs";
+
 import {
   authenticateDiscordIntegrationRequest,
   discordIntegrationError,
@@ -36,30 +38,27 @@ export async function handleDiscordCommunitySetup(request: Request) {
         || typeof body.dryRun !== "boolean") throw new TypeError("invalid_setup");
     const repository = createNativeBookingRepository(scope.profile);
     if (!repository) throw new Error("booking_database_unavailable");
-    const result = await repository.withTransaction(async (session) => {
-      const community = await session.findCommunityByLocationCode(communityCode);
-      if (!community || community.status !== "active") return { error: "community_not_found" };
-      const linked = await session.findCommunityForDiscordGuild(guildId);
-      if (linked && linked.id !== community.id) return { error: "guild_conflict" };
-      if (!body.dryRun) {
-        const link = await session.linkDiscordGuild({
-          discordGuildId: guildId, communityId: community.id,
-          discordGuildName: guildName, actorId: discordUserId,
-        });
-        if (link.status === "conflict") return { error: "guild_conflict" };
-      }
-      return {
-        community: { code: community.location_code, displayName: community.display_name },
-        status: body.dryRun
-          ? linked ? "already linked" : "ready to link"
-          : linked ? "linked and reconciled" : "linked",
-        bookingsOpen: Boolean(community.bookings_open),
-      };
+    const result = await createDiscordCommunitySetupService({
+      gameProfile: scope.profile,
+      repository,
+    }).reconcile({
+      communityCode,
+      guildId,
+      guildName,
+      alliance,
+      actorId: discordUserId,
+      dryRun: body.dryRun,
     });
     if ("error" in result) {
-      return result.error === "community_not_found"
-        ? json({ ok: false, code: result.error, error: "Native booking community was not found." }, 404)
-        : json({ ok: false, code: result.error, error: "Discord server is linked to another community." }, 409);
+      if (result.error === "kingshot_defaults_unavailable") {
+        return json({ ok: false, code: result.error,
+          error: "Automatic Kingshot booking-cycle defaults are not configured yet." }, 409);
+      }
+      const message = result.error === "community_claim_conflict"
+        ? "That community is already linked. Platform approval is required before adding another Discord server."
+        : result.error === "community_inactive" ? "Native booking community is inactive."
+          : "Discord server is linked to another community.";
+      return json({ ok: false, code: result.error, error: message }, 409);
     }
     return json({ ok: true, ...result });
   } catch (error) {

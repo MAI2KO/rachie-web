@@ -14,6 +14,7 @@ import { RATE_LIMIT_POLICIES } from "@/server/rate-limit/policies.mjs";
 import { authorizeBookingAdminRequest } from "./access";
 import {
   BookingAdminTopologyDeniedError,
+  BookingAdminGuildLinkDecisionDeniedError,
   BookingAdminTopologyUnavailableError,
   BookingAdminValidationError,
 } from "./domain-core.mjs";
@@ -39,7 +40,8 @@ function bookingAdminError(error: unknown) {
   if (error instanceof BookingAdminValidationError) {
     return json({ ok: false, code: error.code, error: error.message }, 400);
   }
-  if (error instanceof BookingAdminTopologyDeniedError) {
+  if (error instanceof BookingAdminTopologyDeniedError
+      || error instanceof BookingAdminGuildLinkDecisionDeniedError) {
     return json({ ok: false, code: error.code, error: error.message }, 403);
   }
   if (error instanceof BookingAdminTopologyUnavailableError) {
@@ -100,6 +102,10 @@ export async function handleBookingAdminMutation(request: Request, communityCode
     if (body && typeof body === "object" && !Array.isArray(body)
         && (body as { section?: unknown }).section === "discordAccess") {
       return json({ ok: true, ...(await authorized.service.unlinkAllianceGuild(body)) });
+    }
+    if (body && typeof body === "object" && !Array.isArray(body)
+        && (body as { section?: unknown }).section === "guildLinkRequest") {
+      return json({ ok: true, ...(await authorized.service.decideGuildLinkRequest(body)) });
     }
     if (body && typeof body === "object" && !Array.isArray(body)
         && (body as { section?: unknown }).section === "cycleSchedule") {

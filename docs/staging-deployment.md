@@ -167,7 +167,8 @@ GRANT SELECT ON
   booking_community_services,
   appointment_slots, booking_slot_blocks, booking_guest_share_links,
   community_access_grants, booking_cycle_schedule_overrides,
-  player_points_ledger, community_points_ledger
+  player_points_ledger, community_points_ledger,
+  community_guild_link_requests
 TO rachie_peggie_runtime;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON
@@ -189,6 +190,8 @@ TO rachie_peggie_runtime;
 -- Booking Admin may mutate only these reviewed community configuration fields.
 GRANT INSERT, UPDATE ON booking_community_services
 TO rachie_peggie_runtime;
+GRANT INSERT ON booking_communities, booking_settings
+TO rachie_peggie_runtime;
 GRANT INSERT ON booking_discord_guilds
 TO rachie_peggie_runtime;
 GRANT UPDATE (discord_guild_name, linked_by_actor_id, updated_at)
@@ -204,6 +207,9 @@ GRANT UPDATE (opens_at, closes_at, updated_by_actor_id, updated_at)
 ON booking_cycle_schedule_overrides TO rachie_peggie_runtime;
 GRANT SELECT, INSERT ON player_points_ledger, community_points_ledger
 TO rachie_peggie_runtime;
+GRANT INSERT ON community_guild_link_requests TO rachie_peggie_runtime;
+GRANT UPDATE (status, decided_by_discord_user_id, decided_at, updated_at)
+ON community_guild_link_requests TO rachie_peggie_runtime;
 GRANT INSERT ON booking_guest_share_links
 TO rachie_peggie_runtime;
 GRANT UPDATE (revoked_at, revoked_by_actor_id, updated_at)
@@ -333,6 +339,10 @@ ledger insert is transactional.
 | `0004` | `native_booking_participant_guard` | `a928f0e9f7dcd0422bd10aa9413cb3583a8f89d803726822dc5c13d16681aac3` |
 | `0005` | `guest_booking_approval_foundation` | `61f564efef5ed38e778f3519292563bb3208521c7b0a00dc3134755bda7bd646` |
 | `0006` | `discord_booking_notifications` | `64768e0f779c740196b82e958ae47600c4f78c407da210d8e1be0f72c27d8130` |
+| `0007` | `booking_admin_v1` | `728e4fb6c90f074d5aa8336ce05b44f09400858030d60bf3862d5afdf6a1fb4a` |
+| `0008` | `booking_window_announcements` | `7ce9efc6121cdddddfcb2c39c686537df3af72dcc4a82c94e5f262972c4dbebc` |
+| `0009` | `access_overrides_points` | `8a38247cfb1223ae10f553592be38a603be285d5da7ff7dc5224e371cd14a140` |
+| `0010` | `community_guild_link_requests` | `7920fefc9b498d4b7a01ef0840acbd0fa2ccf350c6a104ab402155b88f5780f3` |
 
 Reruns are safe through the ledger. Individual SQL files are not standalone
 idempotent and must never be manually rerun or edited after application.
@@ -343,7 +353,7 @@ Staging procedure:
 2. From the exact release commit, run `npm ci`.
 3. Run `npm run db:migrate` through the release job with its direct private
    migration-role `DATABASE_URL`, without echoing it.
-4. Confirm `app_schema_migrations` contains exactly `0001`–`0006` with the hashes
+4. Confirm `app_schema_migrations` contains exactly `0001`–`0010` with the hashes
    above.
 5. Apply runtime grants, then validate `rolsuper=false`, `rolbypassrls=false` and
    forced-RLS integration tests.
@@ -463,7 +473,7 @@ members from Discord.
 1. Provision isolated staging PostgreSQL and appropriate backups.
 2. Create migration and runtime roles with the SQL above.
 3. Create private URLs; set only runtime `DATABASE_URL` on the web service.
-4. Run `0001`–`0006` through the migration release job and verify the ledger.
+4. Run `0001`–`0010` through the migration release job and verify the ledger.
 5. Apply and verify runtime grants and forced RLS.
 6. Load reviewed staging community/guild/settings/window/service/date/slot data.
    First create each JSON file with `npm run db:bootstrap-config`; this local

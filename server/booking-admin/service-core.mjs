@@ -8,6 +8,7 @@ import {
 } from "../booking-approval/domain-core.mjs";
 import {
   bookingAdminModel,
+  BookingAdminGuildLinkDecisionDeniedError,
   BookingAdminTopologyDeniedError,
   BookingAdminTopologyUnavailableError,
   BookingAdminValidationError,
@@ -214,6 +215,66 @@ export function createBookingAdminService({
         changed: result.changed }) });
   }
 
+  async function decideGuildLinkRequest(rawChange) {
+    const change = validateBookingAdminChange(rawChange);
+    if (change.section !== "guildLinkRequest") throw new BookingAdminUnavailableError();
+    const initial = await repository.withTransaction((session) => session.readSnapshot(communityId));
+    if (!initial) throw new BookingAdminUnavailableError();
+    const request = (initial.guildLinkRequests ?? []).find((item) => item.id === change.requestId);
+    if (!request) {
+      throw new BookingAdminValidationError("guild_link_request_not_pending",
+        "That alliance Discord request is no longer pending.");
+    }
+    const active = initial.guilds.filter((guild) => guild.link_status === "active");
+    const stateGuild = active.find((guild) => guild.guild_kind === "state");
+    const eligibleGuilds = stateGuild ? [stateGuild]
+      : active.filter((guild) => guild.guild_kind === "alliance");
+    const ownership = await Promise.all(eligibleGuilds.map((guild) => verifyGuildOwner({
+      gameProfile, guildId: guild.discord_guild_id, discordUserId: actor.discordUserId,
+    })));
+    if (!ownership.some((result) => result.status === "owner")) {
+      if (ownership.some((result) => result.status === "unavailable")) {
+        throw new BookingAdminTopologyUnavailableError();
+      }
+      throw new BookingAdminGuildLinkDecisionDeniedError();
+    }
+    const decision = change.action === "approve" ? "approved" : "rejected";
+    const result = await repository.withTransaction(async (session) => {
+      const community = await session.lockCommunity(communityId);
+      if (!community || community.status !== "active") throw new BookingAdminUnavailableError();
+      await session.lockDiscordTopology(communityId);
+      const locked = await session.lockGuildLinkRequest(communityId, change.requestId);
+      if (!locked || locked.status !== "pending") {
+        throw new BookingAdminValidationError("guild_link_request_not_pending",
+          "That alliance Discord request is no longer pending.");
+      }
+      if (change.action === "approve") {
+        const activation = await session.activateAllianceGuildLink({
+          communityId, request: locked, actorId: actor.discordUserId,
+        });
+        if (activation.status === "conflict") {
+          throw new BookingAdminValidationError("guild_link_conflict",
+            "That Discord is already linked or classified elsewhere.");
+        }
+      }
+      await session.decideGuildLinkRequest({ requestId: locked.id, decision,
+        actorId: actor.discordUserId });
+      await session.insertGuildLinkDecisionAudit({
+        id: createId(), requestId: locked.id, communityId, decision,
+        actorId: actor.discordUserId, correlationId: createId(),
+        beforeData: { status: "pending", guildId: locked.requesting_discord_guild_id,
+          requestedByDiscordUserId: locked.requested_by_discord_user_id },
+        afterData: { status: decision, guildId: locked.requesting_discord_guild_id,
+          guildKind: change.action === "approve" ? "alliance" : null },
+      });
+      const snapshot = await session.readSnapshot(communityId, community);
+      if (!snapshot) throw new BookingAdminUnavailableError();
+      return snapshot;
+    });
+    return Object.freeze({ configuration: await modelForSnapshot(result),
+      guildLinkRequest: Object.freeze({ requestId: change.requestId, status: decision }) });
+  }
+
   async function updateCycleSchedule(rawChange) {
     const change = validateBookingAdminChange(rawChange);
     if (change.section !== "cycleSchedule" || gameProfile !== "wos") {
@@ -256,5 +317,6 @@ export function createBookingAdminService({
     return Object.freeze({ configuration: await modelForSnapshot(result.snapshot), changed: result.changed });
   }
 
-  return Object.freeze({ read, update, updateGuestLink, unlinkAllianceGuild, updateCycleSchedule });
+  return Object.freeze({ read, update, updateGuestLink, unlinkAllianceGuild,
+    decideGuildLinkRequest, updateCycleSchedule });
 }

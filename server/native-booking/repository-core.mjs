@@ -49,6 +49,92 @@ class ProfileScopedBookingSession {
     return result.rows[0] ?? null;
   }
 
+  async lockCommunitySetup(communityCode, discordGuildId) {
+    for (const scope of [`community:${communityCode}`, `guild:${discordGuildId}`].sort()) {
+      await this.client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        `native-community-setup:${this.gameProfile}:${scope}`,
+      ]);
+    }
+  }
+
+  async countActiveCommunityGuilds(communityId) {
+    const result = await this.client.query(
+      `SELECT count(*)::integer AS count FROM booking_discord_guilds
+        WHERE game_profile=$1 AND community_id=$2 AND link_status='active'`,
+      [this.gameProfile, communityId],
+    );
+    return result.rows[0]?.count ?? 0;
+  }
+
+  async findPendingCommunityGuildLinkRequest(communityId, discordGuildId) {
+    return (await this.client.query(
+      `SELECT id,status FROM community_guild_link_requests
+        WHERE game_profile=$1 AND community_id=$2 AND requesting_discord_guild_id=$3
+          AND status='pending'`,
+      [this.gameProfile, communityId, discordGuildId],
+    )).rows[0] ?? null;
+  }
+
+  async insertCommunityGuildLinkRequest(input) {
+    await this.client.query(
+      `INSERT INTO community_guild_link_requests
+         (game_profile,id,community_id,requesting_discord_guild_id,
+          requesting_discord_guild_name,alliance_abbreviation,requested_by_discord_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [this.gameProfile, input.id, input.communityId, input.discordGuildId,
+       input.discordGuildName, input.alliance, input.actorId],
+    );
+  }
+
+  async insertCommunityGuildLinkRequestAudit(input) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,
+          source,actor_type,actor_id,correlation_id,after_data)
+       VALUES ($1,$2,$3,'discord_guild_link_request',$4,'alliance_guild_link_requested',
+               'discord','discord_user',$5,$6,$7)`,
+      [this.gameProfile, input.id, input.communityId, input.requestId, input.actorId,
+       input.correlationId, input.afterData],
+    );
+  }
+
+  async createWosCommunityDefaults({ id, locationCode, displayName, actorId }) {
+    if (this.gameProfile !== "wos") throw new TypeError("Automatic community defaults are WOS-only.");
+    await this.client.query(
+      `INSERT INTO booking_communities
+         (game_profile,id,location_code,display_name,bookings_open)
+       VALUES ($1,$2,$3,$4,false)`,
+      [this.gameProfile, id, locationCode, displayName],
+    );
+    await this.client.query(
+      `INSERT INTO booking_settings
+         (game_profile,community_id,construction_fc_required,
+          construction_rfc_required,construction_speedups_required,
+          research_shards_required,research_speedups_required,troop_speedups_required)
+       VALUES ($1,$2,true,true,true,true,true,true)`,
+      [this.gameProfile, id],
+    );
+    await this.client.query(
+      `INSERT INTO booking_community_services
+         (game_profile,community_id,service_code,enabled,updated_by_actor_id)
+       SELECT $1,$2,service_code,true,$3 FROM minister_services
+        WHERE game_profile=$1 AND active=true`,
+      [this.gameProfile, id, actorId],
+    );
+    return this.findCommunityById(id);
+  }
+
+  async insertCommunitySetupAudit({ id, communityId, actorId, correlationId, afterData }) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,
+          source,actor_type,actor_id,correlation_id,after_data)
+       VALUES ($1,$2,$3,'booking_community',$3,'native_community_created',
+               'discord','discord_user',$4,$5,$6)`,
+      [this.gameProfile, id, communityId, actorId, correlationId, afterData],
+    );
+  }
+
   async linkDiscordGuild({ discordGuildId, communityId, discordGuildName, actorId }) {
     const existing = await this.client.query(
       `SELECT community_id FROM booking_discord_guilds
@@ -459,23 +545,50 @@ class ProfileScopedBookingSession {
     return result.rows[0].exists;
   }
 
-  async insertWebsiteBooking(input) {
+  async hasConfirmedBookingForPlayerService(communityId, windowId, serviceCode, playerId) {
+    const result = await this.client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM minister_bookings
+         WHERE game_profile=$1 AND community_id=$2 AND window_id=$3
+           AND service_code=$4 AND player_id_snapshot=$5 AND status='confirmed'
+       ) AS exists`,
+      [this.gameProfile, communityId, windowId, serviceCode, playerId],
+    );
+    return result.rows[0].exists;
+  }
+
+  async findUniqueActiveParticipantForManualBooking(
+    communityId, playerId, inGameName, alliance,
+  ) {
+    const result = await this.client.query(
+      `SELECT id,discord_user_id,source_discord_guild_id
+         FROM booking_participants
+        WHERE game_profile=$1 AND community_id=$2 AND status='active'
+          AND player_id=$3 AND in_game_name=$4 AND alliance=$5
+        ORDER BY id LIMIT 2 FOR SHARE`,
+      [this.gameProfile, communityId, playerId, inGameName, alliance],
+    );
+    return result.rowCount === 1 ? result.rows[0] : null;
+  }
+
+  async insertConfirmedBooking(input) {
     const result = await this.client.query(
       `INSERT INTO minister_bookings
-         (game_profile, id, community_id, window_id, service_date_id, service_code,
-          booking_date, slot_id, participant_id, discord_user_id, player_id_snapshot,
-          in_game_name_snapshot, alliance_snapshot, display_time_label_snapshot,
-          source, actor_type, actor_id, idempotency_key, correlation_id,
+         (game_profile,id,community_id,window_id,service_date_id,service_code,
+          booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
+          in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
+          source,actor_type,actor_id,idempotency_key,correlation_id,
           source_discord_guild_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-               'website','discord_user',$10,$15,$16,$17)
-       RETURNING id, service_code, booking_date, display_time_label_snapshot,
-                 in_game_name_snapshot, alliance_snapshot, status`,
+               $15,$16,$17,$18,$19,$20)
+       RETURNING id,service_code,booking_date,display_time_label_snapshot,
+                 in_game_name_snapshot,alliance_snapshot,status`,
       [this.gameProfile, input.id, input.communityId, input.windowId,
        input.serviceDateId, input.serviceCode, input.bookingDate, input.slotId,
-       input.participantId, input.discordUserId, input.playerId, input.inGameName,
-       input.alliance, input.displayTime, input.idempotencyKey, input.correlationId,
-       input.sourceGuildId],
+       input.participantId ?? null, input.discordUserId ?? null, input.playerId,
+       input.inGameName, input.alliance, input.displayTime, input.source,
+       input.actorType, input.actorId, input.idempotencyKey, input.correlationId,
+       input.sourceGuildId ?? null],
     );
     return result.rows[0];
   }

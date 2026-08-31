@@ -50,7 +50,7 @@ test("owned booking reschedule and cancellation are atomic under forced RLS", { 
         await c.query("INSERT INTO booking_guest_share_links (game_profile,id,community_id,token_hash,token_hint,label) VALUES ($1,$2,$3,$4,$5,'Manager race test')", [profile, randomUUID(), communityId, hashGuestShareToken(shareToken), shareToken.slice(0, 6)]);
         await c.query("INSERT INTO booking_windows (game_profile,id,community_id,status,opens_at,closes_at,created_by_actor_type) VALUES ($1,$2,$3,'open',now()-interval '1 hour',now()+interval '1 day','system')", [profile, windowId, communityId]);
         await c.query("INSERT INTO booking_service_dates (game_profile,id,community_id,window_id,service_code,booking_date) VALUES ($1,$2,$3,$4,'construction','2030-08-21')", [profile, dateId, communityId, windowId]);
-        for (let i = 0; i < 40; i++) {
+        for (let i = 0; i < 45; i++) {
           const slot = randomUUID();
           const time = `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`;
           fixtures[profile].slots.push(slot);
@@ -195,6 +195,62 @@ test("owned booking reschedule and cancellation are atomic under forced RLS", { 
       assert.equal(publicBoard.services[0].slots.find((slot) => slot.time === "09:00").state, "available");
     });
 
+    await t.test("manager manual booking is complete, audited, idempotent, and duplicate-safe", async () => {
+      const service = manage("wos", "manual-actor", "Manual Manager");
+      const input = (slotIndex, playerId = "700700") => ({
+        playerId, inGameName: "Manual Player", alliance: "MAN",
+        serviceCode: "construction", slotId: fixtures.wos.slots[slotIndex],
+        requirements: { fc: 20, speedups: 8 },
+      });
+      await createRegistrationService({
+        context: context("wos", fixtures.wos.communityId, "manual-player-discord"),
+        repository: repos.wos,
+      }).upsert({ playerId: "700700", inGameName: "Manual Player", alliance: "MAN" },
+        "register-manual-player-0001");
+      const created = await service.create(input(40), "manager-manual-create-0001");
+      assert.equal(created.status, 201);
+      assert.equal(created.body.booking.playerName, "Manual Player");
+      assert.equal((await service.create(input(40), "manager-manual-create-0001")).replayed, true);
+      const race = await Promise.allSettled([
+        service.create(input(41, "701701"), "manager-manual-race-a"),
+        service.create(input(42, "701701"), "manager-manual-race-b"),
+      ]);
+      assert.equal(race.filter((result) => result.status === "fulfilled").length, 1);
+      assert.equal(race.find((result) => result.status === "rejected").reason.code,
+        "booking_already_exists");
+      await assert.rejects(service.create({ ...input(43, "702702"), requirements: { fc: 20 } },
+        "manager-manual-missing-requirement"), (error) => error.code === "invalid_requirements");
+      await assert.rejects(guest("wos").create(fixtures.wos.shareToken, input(44),
+        "guest-duplicate-manual-0001"), (error) => error.code === "booking_already_exists");
+      const persisted = await withProfile(runtime, "wos", (c) => c.query(
+        `SELECT booking.source,booking.actor_type,booking.actor_id,
+                count(answer.requirement_code)::integer AS answers
+           FROM minister_bookings booking
+           LEFT JOIN booking_requirement_answers answer
+             ON answer.game_profile=booking.game_profile AND answer.booking_id=booking.id
+          WHERE booking.id=$1
+          GROUP BY booking.id,booking.source,booking.actor_type,booking.actor_id`,
+        [created.body.booking.bookingId],
+      ));
+      assert.deepEqual(persisted.rows, [{ source: "admin", actor_type: "admin",
+        actor_id: "manual-actor", answers: 2 }]);
+      const points = await withProfile(runtime, "wos", (c) => c.query(
+        `SELECT count(*)::integer AS count FROM player_points_ledger
+          WHERE booking_id=$1 AND reason='appointment_confirmed'`,
+        [created.body.booking.bookingId],
+      ));
+      assert.equal(points.rows[0].count, 1);
+      const audit = await withProfile(runtime, "wos", (c) => c.query(
+        `SELECT event_type,actor_id,after_data->>'playerId' AS player_id,
+                after_data->>'serviceCode' AS service_code,after_data->>'slotId' AS slot_id
+           FROM booking_change_events WHERE aggregate_id=$1`,
+        [created.body.booking.bookingId],
+      ));
+      assert.deepEqual(audit.rows, [{ event_type: "manager_manual_booking",
+        actor_id: "manual-actor", player_id: "700700", service_code: "construction",
+        slot_id: fixtures.wos.slots[40] }]);
+    });
+
     await t.test("manager reschedule moves atomically, preserves answers, updates reminders and attributes the player DM", async () => {
       const original = await create("wos", "manager-move-32", 19);
       const cancelOriginal = await create("wos", "manager-notify-cancel", 38);
@@ -236,7 +292,7 @@ test("owned booking reschedule and cancellation are atomic under forced RLS", { 
       assert.equal(managerBoard.services[0].slots.find((slot) => slot.time === "10:00").bookingId,
         moved.body.booking.bookingId);
       const activity = managerBoard.activity.find((event) => event.action === "manager_booking_rescheduled");
-      assert.deepEqual({ manager: activity.managerDisplayName, previous: activity.previousTime,
+      assert.deepEqual({ manager: activity.actorDisplayName, previous: activity.previousTime,
         next: activity.newTime }, { manager: "Operator One", previous: "09:30", next: "10:00" });
       const reminders = await withProfile(runtime, "wos", (c) => c.query(
         `SELECT booking_id,status FROM booking_discord_notifications

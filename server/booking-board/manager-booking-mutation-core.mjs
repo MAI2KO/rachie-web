@@ -6,6 +6,15 @@ import {
   BookingMutationIdempotencyConflictError,
 } from "../native-booking/booking-mutation-service-core.mjs";
 import { validateIdempotencyKey } from "../native-booking/registration-validation.mjs";
+import {
+  validateGuestBookingInput,
+  validateGuestRequirementAnswers,
+} from "../booking-approval/domain-core.mjs";
+import {
+  APPOINTMENT_CONFIRMED_POINTS,
+  CYCLE_DISCORD_PARTICIPATION_POINTS,
+  POINT_REASONS,
+} from "../points/domain-core.mjs";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const sha256 = (value) => createHash("sha256").update(value, "utf8").digest("hex");
@@ -71,6 +80,128 @@ export function createManagerBookingMutationService({
   const actor = assertTrustedManagerContext(managerContext, gameProfile, communityId);
 
   return Object.freeze({
+    async create(rawInput, publicIdempotencyKey) {
+      const input = validateGuestBookingInput(rawInput);
+      const key = scopedKey(gameProfile, communityId, actor.discordUserId,
+        validateIdempotencyKey(publicIdempotencyKey));
+      const operation = "manager_manual_booking";
+      const hash = requestHash(gameProfile, communityId, actor.discordUserId,
+        operation, null, input);
+      try {
+        return await repository.withTransaction(async (session) => {
+          const correlationId = createId();
+          const community = await session.lockCommunityForBooking(communityId);
+          const prior = replayOrConflict(await session.claimBookingMutationIdempotency({
+            communityId, idempotencyKey: key, operation, requestHash: hash, correlationId,
+          }), operation, hash);
+          if (prior) return prior;
+          if (!community || community.status !== "active") {
+            throw new BookingMutationError("community_unavailable", "The community is unavailable.");
+          }
+          const slot = await session.lockAppointmentSlot(communityId, input.slotId);
+          if (!slot || slot.service_code !== input.serviceCode) {
+            throw new BookingMutationError("invalid_slot", "Invalid appointment slot.");
+          }
+          if (!slot.service_active) {
+            throw new BookingMutationError("invalid_service", "The selected service is unavailable.");
+          }
+          const at = now();
+          if (slot.slot_status !== "available"
+              || await session.hasActiveSlotBlock(slot.id)
+              || await session.hasActiveApprovalHoldForSlot(slot.id, at)
+              || await session.hasConfirmedBookingForSlot(slot.id)) {
+            throw new BookingMutationError("slot_unavailable", "The selected slot is no longer available.");
+          }
+          if (await session.hasConfirmedBookingForPlayerService(
+            communityId, slot.window_id, input.serviceCode, input.playerId,
+          )) {
+            throw new BookingMutationError("booking_already_exists",
+              "This Player ID already has an appointment for this service and cycle.");
+          }
+          const settings = await session.findBookingSettings(communityId);
+          const answers = validateGuestRequirementAnswers(gameProfile, input, settings);
+          const participant = await session.findUniqueActiveParticipantForManualBooking(
+            communityId, input.playerId, input.inGameName, input.alliance,
+          );
+          const bookingId = createId();
+          const booking = await session.insertConfirmedBooking({
+            id: bookingId, communityId, windowId: slot.window_id,
+            serviceDateId: slot.service_date_id, serviceCode: slot.service_code,
+            bookingDate: slot.booking_date, slotId: slot.id, playerId: input.playerId,
+            inGameName: input.inGameName, alliance: input.alliance,
+            displayTime: slot.display_time_label, actorId: actor.discordUserId,
+            source: "admin", actorType: "admin",
+            participantId: participant?.id, discordUserId: participant?.discord_user_id,
+            sourceGuildId: participant?.source_discord_guild_id,
+            idempotencyKey: key, correlationId,
+          });
+          for (const answer of answers) {
+            await session.insertBookingRequirementAnswer({ bookingId, ...answer });
+          }
+          const afterData = {
+            action: "manager_manual_booking", bookingId, serviceCode: slot.service_code,
+            slotId: slot.id, date: String(slot.booking_date).slice(0, 10),
+            displayTime: slot.display_time_label, playerId: input.playerId,
+            playerName: input.inGameName, alliance: input.alliance,
+            actorDisplayName: actor.displayName, correlationId,
+          };
+          await session.insertBookingMutationEvent({
+            id: createId(), communityId, bookingId,
+            eventType: "manager_manual_booking", actorId: actor.discordUserId,
+            correlationId, beforeData: {}, afterData,
+          });
+          await session.insertBookingMutationOutbox({
+            id: createId(), communityId, eventType: "booking.created",
+            idempotencyKey: `manager.booking.created:${bookingId}`, correlationId,
+            payload: afterData,
+          });
+          if (participant) {
+            await session.insertPlayerPointsEntry({
+              id: createId(), participantId: participant.id, communityId,
+              discordUserId: participant.discord_user_id,
+              pointsDelta: APPOINTMENT_CONFIRMED_POINTS,
+              reason: POINT_REASONS.appointmentConfirmed,
+              bookingWindowId: slot.window_id, bookingId,
+              sourceGuildId: participant.source_discord_guild_id,
+              idempotencyKey: `appointment_confirmed:${participant.id}:${slot.window_id}:${slot.service_code}`,
+              metadata: { serviceCode: slot.service_code, createdByManager: true },
+            });
+            if (participant.source_discord_guild_id) {
+              await session.insertCommunityParticipationPoints({
+                id: createId(), communityId,
+                sourceGuildId: participant.source_discord_guild_id,
+                bookingWindowId: slot.window_id,
+                pointsDelta: CYCLE_DISCORD_PARTICIPATION_POINTS,
+                reason: POINT_REASONS.cycleDiscordParticipation,
+                idempotencyKey: `cycle_discord_participation:${slot.window_id}:${participant.source_discord_guild_id}`,
+                metadata: { firstQualifyingBookingId: bookingId },
+              });
+            }
+          }
+          const body = {
+            outcome: "created",
+            booking: { ...publicBooking(booking, slot.service_label),
+              playerName: booking.in_game_name_snapshot,
+              alliance: booking.alliance_snapshot },
+          };
+          await session.completeBookingIdempotency(communityId, key, 201, body);
+          return { status: 201, body, replayed: false };
+        });
+      } catch (error) {
+        if (error?.code === "23505") {
+          if (error.constraint === "minister_bookings_one_active_per_slot") {
+            throw new BookingMutationError("slot_unavailable", "The selected slot is no longer available.");
+          }
+          if (["minister_bookings_one_active_player_service",
+            "minister_bookings_one_active_participant_service"].includes(error.constraint)) {
+            throw new BookingMutationError("booking_already_exists",
+              "This Player ID already has an appointment for this service and cycle.");
+          }
+        }
+        throw error;
+      }
+    },
+
     async reschedule(bookingId, rawSlotId, publicIdempotencyKey) {
       const slotId = validateSlotId(rawSlotId);
       const key = scopedKey(gameProfile, communityId, actor.discordUserId,

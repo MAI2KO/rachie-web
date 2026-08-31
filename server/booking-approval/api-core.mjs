@@ -88,7 +88,8 @@ export function createGuestBookingApi(dependencies) {
         }
         if (error instanceof GuestBookingRequestError) {
           const status = error.code === "invalid_share_link" ? 404
-            : ["slot_unavailable", "pending_request_exists", "bookings_closed", "booking_window_unavailable"].includes(error.code) ? 409
+            : ["slot_unavailable", "pending_request_exists", "booking_already_exists",
+              "bookings_closed", "booking_window_unavailable"].includes(error.code) ? 409
               : 400;
           return response(status, { ok: false, error: error.message, code: error.code, fields: error.fields });
         }
