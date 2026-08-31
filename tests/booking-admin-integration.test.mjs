@@ -8,6 +8,7 @@ import pg from "pg";
 import { createProfileScopedBookingAdminRepository } from "../server/booking-admin/repository-core.mjs";
 import { createBookingAdminService } from "../server/booking-admin/service-core.mjs";
 import { createProfileScopedApprovalRepository } from "../server/booking-approval/repository-core.mjs";
+import { createDiscordIntegrationRepository } from "../server/discord-integration/repository-core.mjs";
 import { createGuestBookingPageService } from "../server/booking-approval/service-core.mjs";
 import { loadMigrations, runMigrations } from "../server/database/migrations.mjs";
 import {
@@ -97,10 +98,10 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       discordUserId: "111111111111111111", displayName: "Manager",
     };
     const adminRepository = createProfileScopedBookingAdminRepository("wos", pool);
-    const guestTokens = ["a".repeat(43), "b".repeat(43)];
+    const guestTokenSecret = "booking-admin-integration-secret-value-123456";
     const service = createBookingAdminService({
       gameProfile: "wos", communityId: sharedId, managerContext, repository: adminRepository,
-      createGuestToken: () => guestTokens.shift(),
+      guestTokenSecret,
       now: () => new Date("2026-08-27T12:00:00.000Z"),
     });
     const initial = await service.read();
@@ -133,17 +134,44 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
       gameProfile: "wos", repository: createProfileScopedApprovalRepository("wos", pool),
     });
     const generated = await service.updateGuestLink({ section: "guestLink", action: "generate" });
-    assert.equal(generated.guestLinkPath, `/book/${"a".repeat(43)}`);
-    assert.equal((await guestPages.read("a".repeat(43))).community.code, "9999");
+    const generatedToken = generated.guestLinkPath.slice("/book/".length);
+    assert.equal((await guestPages.read(generatedToken)).community.code, "9999");
+    const discord = createDiscordIntegrationRepository("wos", pool);
+    const generatedWork = (await discord.withTransaction((session) => session.claim(10, {
+      guestTokenSecret, publicBaseUrl: "https://current.example",
+    }))).find((work) => work.type === "manager_guest_link");
+    assert.equal(generatedWork.guestUrl, `https://current.example${generated.guestLinkPath}`);
+    assert.deepEqual(generatedWork.guilds, []);
+    await discord.withTransaction((session) => session.finish(generatedWork.workId,
+      generatedWork.claimToken, { status: "retry", errorCode: "temporary_dm_failure" }));
     const rotated = await service.updateGuestLink({ section: "guestLink", action: "rotate" });
-    assert.equal(rotated.guestLinkPath, `/book/${"b".repeat(43)}`);
-    await assert.rejects(guestPages.read("a".repeat(43)), (error) => error.code === "invalid_share_link");
+    const rotatedToken = rotated.guestLinkPath.slice("/book/".length);
+    await assert.rejects(guestPages.read(generatedToken), (error) => error.code === "invalid_share_link");
     await assert.rejects(createGuestBookingPageService({
       gameProfile: "kingshot", repository: createProfileScopedApprovalRepository("kingshot", pool),
-    }).read("b".repeat(43)), (error) => error.code === "invalid_share_link");
+    }).read(rotatedToken), (error) => error.code === "invalid_share_link");
+    const rotatedWork = (await discord.withTransaction((session) => session.claim(10, {
+      guestTokenSecret, publicBaseUrl: "https://current.example",
+    }))).find((work) => work.type === "manager_guest_link");
+    assert.equal(rotatedWork.guestUrl, `https://current.example${rotated.guestLinkPath}`);
     assert.equal((await service.updateGuestLink({ section: "guestLink", action: "revoke" }))
       .configuration.guestLink.status, "revoked");
-    await assert.rejects(guestPages.read("b".repeat(43)), (error) => error.code === "invalid_share_link");
+    assert.equal(await discord.withTransaction((session) => session.finish(rotatedWork.workId,
+      rotatedWork.claimToken, { status: "sent" })), false);
+    await assert.rejects(guestPages.read(rotatedToken), (error) => error.code === "invalid_share_link");
+    const guestLinkState = await withProfile(pool, "wos", (client) => client.query(
+      `SELECT notification_type,status,idempotency_key,recipient_discord_user_id
+         FROM booking_discord_notifications WHERE notification_type='manager_guest_link'
+         ORDER BY created_at`,
+    ));
+    assert.deepEqual(guestLinkState.rows.map(({ notification_type, status,
+      recipient_discord_user_id }) => ({ notification_type, status, recipient_discord_user_id })), [
+      { notification_type: "manager_guest_link", status: "superseded",
+        recipient_discord_user_id: null },
+      { notification_type: "manager_guest_link", status: "superseded",
+        recipient_discord_user_id: null },
+    ]);
+    assert.equal(JSON.stringify(guestLinkState.rows).includes("https://"), false);
 
     await service.update({ section: "booking", enabled: false });
     await service.update({ section: "service", serviceCode: "construction", enabled: false });

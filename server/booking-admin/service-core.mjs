@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import {
   assertTrustedManagerContext,
-  generateGuestShareToken,
   guestShareTokenHint,
   hashGuestShareToken,
 } from "../booking-approval/domain-core.mjs";
+import { manualGuestLinkToken } from "../automatic-booking-cycle/announcement-core.mjs";
 import {
   bookingAdminModel,
   BookingAdminGuildLinkDecisionDeniedError,
@@ -30,7 +30,8 @@ export function createBookingAdminService({
   managerContext,
   repository,
   createId = randomUUID,
-  createGuestToken = generateGuestShareToken,
+  createGuestToken = /** @type {null | (() => string)} */ (null),
+  guestTokenSecret = /** @type {string | null} */ (null),
   verifyGuildOwner = async (input) => {
     void input;
     return { status: "unavailable" };
@@ -134,17 +135,26 @@ export function createBookingAdminService({
           "no_active_link", "There is no active guest link to change.",
         );
       }
-      if (existing) await session.revokeGuestLink(existing.id, actor.discordUserId);
+      if (existing) {
+        await session.revokeGuestLink(existing.id, actor.discordUserId);
+        await session.supersedeManualGuestLinkNotification(existing.id);
+      }
 
       let token = null;
       let aggregateId = existing?.id ?? communityId;
       if (change.action !== "revoke") {
-        token = createGuestToken();
         aggregateId = createId();
+        token = createGuestToken
+          ? createGuestToken()
+          : manualGuestLinkToken(guestTokenSecret, gameProfile, communityId, aggregateId);
+        if (!token) throw new BookingAdminUnavailableError("Guest-link delivery is unavailable.");
         await session.insertGuestLink({
           id: aggregateId, communityId, tokenHash: hashGuestShareToken(token),
           tokenHint: guestShareTokenHint(token), actorId: actor.discordUserId,
           rotatedFromLinkId: change.action === "rotate" ? existing.id : null,
+        });
+        await session.insertManualGuestLinkNotification({
+          id: createId(), communityId, guestLinkId: aggregateId,
         });
       }
       const correlationId = createId();

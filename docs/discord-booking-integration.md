@@ -40,6 +40,17 @@ Materialisation is deliberately lazy: guest submission writes `booking.approval.
 
 Discord forbidden/closed-DM errors become permanent delivery failures. Temporary Discord or network failures use bounded persisted backoff. Neither failure changes booking state. Sends use a stable Discord nonce with nonce enforcement, reducing the ordinary send-before-ack duplicate window without exposing queue or booking identifiers in the DM.
 
+Migration `0011` extends that same queue for manual Booking Admin guest-link
+Generate and Replace actions. The link row and one manager-only notification are
+written atomically. Delivery reconstructs the token from the existing
+profile-specific integration secret, verifies it against the stored hash, and
+builds the URL from the current website origin; plaintext tokens and URLs are
+not stored in notification or audit rows. Revoke creates no message and
+supersedes unsent work. Recipient discovery uses the active linked guilds in the
+existing booking-open setup for the exact profile/community and the same owner,
+Administrator, and configured bot-manager-role rules, with users deduplicated
+across alliance guilds.
+
 ## Manager discovery and buttons
 
 The bot fetches current members of every Discord guild linked to the community. It selects the guild owner, members whose current permissions include Administrator, and members holding that guild's configured `bot_manager_role_id`, then deduplicates Discord users across guilds. Successfully sent copies are recorded in `booking_approval_discord_messages`.

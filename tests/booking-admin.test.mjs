@@ -51,6 +51,7 @@ function snapshot() {
 function fakeRepository() {
   const state = snapshot();
   const audits = [];
+  const notifications = [];
   const session = {
     async lockCommunity(id) { return id === communityId ? state.community : null; },
     async readSnapshot(id) { return id === communityId ? state : null; },
@@ -69,16 +70,24 @@ function fakeRepository() {
       state.guestLink.revoked_at = "2026-08-26T12:00:00.000Z";
       state.guestLink.revoked_by_actor_id = actorId;
     },
+    async supersedeManualGuestLinkNotification(linkId) {
+      for (const notification of notifications) {
+        if (notification.guestLinkId === linkId) notification.status = "superseded";
+      }
+    },
     async insertGuestLink(input) {
       state.guestLink = {
         id: input.id, token_hash: input.tokenHash, token_hint: input.tokenHint,
         created_at: "2026-08-26T12:00:00.000Z", expires_at: null, revoked_at: null,
       };
     },
+    async insertManualGuestLinkNotification(input) {
+      notifications.push({ ...input, status: "pending" });
+    },
     async insertGuestLinkAudit(input) { audits.push(input); },
   };
   return {
-    gameProfile: "wos", state, audits,
+    gameProfile: "wos", state, audits, notifications,
     async withTransaction(work) { return work(session); },
   };
 }
@@ -175,7 +184,7 @@ test("booking, service, resource, and speed-ups toggles persist and are audited"
 test("manager guest-link lifecycle returns plaintext only for generation and rotation", async () => {
   const repository = fakeRepository();
   let id = 0;
-  const tokens = ["a".repeat(43), "b".repeat(43)];
+  const tokens = ["a".repeat(43), "b".repeat(43), "c".repeat(43)];
   const service = createBookingAdminService({
     gameProfile: "wos", communityId, managerContext: manager, repository,
     createId: () => `00000000-0000-4000-8000-${String(++id).padStart(12, "0")}`,
@@ -186,6 +195,8 @@ test("manager guest-link lifecycle returns plaintext only for generation and rot
   const generated = await service.updateGuestLink({ section: "guestLink", action: "generate" });
   assert.equal(generated.configuration.guestLink.status, "active");
   assert.equal(generated.guestLinkPath, `/book/${"a".repeat(43)}`);
+  assert.equal(repository.notifications.length, 1);
+  assert.equal(repository.notifications[0].status, "pending");
   assert.doesNotMatch(JSON.stringify(generated.configuration), /token|hash/i);
   await assert.rejects(
     service.updateGuestLink({ section: "guestLink", action: "generate" }),
@@ -194,10 +205,19 @@ test("manager guest-link lifecycle returns plaintext only for generation and rot
 
   const rotated = await service.updateGuestLink({ section: "guestLink", action: "rotate" });
   assert.equal(rotated.guestLinkPath, `/book/${"b".repeat(43)}`);
+  assert.equal(repository.notifications.length, 2);
+  assert.equal(repository.notifications[0].status, "superseded");
+  assert.equal(repository.notifications[1].status, "pending");
   assert.equal(repository.state.guestLink.token_hash.length, 64);
   const revoked = await service.updateGuestLink({ section: "guestLink", action: "revoke" });
   assert.equal(revoked.guestLinkPath, null);
   assert.equal(revoked.configuration.guestLink.status, "revoked");
+  assert.equal(repository.notifications.length, 2);
+  assert.equal(repository.notifications[1].status, "superseded");
+  const regenerated = await service.updateGuestLink({ section: "guestLink", action: "generate" });
+  assert.equal(regenerated.guestLinkPath, `/book/${"c".repeat(43)}`);
+  assert.equal(repository.notifications.length, 3);
+  assert.equal(repository.notifications[2].status, "pending");
   assert.equal(repository.audits.slice(-3).every((audit) => audit.actorId === manager.discordUserId), true);
 });
 

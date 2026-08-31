@@ -221,6 +221,7 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
       const adminService = createBookingAdminService({
         gameProfile: "wos", communityId, managerContext,
         repository: createProfileScopedBookingAdminRepository("wos", runtime),
+        guestTokenSecret: "runtime-booking-integration-secret-value-123456",
       });
       assert.equal((await adminService.update({ section: "booking", enabled: false }))
         .community.bookingsEnabled, false);
@@ -231,6 +232,15 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
         section: "requirement", serviceCode: "construction", requirementCode: "fc", enabled: true,
       })).services.find(({ code }) => code === "construction")
         .requirements.find(({ code }) => code === "fc").enabled, true);
+      const generated = await adminService.updateGuestLink({
+        section: "guestLink", action: "generate",
+      });
+      assert.match(generated.guestLinkPath, /^\/book\/[A-Za-z0-9_-]{43}$/);
+      assert.equal((await withProfile(runtime, "wos", (client) => client.query(
+        `SELECT count(*)::int AS count FROM booking_discord_notifications
+          WHERE community_id=$1 AND notification_type='manager_guest_link'`, [communityId],
+      ))).rows[0].count, 1);
+      await adminService.updateGuestLink({ section: "guestLink", action: "revoke" });
     });
 
     await t.test("runtime role can reconcile deterministic automatic WOS cycles", async () => {

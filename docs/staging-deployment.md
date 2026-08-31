@@ -343,6 +343,7 @@ ledger insert is transactional.
 | `0008` | `booking_window_announcements` | `7ce9efc6121cdddddfcb2c39c686537df3af72dcc4a82c94e5f262972c4dbebc` |
 | `0009` | `access_overrides_points` | `8a38247cfb1223ae10f553592be38a603be285d5da7ff7dc5224e371cd14a140` |
 | `0010` | `community_guild_link_requests` | `7920fefc9b498d4b7a01ef0840acbd0fa2ccf350c6a104ab402155b88f5780f3` |
+| `0011` | `manual_guest_link_notifications` | `1fe4b696cc9548b146a31477b7d8dad685a1efa9ab64d5080e4d352a2329d52b` |
 
 Reruns are safe through the ledger. Individual SQL files are not standalone
 idempotent and must never be manually rerun or edited after application.
@@ -353,7 +354,7 @@ Staging procedure:
 2. From the exact release commit, run `npm ci`.
 3. Run `npm run db:migrate` through the release job with its direct private
    migration-role `DATABASE_URL`, without echoing it.
-4. Confirm `app_schema_migrations` contains exactly `0001`–`0010` with the hashes
+4. Confirm `app_schema_migrations` contains exactly `0001`–`0011` with the hashes
    above.
 5. Apply runtime grants, then validate `rolsuper=false`, `rolbypassrls=false` and
    forced-RLS integration tests.
@@ -473,7 +474,7 @@ members from Discord.
 1. Provision isolated staging PostgreSQL and appropriate backups.
 2. Create migration and runtime roles with the SQL above.
 3. Create private URLs; set only runtime `DATABASE_URL` on the web service.
-4. Run `0001`–`0010` through the migration release job and verify the ledger.
+4. Run `0001`–`0011` through the migration release job and verify the ledger.
 5. Apply and verify runtime grants and forced RLS.
 6. Load reviewed staging community/guild/settings/window/service/date/slot data.
    First create each JSON file with `npm run db:bootstrap-config`; this local

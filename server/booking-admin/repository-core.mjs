@@ -375,6 +375,17 @@ class BookingAdminSession {
     );
   }
 
+  async supersedeManualGuestLinkNotification(linkId) {
+    await this.client.query(
+      `UPDATE booking_discord_notifications
+          SET status='superseded',claim_token=NULL,claimed_at=NULL,claimed_until=NULL,updated_at=now()
+        WHERE game_profile=$1 AND guest_share_link_id=$2
+          AND notification_type='manager_guest_link'
+          AND status IN ('pending','retry','claimed')`,
+      [this.gameProfile, linkId],
+    );
+  }
+
   async insertGuestLink({ id, communityId, tokenHash, tokenHint, actorId, rotatedFromLinkId }) {
     await this.client.query(
       `INSERT INTO booking_guest_share_links
@@ -382,6 +393,16 @@ class BookingAdminSession {
           created_by_actor_id,rotated_from_link_id)
        VALUES ($1,$2,$3,$4,$5,'In-game guest booking link',$6,$7)`,
       [this.gameProfile, id, communityId, tokenHash, tokenHint, actorId, rotatedFromLinkId],
+    );
+  }
+
+  async insertManualGuestLinkNotification({ id, communityId, guestLinkId }) {
+    await this.client.query(
+      `INSERT INTO booking_discord_notifications
+         (game_profile,id,community_id,notification_type,guest_share_link_id,idempotency_key)
+       VALUES ($1,$2,$3,'manager_guest_link',$4,$5)
+       ON CONFLICT (game_profile,community_id,idempotency_key) DO NOTHING`,
+      [this.gameProfile, id, communityId, guestLinkId, `manual-guest-link:${guestLinkId}`],
     );
   }
 

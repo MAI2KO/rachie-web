@@ -9,6 +9,7 @@ import {
   ManagerVerificationUnavailableError,
 } from "@/server/booking-board/manager-authorization-core.mjs";
 import { createServerRateLimiter } from "@/server/rate-limit/limiter";
+import { getBookingIntegrationSecret } from "@/server/discord-integration/config";
 import { RATE_LIMIT_POLICIES } from "@/server/rate-limit/policies.mjs";
 
 import { authorizeBookingAdminRequest } from "./access";
@@ -62,6 +63,7 @@ async function scope(request: Request, communityCode: string) {
     communityId: authorization.managerContext.authorizedCommunityId,
     managerContext: authorization.managerContext,
     repository,
+    guestTokenSecret: getBookingIntegrationSecret(authorization.discordSession.gameProfile),
     verifyGuildOwner: verifyDiscordGuildOwner,
   });
   return { ...authorization, service };

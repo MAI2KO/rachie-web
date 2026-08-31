@@ -192,6 +192,7 @@ test("migration files are ordered and checksummed", async () => {
       { version: "0008", name: "booking_window_announcements" },
       { version: "0009", name: "access_overrides_points" },
       { version: "0010", name: "community_guild_link_requests" },
+      { version: "0011", name: "manual_guest_link_notifications" },
     ],
   );
   assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));
@@ -372,4 +373,14 @@ test("community guild link requests are additive, profile-scoped, and concurrenc
   assert.match(migration, /FORCE ROW LEVEL SECURITY/);
   assert.match(migration, /community_guild_link_requests_profile_policy/);
   assert.doesNotMatch(migration, /DROP|TRUNCATE|ALTER COLUMN|SET NOT NULL/i);
+});
+
+test("manual guest-link manager notifications extend the durable queue without plaintext storage", () => {
+  const migration = fs.readFileSync(
+    path.join(migrationsDirectory, "0011_manual_guest_link_notifications.sql"), "utf8",
+  );
+  assert.match(migration, /'manager_guest_link'/);
+  assert.match(migration, /guest_share_link_id IS NOT NULL/);
+  assert.match(migration, /recipient_discord_user_id IS NULL/);
+  assert.doesNotMatch(migration, /CREATE TABLE|ADD COLUMN|DROP TABLE|TRUNCATE|ALTER COLUMN|SET NOT NULL/i);
 });

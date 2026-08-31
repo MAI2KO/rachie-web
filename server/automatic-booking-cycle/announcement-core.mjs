@@ -19,3 +19,10 @@ export function automaticWindowGuestTokenRecord(secret, profile, communityId, wi
     tokenHint: guestShareTokenHint(token),
   }) : null;
 }
+
+export function manualGuestLinkToken(secret, profile, communityId, linkId) {
+  if (typeof secret !== "string" || secret.length < 32) return null;
+  return createHmac("sha256", secret)
+    .update(`manual-guest-link:v1:${profile}:${communityId}:${linkId}`, "utf8")
+    .digest("base64url");
+}

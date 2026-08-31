@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { automaticWindowGuestToken } from "../automatic-booking-cycle/announcement-core.mjs";
+import {
+  automaticWindowGuestToken,
+  manualGuestLinkToken,
+} from "../automatic-booking-cycle/announcement-core.mjs";
+import { hashGuestShareToken } from "../booking-approval/domain-core.mjs";
 
 const PROFILES = new Set(["wos", "kingshot"]);
 const RETRY_MINUTES = [1, 5, 15, 30, 60];
@@ -188,6 +192,33 @@ async function workPayload(client, profile, row, deliveryContext = {}) {
       guestUrl: `${deliveryContext.publicBaseUrl}/book/${guestToken}`,
     };
   }
+  if (row.notification_type === "manager_guest_link") {
+    const result = await client.query(
+      `SELECT community.location_code AS "communityCode",link.token_hash AS "tokenHash",
+              array_agg(guild.discord_guild_id ORDER BY guild.discord_guild_id)
+                FILTER (WHERE guild.discord_guild_id IS NOT NULL) AS guilds
+         FROM booking_guest_share_links AS link
+         JOIN booking_communities AS community
+           ON community.game_profile=link.game_profile AND community.id=link.community_id
+         LEFT JOIN booking_discord_guilds AS guild
+           ON guild.game_profile=link.game_profile AND guild.community_id=link.community_id
+          AND guild.link_status='active'
+        WHERE link.game_profile=$1 AND link.id=$2 AND link.community_id=$3
+          AND link.revoked_at IS NULL AND (link.expires_at IS NULL OR link.expires_at>now())
+        GROUP BY community.location_code,link.token_hash`,
+      [profile, row.guest_share_link_id, row.community_id],
+    );
+    const details = result.rows[0];
+    const guestToken = manualGuestLinkToken(
+      deliveryContext.guestTokenSecret, profile, row.community_id, row.guest_share_link_id,
+    );
+    if (!details || !guestToken || hashGuestShareToken(guestToken) !== details.tokenHash
+        || !deliveryContext.publicBaseUrl) {
+      throw new Error("manual_guest_link_configuration");
+    }
+    return { ...base, communityCode: details.communityCode, guilds: details.guilds ?? [],
+      guestUrl: `${deliveryContext.publicBaseUrl}/book/${guestToken}` };
+  }
   if (row.notification_type === "manager_discovery") {
     const guilds = await client.query(
       `SELECT discord_guild_id AS "guildId",bot_manager_role_id AS "managerRoleId"
@@ -276,6 +307,17 @@ class DiscordIntegrationSession {
           AND work.booking_window_id=booking_window.id
           AND booking_window.game_profile=work.game_profile
           AND booking_window.closes_at<=clock_timestamp()
+          AND work.status IN ('pending','retry','claimed')`,
+      [this.profile],
+    );
+    await this.client.query(
+      `UPDATE booking_discord_notifications AS work
+          SET status='superseded',updated_at=now(),claim_token=NULL,
+              claimed_at=NULL,claimed_until=NULL
+         FROM booking_guest_share_links AS link
+        WHERE work.game_profile=$1 AND work.notification_type='manager_guest_link'
+          AND work.guest_share_link_id=link.id AND link.game_profile=work.game_profile
+          AND (link.revoked_at IS NOT NULL OR (link.expires_at IS NOT NULL AND link.expires_at<=now()))
           AND work.status IN ('pending','retry','claimed')`,
       [this.profile],
     );

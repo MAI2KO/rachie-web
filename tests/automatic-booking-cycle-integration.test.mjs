@@ -160,6 +160,8 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
            WHERE community_id=$1 AND revoked_at IS NULL) AS active_links,
          (SELECT count(*)::int FROM booking_discord_notifications
            WHERE community_id=$1 AND notification_type='booking_window_open') AS announcements,
+         (SELECT count(*)::int FROM booking_discord_notifications
+           WHERE community_id=$1 AND notification_type='manager_guest_link') AS manual_announcements,
          (SELECT bool_and(token_hash ~ '^[0-9a-f]{64}$') FROM booking_guest_share_links
            WHERE community_id=$1) AS hashes_only,
          (SELECT min(expires_at) FROM booking_guest_share_links
@@ -169,7 +171,7 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
       [wosCommunityId],
     ));
     assert.deepEqual(openLifecycle.rows[0], {
-      active_links: 1, announcements: 1, hashes_only: true,
+      active_links: 1, announcements: 1, manual_announcements: 0, hashes_only: true,
       expires_at: new Date("2026-09-06T18:00:00.000Z"),
       due_at: new Date("2026-09-01T18:00:00.000Z"),
     });
