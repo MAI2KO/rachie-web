@@ -229,10 +229,10 @@ test("live Discord verifier detects configured role and Administrator permission
 
 test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, and guarded Edit Mode", () => {
   const source = fs.readFileSync(new URL("../components/appointment-board/appointment-board.tsx", import.meta.url), "utf8");
+  const navigation = fs.readFileSync(new URL("../components/community-section-navigation.tsx", import.meta.url), "utf8");
   const badge = fs.readFileSync(new URL("../components/appointment-board/alliance-badge.tsx", import.meta.url), "utf8");
   const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
-  assert.match(source, /wos: \{ community: "State" \}/);
-  assert.match(source, /kingshot: \{ community: "Kingdom" \}/);
+  assert.match(navigation, /profile === "kingshot" \? "Kingdom" : "State"/);
   assert.match(source, /Player name/);
   assert.match(source, /<th scope="col">Time<\/th>[\s\S]*<th scope="col">Alliance<\/th>[\s\S]*<th scope="col">Player<\/th>[\s\S]*<th scope="col">Player ID<\/th>[\s\S]*service\.requirementColumns\.map/);
   assert.match(source, /Player ID/);

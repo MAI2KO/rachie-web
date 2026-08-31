@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 
 import { AllianceBadge } from "./alliance-badge";
-import { CommunityHeaderActions, CommunitySectionNavigation } from "@/components/community-section-navigation";
+import { CommunityPageChrome } from "@/components/community-section-navigation";
 
 type PublicSlot = { time: string; state: "available" | "pending" | "confirmed"; playerName?: string; playerAlliance?: string };
 type PublicService = { name: string; date: string; slots: PublicSlot[] };
@@ -45,11 +45,6 @@ type ManagerBoard = {
     createdAt: string;
   }>;
 };
-
-const terms = {
-  wos: { community: "State" },
-  kingshot: { community: "Kingdom" },
-} as const;
 
 const readableDate = (value: string) => new Intl.DateTimeFormat("en-GB", {
   day: "numeric", month: "long", timeZone: "UTC",
@@ -386,23 +381,18 @@ export function AppointmentBoard({ profile, initialBoard }: {
     }
   }
 
-  const communityTerm = terms[profile].community;
   return (
     <article className="appointment-board">
-      <header className="appointment-board__heading community-page-heading">
-        <div><p className="booking-kicker">{communityTerm} {initialBoard.community.code}</p><h1>{initialBoard.community.displayName}</h1></div>
-        <div className="community-page-header-tools">
-          <CommunityHeaderActions />
-          {managerBoard ? <div aria-label="Appointment manager mode" className="manager-mode-control">
-            <button aria-pressed={editMode} className="booking-button" onClick={() => setEditMode(true)}
-              type="button">Edit appointments</button>
-            <button aria-pressed={!editMode} className="booking-button booking-button--secondary"
-              onClick={() => setEditMode(false)} type="button">Copy mode</button>
-          </div> : null}
-        </div>
-      </header>
-      <CommunitySectionNavigation communityCode={initialBoard.community.code} current="appointments" profile={profile}
-        showAdmin={Boolean(managerBoard)} />
+      <CommunityPageChrome communityCode={initialBoard.community.code} current="appointments"
+        displayName={initialBoard.community.displayName} profile={profile} resolveAdmin={false}
+        showAdmin={Boolean(managerBoard)}>
+        {managerBoard ? <div aria-label="Appointment manager mode" className="manager-mode-control">
+          <button aria-pressed={editMode} className="booking-button" onClick={() => setEditMode(true)}
+            type="button">Edit appointments</button>
+          <button aria-pressed={!editMode} className="booking-button booking-button--secondary"
+            onClick={() => setEditMode(false)} type="button">Copy mode</button>
+        </div> : null}
+      </CommunityPageChrome>
       {notice ? <p aria-live="polite" className="booking-notice">{notice}</p> : null}
       {managerBoard
         ? <ManagerPanels board={managerBoard} busyBooking={busyBooking} busyRequest={busyRequest}

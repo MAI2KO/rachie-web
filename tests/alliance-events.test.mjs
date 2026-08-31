@@ -153,8 +153,8 @@ test("State and Kingdom share navigation and render UTC plus browser-local time 
   const topEvents = fs.readFileSync(new URL("../app/events/page.tsx", import.meta.url), "utf8");
   assert.match(nav, /Appointments/); assert.match(nav, /Alliance Events/);
   assert.match(nav, /managerAuthorized[\s\S]*Booking Admin/);
-  assert.match(ui, /CommunityHeaderActions/);
-  assert.match(ui, /Kingdom/); assert.match(ui, /State/); assert.match(ui, /UTC/); assert.match(ui, /occurrence\.group/);
+  assert.match(ui, /CommunityPageChrome/);
+  assert.match(nav, /Kingdom/); assert.match(nav, /State/); assert.match(ui, /UTC/); assert.match(ui, /occurrence\.group/);
   assert.match(local, /Intl\.DateTimeFormat/); assert.match(local, /timeZoneName/);
   assert.match(state, /requiredProfile="wos"/); assert.match(kingdom, /requiredProfile="kingshot"/);
   assert.doesNotMatch(topEvents, /AllianceEvents|alliance-events/);
@@ -164,8 +164,8 @@ test("Alliance Events presentation uses responsive event cards with event-led hi
   const ui = fs.readFileSync(new URL("../components/alliance-events/alliance-events.tsx", import.meta.url), "utf8");
   const local = fs.readFileSync(new URL("../components/alliance-events/browser-local-time.tsx", import.meta.url), "utf8");
   const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
-  assert.match(ui, /<h3>\{alliance\.name\}<\/h3>/);
-  assert.match(ui, /<h4>\{event\.name\}<\/h4>/);
+  assert.match(ui, /<h2>\{alliance\.name\}<\/h2>/);
+  assert.match(ui, /<h3>\{event\.name\}<\/h3>/);
   assert.match(ui, /<article className="alliance-event-card"/);
   assert.match(ui, /alliance\.events\.map/);
   assert.match(ui, /alliance-event-groups/);
@@ -178,7 +178,7 @@ test("Alliance Events presentation uses responsive event cards with event-led hi
   assert.match(local, /Your local time/);
   assert.match(css, /\.alliance-event-list \{[^}]*grid-template-columns: repeat\(2,/);
   assert.match(css, /\.alliance-event-card \{[^}]*border: 1px solid/);
-  assert.match(css, /\.alliance-event-card h4 \{[^}]*font-weight: 800/);
+  assert.match(css, /\.alliance-event-card h3 \{[^}]*font-weight: 800/);
   assert.match(css, /\.alliance-event-group dt \{[^}]*font-weight: 500/);
   assert.doesNotMatch(css, /alliance-event-group[^}]*justify-content: space-between/);
   assert.match(css, /@media \(max-width: 39\.99rem\)[\s\S]*\.alliance-event-list \{ grid-template-columns: 1fr; \}/);

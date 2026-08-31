@@ -1,5 +1,5 @@
 import { AllianceBadge } from "@/components/appointment-board/alliance-badge";
-import { CommunityHeaderActions, CommunitySectionNavigation } from "@/components/community-section-navigation";
+import { CommunityPageChrome } from "@/components/community-section-navigation";
 import type { GameProfile } from "@/brands/types";
 
 import { BrowserLocalTime } from "./browser-local-time";
@@ -53,20 +53,11 @@ export function AllianceEvents({ profile, community, alliances, unavailable }: {
   readonly alliances: readonly PublicAllianceSchedule[];
   readonly unavailable: boolean;
 }) {
-  const noun = profile === "kingshot" ? "Kingdom" : "State";
   return (
     <article className="alliance-events-page">
-      <header className="alliance-events-page__heading community-page-heading">
-        <div><p className="booking-kicker">{noun} {community.code}</p>
-          <h1>{community.displayName}</h1></div>
-        <CommunityHeaderActions />
-      </header>
-      <CommunitySectionNavigation communityCode={community.code} current="events" profile={profile} />
-      <section aria-labelledby="alliance-events-title" className="alliance-events-schedule">
-        <header>
-          <h2 id="alliance-events-title">Alliance Events</h2>
-          <p>Public schedules for participating alliances in this {noun.toLowerCase()}.</p>
-        </header>
+      <CommunityPageChrome communityCode={community.code} current="events"
+        displayName={community.displayName} profile={profile} />
+      <section aria-label="Alliance events" className="alliance-events-schedule">
         {unavailable
           ? <p className="alliance-events-message" role="status">Alliance event schedules are temporarily unavailable.</p>
           : alliances.length === 0
@@ -76,12 +67,12 @@ export function AllianceEvents({ profile, community, alliances, unavailable }: {
                 <section className="alliance-schedule" key={`${alliance.name}:${allianceIndex}`}>
                   <header>
                     {alliance.abbreviation ? <AllianceBadge abbreviation={alliance.abbreviation} /> : null}
-                    <h3>{alliance.name}</h3>
+                    <h2>{alliance.name}</h2>
                   </header>
                   <div className="alliance-event-list">
                     {alliance.events.map((event, eventIndex) => (
                       <article className="alliance-event-card" key={`${event.name}:${eventIndex}`}>
-                        <h4>{event.name}</h4>
+                        <h3>{event.name}</h3>
                         {(() => {
                           const occurrences = eventOccurrences(event);
                           const grouped = occurrences.some((occurrence) => occurrence.group !== null);

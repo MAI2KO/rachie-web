@@ -353,8 +353,6 @@ button:focus-visible,
 @keyframes booking-spin { to { transform: rotate(360deg); } }
 
 .appointment-board { width: 100%; }
-.appointment-board__heading { display: flex; gap: 1rem; align-items: end; justify-content: space-between; padding-bottom: 1.25rem; border-bottom: 2px solid var(--brand-text); }
-.appointment-board__heading h1 { margin: 0; font-size: clamp(1.75rem, 6vw, 2.75rem); line-height: 1.1; }
 .appointment-panels { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(18rem, 1fr); gap: 1rem; margin-top: 1.5rem; overflow-x: auto; overscroll-behavior-inline: contain; padding: 0.125rem 0.125rem 1rem; scroll-snap-type: inline mandatory; }
 .appointment-panel { min-width: 0; border: 1px solid var(--brand-border); border-radius: 5px; background: var(--brand-surface); scroll-snap-align: start; }
 .appointment-panel > header { padding: 1rem; border-bottom: 1px solid var(--brand-border); }
@@ -412,23 +410,20 @@ button:focus-visible,
 .community-section-nav { display: flex; gap: 0.5rem; overflow-x: auto; }
 .community-section-nav a { min-height: 2.75rem; padding: 0.6rem 0.9rem; border: 1px solid var(--brand-border); border-radius: 999px; align-content: center; background: var(--brand-surface); font-weight: 750; white-space: nowrap; }
 .community-section-nav a[aria-current="page"] { border-color: var(--brand-accent-strong); background: var(--brand-accent-strong); color: var(--brand-accent-contrast); }
-.community-page-heading { display: flex; gap: 1rem; align-items: flex-end; justify-content: space-between; }
-.community-page-header-tools { display: grid; gap: 0.65rem; justify-items: end; }
+.community-page-heading { display: flex; gap: 1rem; padding-bottom: 1.25rem; border-bottom: 2px solid var(--brand-text); align-items: flex-end; justify-content: space-between; }
+.community-page-heading h1 { margin: 0; font-size: clamp(1.75rem, 6vw, 2.75rem); line-height: 1.1; }
 .community-header-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: flex-end; }
 .community-header-actions .session-actions { gap: 0.5rem; }
 .community-header-actions .booking-button { min-height: 2.35rem; padding: 0.4rem 0.75rem; font-size: 0.8125rem; white-space: nowrap; }
 .community-auth-error { flex-basis: 100%; color: #991b1b; font-size: 0.75rem; text-align: right; }
-.alliance-events-page__heading h1 { margin: 0; }
-.alliance-events-schedule > header h2 { margin-bottom: 0; font-size: clamp(1.5rem, 4vw, 2.25rem); }
-.alliance-events-schedule > header p { margin-top: 0.35rem; color: var(--brand-text-muted); }
 .alliance-events-message { padding: 1rem; border: 1px solid var(--brand-border); border-radius: 0.65rem; background: var(--brand-surface); }
 .alliance-sections { display: grid; gap: 1.5rem; }
 .alliance-schedule { border: 1px solid var(--brand-border); border-radius: 0.75rem; overflow: hidden; background: var(--brand-surface); }
 .alliance-schedule > header { display: flex; gap: 0.55rem; min-height: 3.5rem; padding: 0.8rem 1rem; align-items: center; border-bottom: 2px solid var(--brand-accent-strong); background: var(--brand-surface-muted); }
-.alliance-schedule > header h3 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.45rem); }
+.alliance-schedule > header h2 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.45rem); }
 .alliance-event-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; padding: 0.75rem; align-items: start; }
 .alliance-event-card { min-width: 0; padding: 0.8rem 0.9rem; border: 1px solid var(--brand-border); border-radius: 0.65rem; background: var(--brand-surface); }
-.alliance-event-card h4 { margin: 0 0 0.55rem; font-size: 1rem; font-weight: 800; }
+.alliance-event-card h3 { margin: 0 0 0.55rem; font-size: 1rem; font-weight: 800; }
 .alliance-event-groups { display: grid; gap: 0.35rem; margin: 0; }
 .alliance-event-group { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: baseline; font-size: 0.875rem; }
 .alliance-event-group dt { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
@@ -437,10 +432,7 @@ button:focus-visible,
 .alliance-occurrence-time { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; color: var(--brand-text-muted); font-variant-numeric: tabular-nums; font-weight: 400; }
 .alliance-occurrence-time__local { color: var(--brand-text-muted); }
 
-.booking-admin > header h1 { margin: 0; }
-.booking-admin > header > p:last-child { color: var(--brand-text-muted); }
 .booking-admin { display: grid; gap: 1.25rem; }
-.booking-admin .community-section-nav { margin-block: 0; }
 .booking-admin-section { display: grid; gap: 0.85rem; padding: 1rem; border: 1px solid var(--brand-border); border-radius: 0.75rem; background: var(--brand-surface); }
 .booking-admin-section > div:first-child h2 { margin: 0; font-size: 1.2rem; }
 .booking-admin-section > div:first-child p { margin: 0.25rem 0 0; color: var(--brand-text-muted); font-size: 0.8125rem; }
@@ -527,9 +519,7 @@ button:focus-visible,
   .requirement-fields { grid-template-columns: 1fr; }
   .form-actions,
   .cancel-confirmation > div { align-items: stretch; flex-direction: column; }
-  .appointment-board__heading { align-items: stretch; flex-direction: column; }
   .community-page-heading { align-items: stretch; flex-direction: column; }
-  .community-page-header-tools { justify-items: stretch; }
   .community-header-actions { justify-content: flex-start; }
   .community-header-actions .session-actions { justify-content: flex-start; }
   .community-auth-error { text-align: left; }

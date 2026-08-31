@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { CommunityHeaderActions, CommunitySectionNavigation } from "@/components/community-section-navigation";
+import { CommunityPageChrome } from "@/components/community-section-navigation";
 
 type Requirement = { readonly code: string; readonly label: string; readonly enabled: boolean };
 type Service = {
@@ -307,14 +307,8 @@ export function BookingAdmin({ initialConfiguration }: {
 
   const controlsDisabled = !csrfToken;
   return <article className="booking-admin">
-    <header className="community-page-heading">
-      <div><p className="booking-kicker">{noun} {configuration.community.code}</p>
-        <h1>{configuration.community.displayName} Booking Admin</h1>
-        <p>Manage bookings, appointment types and Discord access for this {noun.toLowerCase()}.</p></div>
-      <CommunityHeaderActions />
-    </header>
-    <CommunitySectionNavigation communityCode={configuration.community.code} current="admin"
-      profile={configuration.profile} showAdmin />
+    <CommunityPageChrome communityCode={configuration.community.code} current="admin"
+      displayName={configuration.community.displayName} profile={configuration.profile} showAdmin />
     {notice ? <p aria-live="polite" className="booking-notice" role="status">{notice}</p> : null}
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-booking">

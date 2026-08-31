@@ -28,6 +28,7 @@ import {
   CommunitySelectionRejectedError,
   createAuthService,
   InvalidCsrfError,
+  normalizeAuthReturnPath,
 } from "../server/auth/service-core.mjs";
 import { resolveAuthRequestContextCore } from "../server/auth/request-context-core.mjs";
 
@@ -230,6 +231,39 @@ test("OAuth state is one-use and mismatches fail before code exchange", async ()
     service.completeLogin({ code: null, state: null, cookieState: null }),
     AuthenticationRejectedError,
   );
+});
+
+test("OAuth state safely preserves same-origin community return paths", async () => {
+  for (const returnTo of ["/state/9999", "/state/9999/events", "/state/9999/admin",
+    "/kingdom/9999", "/kingdom/9999/events", "/kingdom/9999/admin"]) {
+    const { service } = createFixtureService();
+    const started = await service.beginLogin(returnTo);
+    const result = await service.completeLogin({
+      code: "code", state: started.state, cookieState: started.state,
+    });
+    assert.equal(result.returnTo, returnTo);
+  }
+});
+
+test("OAuth return paths reject open redirects and retain the safe default", async () => {
+  for (const unsafe of ["https://evil.example/steal", "//evil.example/steal",
+    "/\\evil.example/steal", "javascript:alert(1)", "\u0000/state/9999"]) {
+    assert.equal(normalizeAuthReturnPath(unsafe), "/booking");
+    const { service } = createFixtureService();
+    const started = await service.beginLogin(unsafe);
+    const result = await service.completeLogin({
+      code: "code", state: started.state, cookieState: started.state,
+    });
+    assert.equal(result.returnTo, "/booking");
+  }
+  assert.equal(normalizeAuthReturnPath("/state/9999?view=compact#today"),
+    "/state/9999?view=compact#today");
+});
+
+test("auth routes pass returnTo into OAuth state and use its validated callback destination", () => {
+  const handler = fs.readFileSync(new URL("../server/auth/route-handler.ts", import.meta.url), "utf8");
+  assert.match(handler, /beginLogin\([\s\S]*searchParams\.get\("returnTo"\)/);
+  assert.match(handler, /Location: result\.returnTo/);
 });
 
 test("zero, one, and multiple verified communities have explicit selection rules", async () => {

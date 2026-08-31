@@ -112,7 +112,9 @@ export async function handleAuthLogin(request: Request): Promise<Response> {
       requestNetworkSubject(request),
     );
     if (limited) return limited;
-    const login = await configured.service.beginLogin();
+    const login = await configured.service.beginLogin(
+      new URL(request.url).searchParams.get("returnTo"),
+    );
     return new Response(null, {
       status: 302,
       headers: {
@@ -156,7 +158,7 @@ export async function handleAuthCallback(request: Request): Promise<Response> {
     });
     const headers = new Headers({
       "Cache-Control": "no-store",
-      Location: "/booking",
+      Location: result.returnTo,
     });
     headers.append("Set-Cookie", clearState);
     headers.append(

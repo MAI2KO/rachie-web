@@ -8,6 +8,40 @@ import {
 
 export const OAUTH_STATE_LIFETIME_SECONDS = 10 * 60;
 export const AUTH_SESSION_LIFETIME_SECONDS = 12 * 60 * 60;
+export const DEFAULT_AUTH_RETURN_PATH = "/booking";
+
+export function normalizeAuthReturnPath(value, fallback = DEFAULT_AUTH_RETURN_PATH) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 1024
+      || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")
+      || /[\u0000-\u001f\u007f]/.test(value)) return fallback;
+  try {
+    const origin = "https://auth-return.invalid";
+    const parsed = new URL(value, origin);
+    if (parsed.origin !== origin) return fallback;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
+function oauthState(returnTo) {
+  const token = createOpaqueToken();
+  if (returnTo === DEFAULT_AUTH_RETURN_PATH) return token;
+  return `${token}.${Buffer.from(returnTo, "utf8").toString("base64url")}`;
+}
+
+function oauthStateReturnPath(state) {
+  if (typeof state !== "string") return DEFAULT_AUTH_RETURN_PATH;
+  const separator = state.indexOf(".");
+  if (separator < 0) return DEFAULT_AUTH_RETURN_PATH;
+  try {
+    return normalizeAuthReturnPath(
+      Buffer.from(state.slice(separator + 1), "base64url").toString("utf8"),
+    );
+  } catch {
+    return DEFAULT_AUTH_RETURN_PATH;
+  }
+}
 
 export class AuthenticationRejectedError extends Error {
   constructor() {
@@ -101,8 +135,9 @@ export function createAuthService({
   }
 
   return Object.freeze({
-    async beginLogin() {
-      const state = createOpaqueToken();
+    async beginLogin(returnPath) {
+      const returnTo = normalizeAuthReturnPath(returnPath);
+      const state = oauthState(returnTo);
       await repository.createOAuthState(
         hashOpaqueToken(state),
         futureDate(now, OAUTH_STATE_LIFETIME_SECONDS),
@@ -129,7 +164,7 @@ export function createAuthService({
         user: identity.user,
         guildIds: identity.guildIds,
       });
-      return { sessionToken };
+      return { sessionToken, returnTo: oauthStateReturnPath(state) };
     },
 
     async getSession(sessionToken) {
