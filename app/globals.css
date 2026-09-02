@@ -402,8 +402,11 @@ button:focus-visible,
 .manager-manual-booking-form input { min-height: 2.25rem; padding: 0.4rem 0.55rem; border: 1px solid var(--brand-border); border-radius: 0.45rem; background: var(--brand-surface); color: var(--brand-text); }
 .manager-activity { margin-top: 1.5rem; padding: 1rem; border: 1px solid var(--brand-border); background: var(--brand-surface); }
 .manager-activity summary { cursor: pointer; font-weight: 800; }
-.manager-activity > label { display: flex; align-items: center; gap: 0.5rem; margin: 0.9rem 0; font-weight: 700; }
-.manager-activity select { min-height: 2.25rem; border: 1px solid var(--brand-border); border-radius: 0.45rem; background: var(--brand-surface); color: var(--brand-text); }
+.manager-activity-viewport { max-height: 650px; margin-top: 0.9rem; overflow-x: hidden; overflow-y: auto; border: 1px solid var(--brand-border); border-radius: 0.55rem; }
+.manager-activity-viewport:focus-visible { outline: 3px solid var(--brand-focus-ring); outline-offset: 2px; }
+.manager-activity-cards { display: none; }
+.manager-activity-more { display: flex; padding: 0.75rem; justify-content: center; border-top: 1px solid var(--brand-border); }
+.manager-activity-more button { min-height: 2.5rem; padding: 0.45rem 1rem; border: 1px solid var(--brand-border); border-radius: 999px; background: var(--brand-surface-muted); color: var(--brand-text); cursor: pointer; font-weight: 800; }
 .manager-audit-id { display: block; color: var(--brand-text-muted); font-size: 0.6875rem; }
 
 .community-section-navigation { margin-block: 1rem 1.5rem; }
@@ -469,8 +472,12 @@ button:focus-visible,
 .booking-admin-dates { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .booking-admin-dates li { display: grid; grid-template-columns: minmax(8rem, auto) 1fr auto; gap: 0.75rem; padding: 0.55rem 0; border-top: 1px solid var(--brand-border); align-items: baseline; }
 .booking-admin-dates li strong { font-size: 0.75rem; text-transform: uppercase; }
-.booking-admin-activity > label { display: flex; gap: 0.5rem; align-items: center; font-weight: 700; }
-.booking-admin-activity select { min-height: 2.25rem; padding-inline: 0.5rem; border: 1px solid var(--brand-border); border-radius: 0.45rem; background: var(--brand-surface); color: var(--brand-text); }
+.booking-admin-activity-viewport { max-height: 650px; overflow-x: hidden; overflow-y: auto; border: 1px solid var(--brand-border); border-radius: 0.55rem; }
+.booking-admin-activity-viewport:focus-visible { outline: 3px solid var(--brand-focus-ring); outline-offset: 2px; }
+.booking-admin-activity-cards { display: none; }
+.booking-admin-activity-more { display: flex; padding: 0.75rem; justify-content: center; border-top: 1px solid var(--brand-border); }
+.booking-admin-activity-more button { min-height: 2.5rem; padding: 0.45rem 1rem; border: 1px solid var(--brand-border); border-radius: 999px; background: var(--brand-surface-muted); color: var(--brand-text); cursor: pointer; font-weight: 800; }
+.booking-admin-activity-more button:disabled { cursor: wait; opacity: 0.55; }
 
 .guest-booking { max-width: 46rem; margin-inline: auto; }
 .guest-booking > header h1,
@@ -539,6 +546,22 @@ button:focus-visible,
   .booking-admin-setting { align-items: flex-start; flex-direction: column; }
   .booking-admin-cycle-summary { grid-template-columns: 1fr; }
   .booking-admin-dates li { grid-template-columns: 1fr; gap: 0.15rem; }
+  .manager-activity-viewport { max-height: 65vh; }
+  .manager-activity-table { display: none; }
+  .manager-activity-cards { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .manager-activity-cards > li { display: grid; gap: 0.65rem; padding: 0.8rem; border-bottom: 1px solid var(--brand-border); }
+  .manager-activity-cards dl { display: grid; gap: 0.55rem; margin: 0; }
+  .manager-activity-cards dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 0.5rem; }
+  .manager-activity-cards dt { color: var(--brand-text-muted); font-size: 0.6875rem; font-weight: 800; letter-spacing: 0.025em; text-transform: uppercase; }
+  .manager-activity-cards dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+  .booking-admin-activity-viewport { max-height: 65vh; }
+  .booking-admin-activity-table { display: none; }
+  .booking-admin-activity-cards { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .booking-admin-activity-cards > li { padding: 0.8rem; border-bottom: 1px solid var(--brand-border); }
+  .booking-admin-activity-cards dl { display: grid; gap: 0.55rem; margin: 0; }
+  .booking-admin-activity-cards dl > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 0.5rem; }
+  .booking-admin-activity-cards dt { color: var(--brand-text-muted); font-size: 0.6875rem; font-weight: 800; letter-spacing: 0.025em; text-transform: uppercase; }
+  .booking-admin-activity-cards dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 }
 
 .site-footer {

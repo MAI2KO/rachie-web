@@ -181,7 +181,7 @@ const operationalRequirements = (answers) => Object.freeze((answers ?? []).map((
 export function managerAppointmentBoard(
   community,
   rows,
-  activity,
+  activityPage,
   { gameProfile, settings, currentDiscordUserId } = {},
 ) {
   const services = [];
@@ -234,7 +234,15 @@ export function managerAppointmentBoard(
     services: Object.freeze(services.map((service) => Object.freeze({
       ...service, slots: Object.freeze(service.slots),
     }))),
-    activity: Object.freeze(activity.map((event) => Object.freeze({
+    ...managerActivityPage(activityPage),
+  });
+}
+
+export function managerActivityPage(activityPage) {
+  const page = Array.isArray(activityPage) ? { rows: activityPage, nextCursor: null } : activityPage;
+  return Object.freeze({
+    activity: Object.freeze((page?.rows ?? []).map((event) => Object.freeze({
+      id: String(event.id),
       action: event.action,
       category: event.category,
       playerName: event.player_name,
@@ -246,8 +254,11 @@ export function managerAppointmentBoard(
       resultingState: event.resulting_state,
       ...(event.previous_time ? { previousTime: event.previous_time } : {}),
       ...(event.new_time ? { newTime: event.new_time } : {}),
-      createdAt: event.created_at,
+      createdAt: event.created_at instanceof Date
+        ? event.created_at.toISOString() : String(event.created_at),
     }))),
+    activityNextCursor: page?.nextCursor
+      ? `${page.nextCursor.createdAt}|${page.nextCursor.id}` : null,
   });
 }
 

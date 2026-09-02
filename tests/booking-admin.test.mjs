@@ -7,6 +7,7 @@ import {
   BookingAdminGuildLinkDecisionDeniedError,
   BookingAdminTopologyDeniedError,
   BookingAdminValidationError,
+  parseBookingActivityCursor,
   validateCycleScheduleTiming,
   validateBookingAdminChange,
 } from "../server/booking-admin/domain-core.mjs";
@@ -46,6 +47,7 @@ function snapshot() {
     scheduleOverrides: [],
     recurringDefault: null,
     activity: [],
+    activityNextCursor: null,
   };
 }
 
@@ -578,7 +580,10 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
   assert.match(ui, /Approved guest booking/); assert.match(ui, /Denied guest booking/);
   assert.match(ui, /Rescheduled booking/); assert.match(ui, /Cancelled booking/);
   assert.match(ui, /Discord ID:/); assert.match(ui, /Player ID:/);
-  assert.match(ui, /<option value="configuration">Settings<\/option>/);
+  assert.doesNotMatch(ui, /activityFilter|<select[^>]*activity/i);
+  assert.match(ui, /<dt>Who<\/dt>/);
+  assert.match(ui, /booking-admin-activity-cards/);
+  assert.match(ui, /Load more/);
   assert.doesNotMatch(ui, /Booking Admin v1|only a hash is stored|Resource requirement/);
   assert.doesNotMatch(ui, /create date|delete date|generate slot/i);
 });
@@ -593,6 +598,7 @@ test("public admin model contains only display-safe configuration and linked gui
 test("Booking Admin activity preserves bounded event identity and display details", () => {
   const source = snapshot();
   source.activity = [{
+    id: "10000000-0000-4000-8000-000000000010",
     action: "manager_manual_booking", category: "bookings", player_name: "Player One",
     player_id: "987654", actor_discord_user_id: "111111111111111111",
     actor_display_name: "Manager One", service_code: "construction",
@@ -601,6 +607,7 @@ test("Booking Admin activity preserves bounded event identity and display detail
     requirement_code: null, enabled: null, guild_name: null, cycle_index: null,
     created_at: new Date("2026-09-01T12:00:00.000Z"),
   }, {
+    id: "10000000-0000-4000-8000-000000000011",
     action: "approved", category: "approvals", player_name: "Guest Player",
     player_id: "123456", actor_discord_user_id: "222222222222222222",
     actor_display_name: "Approver", service_code: "research", previous_state: "pending_approval",
@@ -611,6 +618,7 @@ test("Booking Admin activity preserves bounded event identity and display detail
   }];
   const activity = bookingAdminModel("wos", source).activity;
   assert.equal(activity[0].action, "manager_manual_booking");
+  assert.equal(activity[0].id, "10000000-0000-4000-8000-000000000010");
   assert.equal(activity[0].actorDiscordUserId, "111111111111111111");
   assert.equal(activity[0].actorDisplayName, "Manager One");
   assert.equal(activity[0].newTime, "19:30");
@@ -618,13 +626,21 @@ test("Booking Admin activity preserves bounded event identity and display detail
   assert.equal(activity[1].playerId, "123456");
 });
 
-test("Booking Admin activity query is newest-first and hard-bounded to 100 rows", () => {
+test("Booking Admin activity query is stable keyset pagination without audit deletion", () => {
   const repository = fs.readFileSync(
     new URL("../server/booking-admin/repository-core.mjs", import.meta.url), "utf8",
   );
   assert.match(repository, /listRecentActivity\(communityId, 100\)/);
+  assert.match(repository, /activity\.created_at < \$4::timestamptz/);
+  assert.match(repository, /activity\.id < \$5::uuid/);
   assert.match(repository, /ORDER BY activity\.created_at DESC,activity\.id DESC[\s\S]*LIMIT \$3/);
   assert.match(repository, /booking_approval_events/);
   assert.match(repository, /booking_change_events/);
   assert.match(repository, /website_discord_identities/);
+  assert.doesNotMatch(repository, /DELETE FROM booking_(?:approval|change)_events/i);
+  assert.deepEqual(parseBookingActivityCursor(
+    "2026-09-01T12:00:00.000Z|10000000-0000-4000-8000-000000000010",
+  ), { createdAt: "2026-09-01T12:00:00.000Z", id: "10000000-0000-4000-8000-000000000010" });
+  assert.throws(() => parseBookingActivityCursor("newest"),
+    (error) => error.code === "invalid_activity_cursor");
 });

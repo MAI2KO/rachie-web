@@ -118,12 +118,18 @@ export async function handlePublicAppointmentBoard(request: Request, communityCo
 export async function handleManagerAppointmentBoard(request: Request, communityCode: string) {
   try {
     const scope = await managerScope(request, communityCode);
-    const board = await createBookingBoardReadService({
+    const service = createBookingBoardReadService({
       gameProfile: scope.discordSession.gameProfile,
       communityId: scope.managerContext.authorizedCommunityId,
       managerContext: scope.managerContext,
       repository: scope.repository,
-    }).managerBoard();
+    });
+    const activityCursor = new URL(request.url).searchParams.get("activityCursor");
+    if (activityCursor !== null) {
+      return json({ ok: true, ...(await service.managerActivity(activityCursor)),
+        authorization: { via: scope.managerContext.authorization.via } });
+    }
+    const board = await service.managerBoard();
     return json({ ok: true, board, authorization: { via: scope.managerContext.authorization.via } });
   } catch (error) {
     return managerError(error);

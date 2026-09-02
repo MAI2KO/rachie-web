@@ -102,7 +102,6 @@ export async function handleDiscordWorkClaim(request: Request) {
     const secret = getBookingIntegrationSecret(scope.profile);
     const work = await scope.repository.withTransaction((session) => session.claim(body.limit, {
       guestTokenSecret: secret,
-      publicBaseUrl: new URL(request.url).origin,
     }));
     if (work.length > 0) {
       console.info("discord_booking_integration_work_claimed", {

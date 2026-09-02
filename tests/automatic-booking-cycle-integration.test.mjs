@@ -7,6 +7,7 @@ import pg from "pg";
 
 import { reconcileAutomaticWosBookingCycles } from "../server/automatic-booking-cycle/repository-core.mjs";
 import { loadMigrations, runMigrations } from "../server/database/migrations.mjs";
+import { createDiscordIntegrationRepository } from "../server/discord-integration/repository-core.mjs";
 import { createNativeBookingReadService } from "../server/native-booking/read-service-core.mjs";
 import { createProfileScopedBookingRepository } from "../server/native-booking/repository-core.mjs";
 
@@ -182,6 +183,14 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
       expires_at: new Date("2026-09-06T18:00:00.000Z"),
       due_at: new Date("2026-09-01T18:00:00.000Z"),
     });
+    const discord = createDiscordIntegrationRepository("wos", pool);
+    const announcement = (await discord.withTransaction((session) => session.claim(10, {
+      guestTokenSecret,
+    }))).find((work) => work.type === "booking_window_open");
+    assert.match(announcement.guestPath, /^\/book\/[A-Za-z0-9_-]{43}$/);
+    assert.equal("guestUrl" in announcement, false);
+    assert.equal("memberUrl" in announcement, false);
+    assert.equal(JSON.stringify(announcement).includes("localhost"), false);
     await withProfile(pool, "wos", (client) => client.query(
       `UPDATE booking_cycle_schedule_overrides
           SET closes_at='2026-09-06T19:00:00Z',updated_at=now()

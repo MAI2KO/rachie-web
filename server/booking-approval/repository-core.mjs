@@ -554,7 +554,7 @@ class ProfileScopedApprovalSession {
     return result.rows;
   }
 
-  async listRecentApprovalActivity(communityId, limit) {
+  async listRecentApprovalActivity(communityId, limit, cursor = null) {
     const result = await this.client.query(
       `SELECT activity.* FROM (
          SELECT event.id,event.action,'approvals'::text AS category,
@@ -584,7 +584,8 @@ class ProfileScopedApprovalSession {
                 COALESCE(booking.player_id_snapshot,
                   event.after_data->>'playerId',event.after_data#>>'{participant,playerId}') AS player_id,
                 event.actor_id AS actor_discord_user_id,
-                event.after_data->>'actorDisplayName' AS actor_display_name,
+                COALESCE(event.after_data->>'actorDisplayName',identity.global_name,
+                  identity.username) AS actor_display_name,
                 event.before_data->>'status' AS previous_state,
                 CASE event.event_type
                   WHEN 'manager_booking_rescheduled' THEN 'rescheduled'
@@ -601,13 +602,24 @@ class ProfileScopedApprovalSession {
          LEFT JOIN minister_bookings AS booking
            ON event.aggregate_type='minister_booking'
           AND booking.game_profile=event.game_profile AND booking.id=event.aggregate_id
+         LEFT JOIN website_discord_identities AS identity
+           ON identity.game_profile=event.game_profile
+          AND identity.discord_user_id=event.actor_id
          WHERE event.game_profile=$1 AND event.community_id=$2
        ) AS activity
+       WHERE ($4::timestamptz IS NULL OR activity.created_at < $4::timestamptz
+         OR (activity.created_at = $4::timestamptz AND activity.id < $5::uuid))
        ORDER BY activity.created_at DESC,activity.id DESC
        LIMIT $3`,
-      [this.gameProfile, communityId, limit],
+      [this.gameProfile, communityId, limit + 1, cursor?.createdAt ?? null, cursor?.id ?? null],
     );
-    return result.rows;
+    const rows = result.rows.slice(0, limit);
+    const last = rows.at(-1);
+    return { rows, nextCursor: result.rows.length > limit && last ? {
+      createdAt: last.created_at instanceof Date
+        ? last.created_at.toISOString() : String(last.created_at),
+      id: String(last.id),
+    } : null };
   }
 
   async findRequestDetail(communityId, requestId) {

@@ -181,15 +181,14 @@ async function workPayload(client, profile, row, deliveryContext = {}) {
     const guestToken = automaticWindowGuestToken(
       deliveryContext.guestTokenSecret, profile, row.community_id, row.booking_window_id,
     );
-    if (!details || !guestToken || !deliveryContext.publicBaseUrl) {
+    if (!details || !guestToken) {
       throw new Error("booking_window_announcement_configuration");
     }
     return {
       ...base,
       ...details,
       guilds: details.guilds ?? [],
-      memberUrl: `${deliveryContext.publicBaseUrl}/booking`,
-      guestUrl: `${deliveryContext.publicBaseUrl}/book/${guestToken}`,
+      guestPath: `/book/${guestToken}`,
     };
   }
   if (row.notification_type === "manager_guest_link") {

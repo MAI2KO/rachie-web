@@ -51,6 +51,7 @@ test("manager board serializer includes operational fields and bounded human-rea
     pending_hold_expires_at: "2030-08-21T14:30:00Z",
     pending_requirements: [{ code: "speedups", label: "Speed-ups (days)", value: 12, unit: "days" }],
   }], [{
+    id: "10000000-0000-4000-8000-000000000020",
     action: "submitted", category: "approvals", player_name: "Guest Player",
     player_id: "87654321", actor_discord_user_id: null, actor_display_name: null,
     service_code: "construction", previous_state: null,
@@ -68,7 +69,7 @@ test("manager board serializer includes operational fields and bounded human-rea
     { code: "speedups", label: "Speed-ups (days)", unit: "days" },
   ]);
   assert.deepEqual(Object.keys(board.activity[0]).sort(), [
-    "action", "actorDiscordUserId", "actorDisplayName", "category", "createdAt", "playerId",
+    "action", "actorDiscordUserId", "actorDisplayName", "category", "createdAt", "id", "playerId",
     "playerName", "previousState", "resultingState", "serviceCode",
   ]);
   assert.equal(board.activity[0].playerId, "87654321");
@@ -275,6 +276,14 @@ test("shared board UI uses State/Kingdom terms, mobile swipe panels, Copy Mode, 
   assert.match(css, /\.alliance-badge--solid \{[^}]*background: var\(--brand-accent-strong\)/);
   assert.doesNotMatch(css, /\.manager-current-user-badge/);
   assert.match(css, /\.manager-table-scroll \{[^}]*overflow-x: auto/);
+  assert.match(source, /<th>Who<\/th>/);
+  assert.match(source, /<dt>Who<\/dt>/);
+  assert.match(source, /Discord member/);
+  assert.match(source, /Discord ID:/);
+  assert.match(source, /manager-activity-cards/);
+  assert.match(source, /Load more/);
+  assert.doesNotMatch(source, /activityFilter|Filter activity|<th>Actor<\/th>/);
+  assert.match(css, /\.manager-activity-viewport \{[^}]*max-height: 650px;[^}]*overflow-x: hidden;[^}]*overflow-y: auto/);
   assert.match(css, /\.manager-row__actions \.booking-button \{[^}]*min-height: 2rem;[^}]*padding: 0\.25rem 0\.5rem;[^}]*font-size: 0\.75rem/);
   assert.doesNotMatch(css, /\.manager-row[^}]*flex-direction: column/);
 });

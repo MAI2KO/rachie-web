@@ -12,6 +12,7 @@ type Service = {
   readonly requirements: readonly Requirement[];
 };
 type Activity = {
+  readonly id: string;
   readonly action: string;
   readonly category: "bookings" | "approvals" | "cancellations" | "manager_actions" | "configuration";
   readonly playerName: string | null;
@@ -95,6 +96,7 @@ type BookingAdminConfiguration = {
     readonly windowStatus: string;
   }[];
   readonly activity: readonly Activity[];
+  readonly activityNextCursor: string | null;
 };
 
 type Change =
@@ -184,10 +186,17 @@ function activityActionLabel(activity: Activity) {
 
 function activityActorLabel(activity: Activity) {
   if (activity.actorDisplayName) return activity.actorDisplayName;
+  if (activity.actorDiscordUserId) return "Discord member";
   if (activity.action === "submitted") return "Guest player";
   if (activity.action === "expired") return "System";
   if (activity.action === "booking_created") return "Player";
-  return activity.actorDiscordUserId ? "Discord member" : "System";
+  return "System";
+}
+
+function ActivityActor({ activity }: { readonly activity: Activity }) {
+  return <>{activityActorLabel(activity)}
+    {activity.actorDiscordUserId ? <small className="manager-audit-id">
+      Discord ID: {activity.actorDiscordUserId}</small> : null}</>;
 }
 
 function readableSetting(value: string | null) {
@@ -264,12 +273,8 @@ export function BookingAdmin({ initialConfiguration }: {
       ? minuteOfDayValue(initialConfiguration.defaultWindow.closeOffsetMinutes % 1440) : "12:00",
   );
   const [confirmedGuildId, setConfirmedGuildId] = useState("");
-  const [activityFilter, setActivityFilter] = useState<Activity["category"] | "all">("all");
   const noun = configuration.profile === "kingshot" ? "Kingdom" : "State";
   const endpoint = `/api/v1/booking-admin/${encodeURIComponent(configuration.community.code)}`;
-  const visibleActivity = configuration.activity.filter(
-    (activity) => activityFilter === "all" || activity.category === activityFilter,
-  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -359,6 +364,33 @@ export function BookingAdmin({ initialConfiguration }: {
       setDefaultCloseTime(minuteOfDayValue(next.defaultWindow.closeOffsetMinutes % 1440));
     }
     setConfirmOpenChange(false);
+  }
+
+  async function loadMoreActivity() {
+    if (!configuration.activityNextCursor) return;
+    setBusy("activity");
+    setNotice("");
+    try {
+      const response = await fetch(`${endpoint}?activityCursor=${encodeURIComponent(
+        configuration.activityNextCursor,
+      )}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok || !Array.isArray(payload.activity)) {
+        throw new Error(payload.error ?? "Older activity could not be loaded.");
+      }
+      setConfiguration((current) => {
+        const existingIds = new Set(current.activity.map((activity) => activity.id));
+        const additional = (payload.activity as Activity[]).filter(
+          (activity) => !existingIds.has(activity.id),
+        );
+        return { ...current, activity: [...current.activity, ...additional],
+          activityNextCursor: payload.activityNextCursor ?? null };
+      });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Older activity could not be loaded.");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function saveDefaultWindow() {
@@ -702,30 +734,15 @@ export function BookingAdmin({ initialConfiguration }: {
     <section className="booking-admin-section booking-admin-activity" aria-labelledby="booking-admin-activity">
       <div><h2 id="booking-admin-activity">Recent activity</h2>
         <p>The latest booking and configuration changes for this {noun}.</p></div>
-      <label>Show
-        <select onChange={(event) => setActivityFilter(event.currentTarget.value as typeof activityFilter)}
-          value={activityFilter}>
-          <option value="all">All</option>
-          <option value="bookings">Bookings</option>
-          <option value="approvals">Approvals</option>
-          <option value="cancellations">Cancellations</option>
-          <option value="manager_actions">Manager actions</option>
-          <option value="configuration">Settings</option>
-        </select>
-      </label>
       {configuration.activity.length === 0
         ? <p>No recent booking activity yet.</p>
-        : visibleActivity.length === 0
-          ? <p>No recent activity matches this filter.</p>
-          : <div className="manager-table-scroll" role="region" tabIndex={0}>
+        : <div className="booking-admin-activity-viewport" role="region" tabIndex={0}>
+          <div className="manager-table-scroll booking-admin-activity-table">
             <table className="manager-table">
               <thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Player</th><th>Details</th></tr></thead>
-              <tbody>{visibleActivity.map((activity, index) => <tr
-                key={`${activity.createdAt}:${activity.action}:${index}`}>
+              <tbody>{configuration.activity.map((activity) => <tr key={activity.id}>
                 <td><time dateTime={activity.createdAt}>{displayUtcInstant(activity.createdAt)}</time></td>
-                <td>{activityActorLabel(activity)}
-                  {activity.actorDiscordUserId ? <small className="manager-audit-id">
-                    Discord ID: {activity.actorDiscordUserId}</small> : null}</td>
+                <td><ActivityActor activity={activity} /></td>
                 <td>{activityActionLabel(activity)}</td>
                 <td>{activity.playerName ?? "—"}
                   {activity.playerId ? <small className="manager-audit-id">
@@ -733,7 +750,27 @@ export function BookingAdmin({ initialConfiguration }: {
                 <td>{activityDetails(activity)}</td>
               </tr>)}</tbody>
             </table>
-          </div>}
+          </div>
+          <ol className="booking-admin-activity-cards">
+            {configuration.activity.map((activity) => <li key={activity.id}>
+              <dl>
+                <div><dt>Time</dt><dd><time dateTime={activity.createdAt}>
+                  {displayUtcInstant(activity.createdAt)}</time></dd></div>
+                <div><dt>Who</dt><dd><ActivityActor activity={activity} /></dd></div>
+                <div><dt>Action</dt><dd>{activityActionLabel(activity)}</dd></div>
+                <div><dt>Player</dt><dd>{activity.playerName ?? "—"}
+                  {activity.playerId ? <small className="manager-audit-id">
+                    Player ID: {activity.playerId}</small> : null}</dd></div>
+                <div><dt>Details</dt><dd>{activityDetails(activity)}</dd></div>
+              </dl>
+            </li>)}
+          </ol>
+          {configuration.activityNextCursor ? <div className="booking-admin-activity-more">
+            <button disabled={busy === "activity"} onClick={() => void loadMoreActivity()} type="button">
+              {busy === "activity" ? "Loading…" : "Load more"}
+            </button>
+          </div> : null}
+        </div>}
     </section>
   </article>;
 }

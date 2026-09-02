@@ -274,6 +274,37 @@ test("Booking Admin persists isolated controls and existing booking reads honor 
     assert.equal(activity.some((event) => event.action === "guest_link_rotate"), true);
     assert.equal(activity.every((event, index) => index === 0
       || new Date(activity[index - 1].createdAt) >= new Date(event.createdAt)), true);
+
+    await withProfile(pool, "wos", (client) => client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,source,
+          actor_type,actor_id,correlation_id,after_data,created_at)
+       SELECT 'wos',gen_random_uuid(),$1,'booking_configuration',$1,
+              'booking_admin_updated','website','discord_user',$2,
+              'pagination-' || sequence,
+              jsonb_build_object('section','booking','enabled',true,
+                'actorDisplayName','Pagination Manager'),
+              '2035-01-01T00:00:00Z'::timestamptz
+         FROM generate_series(1,505) AS sequence`,
+      [sharedId, managerContext.discordUserId],
+    ));
+    const firstPage = await service.read();
+    const browsed = [...firstPage.activity];
+    let cursor = firstPage.activityNextCursor;
+    while (cursor && browsed.length < 500) {
+      const page = await service.readActivity(cursor);
+      browsed.push(...page.activity);
+      cursor = page.activityNextCursor;
+    }
+    assert.equal(browsed.length, 500);
+    assert.equal(new Set(browsed.map((event) => event.id)).size, 500,
+      "stable timestamp/ID keysets do not duplicate events");
+    assert.equal(browsed.every((event, index) => index === 0
+      || new Date(browsed[index - 1].createdAt) >= new Date(event.createdAt)), true);
+    assert.equal((await withProfile(pool, "wos", (client) => client.query(
+      "SELECT count(*)::int AS count FROM booking_change_events WHERE community_id=$1",
+      [sharedId],
+    ))).rows[0].count, 521, "pagination never deletes retained audit events");
   } finally {
     await pool.end();
     await admin.query(`DROP SCHEMA ${schema} CASCADE`);

@@ -17,6 +17,7 @@ import {
   guestBookingPage,
   hashGuestShareToken,
   managerAppointmentBoard,
+  managerActivityPage,
   publicAppointmentBoard,
   validateGuestBookingInput,
   validateGuestRequirementAnswers,
@@ -444,6 +445,14 @@ export function createBookingBoardReadService({
   now = () => new Date(),
 }) {
   if (repository.gameProfile !== gameProfile) throw new TypeError("Approval repository profile mismatch.");
+  function activityCursor(value) {
+    const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)\|([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i
+      .exec(String(value ?? ""));
+    if (!match || !Number.isFinite(new Date(match[1]).getTime())) {
+      throw new BookingApprovalTransitionError("invalid_activity_cursor", "The activity page cursor is invalid.");
+    }
+    return { createdAt: new Date(match[1]).toISOString(), id: match[2] };
+  }
   return Object.freeze({
     async publicBoard() {
       return repository.withTransaction(async (session) => {
@@ -458,7 +467,7 @@ export function createBookingBoardReadService({
         const community = await session.findActiveCommunityById(communityId);
         if (!community) throw new BookingApprovalTransitionError("community_not_found", "Community was not found.");
         const rows = await session.listManagerBoardRows(communityId, now());
-        const activity = await session.listRecentApprovalActivity(communityId, 50);
+        const activity = await session.listRecentApprovalActivity(communityId, 100);
         const settings = await session.findSettings(communityId);
         return managerAppointmentBoard(community, rows, activity, {
           gameProfile,
@@ -466,6 +475,13 @@ export function createBookingBoardReadService({
           currentDiscordUserId: managerContext.discordUserId,
         });
       });
+    },
+    async managerActivity(rawCursor) {
+      assertTrustedManagerContext(managerContext, gameProfile, communityId);
+      const cursor = activityCursor(rawCursor);
+      return repository.withTransaction(async (session) => managerActivityPage(
+        await session.listRecentApprovalActivity(communityId, 100, cursor),
+      ));
     },
     async adminRequest(requestId) {
       assertTrustedManagerContext(managerContext, gameProfile, communityId);

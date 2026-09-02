@@ -8,10 +8,12 @@ import {
 import { manualGuestLinkToken } from "../automatic-booking-cycle/announcement-core.mjs";
 import {
   bookingAdminModel,
+  bookingActivityModel,
   BookingAdminGuildLinkDecisionDeniedError,
   BookingAdminTopologyDeniedError,
   BookingAdminTopologyUnavailableError,
   BookingAdminValidationError,
+  parseBookingActivityCursor,
   validateCycleScheduleTiming,
   validateBookingAdminChange,
 } from "./domain-core.mjs";
@@ -73,6 +75,17 @@ export function createBookingAdminService({
       return snapshot;
     });
     return modelForSnapshot(snapshot);
+  }
+
+  async function readActivity(rawCursor) {
+    const cursor = parseBookingActivityCursor(rawCursor);
+    const page = await repository.withTransaction(async (session) =>
+      session.listRecentActivity(communityId, 100, cursor));
+    return Object.freeze({
+      activity: bookingActivityModel(page.rows),
+      activityNextCursor: page.nextCursor
+        ? `${page.nextCursor.createdAt}|${page.nextCursor.id}` : null,
+    });
   }
 
   async function update(rawChange) {
@@ -374,6 +387,6 @@ export function createBookingAdminService({
       changed: result.changed });
   }
 
-  return Object.freeze({ read, update, updateGuestLink, unlinkAllianceGuild,
+  return Object.freeze({ read, readActivity, update, updateGuestLink, unlinkAllianceGuild,
     decideGuildLinkRequest, updateCycleSchedule, updateRecurringWindowDefault });
 }

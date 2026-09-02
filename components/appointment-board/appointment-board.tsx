@@ -21,6 +21,21 @@ type ManagerSlot = PublicSlot & {
   requirements?: Requirement[];
   holdExpiresAt?: string;
 };
+type ManagerActivity = {
+  id: string;
+  action: string;
+  category: "bookings" | "approvals" | "cancellations" | "manager_actions" | "configuration";
+  playerName: string | null;
+  playerId: string | null;
+  actorDiscordUserId: string | null;
+  actorDisplayName: string | null;
+  serviceCode: string | null;
+  previousState: string | null;
+  resultingState: string;
+  previousTime?: string;
+  newTime?: string;
+  createdAt: string;
+};
 type ManagerBoard = {
   community: PublicBoard["community"];
   services: Array<{
@@ -30,20 +45,8 @@ type ManagerBoard = {
     requirementColumns: Array<{ code: string; label: string; unit?: string }>;
     slots: ManagerSlot[];
   }>;
-  activity: Array<{
-    action: string;
-    category: "bookings" | "approvals" | "cancellations" | "manager_actions" | "configuration";
-    playerName: string | null;
-    playerId: string | null;
-    actorDiscordUserId: string | null;
-    actorDisplayName: string | null;
-    serviceCode: string | null;
-    previousState: string | null;
-    resultingState: string;
-    previousTime?: string;
-    newTime?: string;
-    createdAt: string;
-  }>;
+  activity: ManagerActivity[];
+  activityNextCursor: string | null;
 };
 
 const readableDate = (value: string) => new Intl.DateTimeFormat("en-GB", {
@@ -74,6 +77,34 @@ function appointmentTypeName(value: string) {
 
 function activityStateLabel(value: string) {
   return value ? `${value[0].toUpperCase()}${value.slice(1).replaceAll("_", " ")}` : value;
+}
+
+function activityActorLabel(activity: ManagerActivity) {
+  if (activity.actorDisplayName) return activity.actorDisplayName;
+  if (activity.actorDiscordUserId) return "Discord member";
+  if (activity.action === "submitted") return "Guest player";
+  return "System";
+}
+
+function ActivityActor({ activity }: { activity: ManagerActivity }) {
+  return <>{activityActorLabel(activity)}{activity.actorDiscordUserId
+    ? <small className="manager-audit-id">Discord ID: {activity.actorDiscordUserId}</small>
+    : null}</>;
+}
+
+function activityDetails(activity: ManagerActivity) {
+  return <>{activity.serviceCode ? `${appointmentTypeName(activity.serviceCode)} · ` : ""}
+    {activity.previousState
+      ? `${activityStateLabel(activity.previousState)} → ${activityStateLabel(activity.resultingState)}`
+      : activityStateLabel(activity.resultingState)}
+    {activity.previousTime
+      ? ` · ${activity.previousTime}${activity.newTime ? ` → ${activity.newTime}` : ""}` : ""}</>;
+}
+
+function activityTime(instant: string) {
+  return `${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "UTC" })
+    .format(new Date(instant))} UTC`;
 }
 
 function PublicPanels({ services }: { services: PublicService[] }) {
@@ -249,7 +280,6 @@ export function AppointmentBoard({ profile, initialBoard }: {
   const [manualSlot, setManualSlot] = useState("");
   const [busyManual, setBusyManual] = useState("");
   const [notice, setNotice] = useState("");
-  const [activityFilter, setActivityFilter] = useState("all");
   const endpoint = `/api/v1/appointment-board/${encodeURIComponent(initialBoard.community.code)}/manager`;
 
   const loadManagerBoard = useCallback(async () => {
@@ -264,6 +294,32 @@ export function AppointmentBoard({ profile, initialBoard }: {
     }
     if (boardPayload.ok) setManagerBoard(boardPayload.board);
   }, [endpoint]);
+
+  async function loadMoreActivity() {
+    if (!managerBoard?.activityNextCursor) return;
+    setBusyRequest("activity");
+    try {
+      const response = await fetch(`${endpoint}?activityCursor=${encodeURIComponent(
+        managerBoard.activityNextCursor,
+      )}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok || !Array.isArray(payload.activity)) {
+        throw new Error(payload.error ?? "Older activity could not be loaded.");
+      }
+      setManagerBoard((current) => {
+        if (!current) return current;
+        const ids = new Set(current.activity.map((activity) => activity.id));
+        return { ...current,
+          activity: [...current.activity, ...(payload.activity as ManagerActivity[])
+            .filter((activity) => !ids.has(activity.id))],
+          activityNextCursor: payload.activityNextCursor ?? null };
+      });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Older activity could not be loaded.");
+    } finally {
+      setBusyRequest("");
+    }
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadManagerBoard(); }, 0);
@@ -405,29 +461,31 @@ export function AppointmentBoard({ profile, initialBoard }: {
         : <PublicPanels services={initialBoard.services} />}
       {managerBoard ? <details className="manager-activity" open>
         <summary>Recent activity</summary>
-        <label>Filter activity <select onChange={(event) => setActivityFilter(event.target.value)}
-          value={activityFilter}>
-          <option value="all">All</option><option value="bookings">Bookings</option>
-          <option value="approvals">Approvals</option><option value="cancellations">Cancellations</option>
-          <option value="manager_actions">Manager actions</option>
-          <option value="configuration">Configuration</option>
-        </select></label>
-        {managerBoard.activity.some((event) => activityFilter === "all" || event.category === activityFilter)
-          ? <div className="manager-table-scroll" role="region" tabIndex={0}><table className="manager-table">
-            <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Player</th><th>Details</th></tr></thead>
-            <tbody>{managerBoard.activity.filter((event) => activityFilter === "all"
-              || event.category === activityFilter).map((event, index) => <tr key={`${event.createdAt}:${index}`}>
-              <td><time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time></td>
-              <td>{event.actorDisplayName ?? "System"}</td>
+        {managerBoard.activity.length
+          ? <div className="manager-activity-viewport" role="region" tabIndex={0}>
+            <div className="manager-table-scroll manager-activity-table"><table className="manager-table">
+            <thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Player</th><th>Details</th></tr></thead>
+            <tbody>{managerBoard.activity.map((event) => <tr key={event.id}>
+              <td><time dateTime={event.createdAt}>{activityTime(event.createdAt)}</time></td>
+              <td><ActivityActor activity={event} /></td>
               <td>{activityLabel(event.action)}</td>
               <td>{event.playerName ?? "—"}{event.playerId
                 ? <small className="manager-audit-id">Player ID: {event.playerId}</small> : null}</td>
-              <td>{event.serviceCode ? `${appointmentTypeName(event.serviceCode)} · ` : ""}
-                {event.previousState ? `${activityStateLabel(event.previousState)} → ${activityStateLabel(event.resultingState)}`
-                  : activityStateLabel(event.resultingState)}
-                {event.previousTime ? ` · ${event.previousTime}${event.newTime ? ` → ${event.newTime}` : ""}` : ""}</td>
+              <td>{activityDetails(event)}</td>
             </tr>)}</tbody>
-          </table></div> : <p>No matching activity.</p>}
+          </table></div>
+          <ol className="manager-activity-cards">{managerBoard.activity.map((event) => <li key={event.id}>
+            <time dateTime={event.createdAt}>{activityTime(event.createdAt)}</time>
+            <dl><div><dt>Who</dt><dd><ActivityActor activity={event} /></dd></div>
+              <div><dt>Action</dt><dd>{activityLabel(event.action)}</dd></div>
+              <div><dt>Player</dt><dd>{event.playerName ?? "—"}{event.playerId
+                ? <small className="manager-audit-id">Player ID: {event.playerId}</small> : null}</dd></div>
+              <div><dt>Details</dt><dd>{activityDetails(event)}</dd></div></dl>
+          </li>)}</ol>
+          {managerBoard.activityNextCursor ? <div className="manager-activity-more"><button
+            disabled={busyRequest === "activity"} onClick={() => void loadMoreActivity()} type="button">
+            {busyRequest === "activity" ? "Loading…" : "Load more"}</button></div> : null}
+          </div> : <p>No recent activity.</p>}
       </details> : null}
     </article>
   );

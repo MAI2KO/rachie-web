@@ -72,6 +72,11 @@ async function scope(request: Request, communityCode: string) {
 export async function handleBookingAdminRead(request: Request, communityCode: string) {
   try {
     const authorized = await scope(request, communityCode);
+    const activityCursor = new URL(request.url).searchParams.get("activityCursor");
+    if (activityCursor !== null) {
+      return json({ ok: true, ...(await authorized.service.readActivity(activityCursor)),
+        authorization: { via: authorized.managerContext.authorization.via } });
+    }
     return json({ ok: true, configuration: await authorized.service.read(),
       authorization: { via: authorized.managerContext.authorization.via } });
   } catch (error) {

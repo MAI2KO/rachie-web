@@ -29,7 +29,7 @@ class BookingAdminSession {
     )).rows[0] ?? null;
     if (!community || community.status !== "active") return null;
     const [services, settings, windows, dates, guestLinks, guilds, scheduleOverrides,
-      recurringDefaults, guildLinkRequests, activity] = await Promise.all([
+      recurringDefaults, guildLinkRequests, activityPage] = await Promise.all([
       this.client.query(
         `SELECT service.service_code,service.display_label,service.sort_order,
                 COALESCE(community_service.enabled,service.active) AS enabled
@@ -124,11 +124,12 @@ class BookingAdminSession {
       scheduleOverrides: scheduleOverrides.rows,
       recurringDefault: recurringDefaults.rows[0] ?? null,
       guildLinkRequests: guildLinkRequests.rows,
-      activity,
+      activity: activityPage.rows,
+      activityNextCursor: activityPage.nextCursor,
     };
   }
 
-  async listRecentActivity(communityId, limit) {
+  async listRecentActivity(communityId, limit, cursor = null) {
     const result = await this.client.query(
       `SELECT activity.* FROM (
          SELECT event.id,event.action,'approvals'::text AS category,
@@ -193,11 +194,22 @@ class BookingAdminSession {
             AND identity.discord_user_id=event.actor_id
           WHERE event.game_profile=$1 AND event.community_id=$2
        ) AS activity
+       WHERE ($4::timestamptz IS NULL OR activity.created_at < $4::timestamptz
+         OR (activity.created_at = $4::timestamptz AND activity.id < $5::uuid))
        ORDER BY activity.created_at DESC,activity.id DESC
        LIMIT $3`,
-      [this.gameProfile, communityId, limit],
+      [this.gameProfile, communityId, limit + 1, cursor?.createdAt ?? null, cursor?.id ?? null],
     );
-    return result.rows;
+    const rows = result.rows.slice(0, limit);
+    const last = rows.at(-1);
+    return {
+      rows,
+      nextCursor: result.rows.length > limit && last ? {
+        createdAt: last.created_at instanceof Date
+          ? last.created_at.toISOString() : String(last.created_at),
+        id: String(last.id),
+      } : null,
+    };
   }
 
   async lockDiscordTopology(communityId) {

@@ -35,6 +35,45 @@ export class BookingAdminValidationError extends Error {
   }
 }
 
+const ACTIVITY_CURSOR_PATTERN = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)\|([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+
+export function parseBookingActivityCursor(value) {
+  const match = ACTIVITY_CURSOR_PATTERN.exec(String(value ?? ""));
+  if (!match || !Number.isFinite(new Date(match[1]).getTime())) {
+    throw new BookingAdminValidationError("invalid_activity_cursor", "The activity page cursor is invalid.");
+  }
+  return Object.freeze({ createdAt: new Date(match[1]).toISOString(), id: match[2] });
+}
+
+function bookingActivityCursor(value) {
+  return value ? `${value.createdAt}|${value.id}` : null;
+}
+
+export function bookingActivityModel(events = []) {
+  return Object.freeze(events.map((event) => Object.freeze({
+    id: String(event.id),
+    action: event.action,
+    category: event.category,
+    playerName: event.player_name,
+    playerId: event.player_id,
+    actorDiscordUserId: event.actor_discord_user_id,
+    actorDisplayName: event.actor_display_name,
+    serviceCode: event.service_code,
+    previousState: event.previous_state,
+    resultingState: event.resulting_state,
+    previousTime: event.previous_time,
+    newTime: event.new_time,
+    bookingDate: event.booking_date ? dateOnly(event.booking_date) : null,
+    settingSection: event.setting_section,
+    requirementCode: event.requirement_code,
+    enabled: event.enabled === "true" ? true : event.enabled === "false" ? false : null,
+    guildName: event.guild_name,
+    cycleIndex: event.cycle_index === null ? null : Number(event.cycle_index),
+    createdAt: event.created_at instanceof Date
+      ? event.created_at.toISOString() : String(event.created_at),
+  })));
+}
+
 export class BookingAdminTopologyDeniedError extends Error {
   constructor(message = "Only the State/Kingdom Discord owner or this alliance Discord owner may unlink it.") {
     super(message);
@@ -321,26 +360,7 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
       date: dateOnly(date.booking_date),
       windowStatus: date.window_status,
     }))),
-    activity: Object.freeze((snapshot.activity ?? []).map((event) => Object.freeze({
-      action: event.action,
-      category: event.category,
-      playerName: event.player_name,
-      playerId: event.player_id,
-      actorDiscordUserId: event.actor_discord_user_id,
-      actorDisplayName: event.actor_display_name,
-      serviceCode: event.service_code,
-      previousState: event.previous_state,
-      resultingState: event.resulting_state,
-      previousTime: event.previous_time,
-      newTime: event.new_time,
-      bookingDate: event.booking_date ? dateOnly(event.booking_date) : null,
-      settingSection: event.setting_section,
-      requirementCode: event.requirement_code,
-      enabled: event.enabled === "true" ? true : event.enabled === "false" ? false : null,
-      guildName: event.guild_name,
-      cycleIndex: event.cycle_index === null ? null : Number(event.cycle_index),
-      createdAt: event.created_at instanceof Date
-        ? event.created_at.toISOString() : String(event.created_at),
-    }))),
+    activity: bookingActivityModel(snapshot.activity),
+    activityNextCursor: bookingActivityCursor(snapshot.activityNextCursor),
   });
 }
