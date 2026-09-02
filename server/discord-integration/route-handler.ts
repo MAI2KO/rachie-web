@@ -22,11 +22,28 @@ const SNOWFLAKE = /^\d{1,20}$/;
 const observedClaimProfiles = new Set<GameProfile>();
 const observedAuthenticationFailures = new Set<string>();
 
+function repairCutoff(value: unknown) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    throw new TypeError("invalid_sent_before");
+  }
+  const cutoff = new Date(value);
+  if (!Number.isFinite(cutoff.getTime()) || cutoff.toISOString() !== value) {
+    throw new TypeError("invalid_sent_before");
+  }
+  return cutoff;
+}
+
 interface IntegrationSession {
   consumeNonce(nonce: string, expiresAt: Date): Promise<boolean>;
   claim(limit: unknown, deliveryContext?: object): Promise<unknown[]>;
   registerRecipients(workId: string, claimToken: unknown, recipients: unknown[]): Promise<boolean>;
   finish(workId: string, claimToken: unknown, outcome: object): Promise<boolean>;
+  listLegacyAnnouncementRepairs(sentBefore: Date): Promise<unknown[]>;
+  beginLegacyAnnouncementRepair(notificationId: string, guestTokenSecret: string | null,
+    sentBefore: Date): Promise<unknown>;
+  completeLegacyAnnouncementRepair(notificationId: string, message: {
+    discordChannelId: string; discordMessageId: string;
+  }): Promise<boolean>;
 }
 interface IntegrationRepository {
   withTransaction<T>(work: (session: IntegrationSession) => Promise<T> | T): Promise<T>;
@@ -111,6 +128,49 @@ export async function handleDiscordWorkClaim(request: Request) {
     }
     return json({ ok: true, profile: scope.profile, work });
   } catch (error) { return discordIntegrationError(error, "claim"); }
+}
+
+export async function handleLegacyAnnouncementRepairCandidates(request: Request) {
+  try {
+    const scope = await authenticateDiscordIntegrationRequest(request);
+    const cutoff = repairCutoff((scope.body as { sentBefore?: unknown }).sentBefore);
+    const candidates = await scope.repository.withTransaction((session) =>
+      session.listLegacyAnnouncementRepairs(cutoff));
+    return json({ ok: true, profile: scope.profile, candidates });
+  } catch (error) { return discordIntegrationError(error, "announcement_repair_candidates"); }
+}
+
+export async function handleLegacyAnnouncementRepairBegin(request: Request, notificationId: string) {
+  try {
+    if (!UUID.test(notificationId)) throw new TypeError("invalid_notification_id");
+    const scope = await authenticateDiscordIntegrationRequest(request);
+    const cutoff = repairCutoff((scope.body as { sentBefore?: unknown }).sentBefore);
+    const repair = await scope.repository.withTransaction((session) =>
+      session.beginLegacyAnnouncementRepair(
+        notificationId, getBookingIntegrationSecret(scope.profile), cutoff,
+      ));
+    return repair ? json({ ok: true, repair })
+      : json({ ok: false, code: "repair_not_eligible", error: "Announcement repair is not eligible." }, 409);
+  } catch (error) { return discordIntegrationError(error, "announcement_repair_begin"); }
+}
+
+export async function handleLegacyAnnouncementRepairComplete(request: Request, notificationId: string) {
+  try {
+    if (!UUID.test(notificationId)) throw new TypeError("invalid_notification_id");
+    const scope = await authenticateDiscordIntegrationRequest(request);
+    const body = scope.body as { discordChannelId?: unknown; discordMessageId?: unknown };
+    if (!SNOWFLAKE.test(String(body.discordChannelId ?? ""))
+        || !SNOWFLAKE.test(String(body.discordMessageId ?? ""))) {
+      throw new TypeError("invalid_message_reference");
+    }
+    const completed = await scope.repository.withTransaction((session) =>
+      session.completeLegacyAnnouncementRepair(notificationId, {
+        discordChannelId: String(body.discordChannelId),
+        discordMessageId: String(body.discordMessageId),
+      }));
+    return completed ? json({ ok: true })
+      : json({ ok: false, code: "repair_not_active", error: "Announcement repair is not active." }, 409);
+  } catch (error) { return discordIntegrationError(error, "announcement_repair_complete"); }
 }
 
 export async function handleDiscordWorkRecipients(request: Request, workId: string) {

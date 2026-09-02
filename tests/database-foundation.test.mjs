@@ -195,6 +195,7 @@ test("migration files are ordered and checksummed", async () => {
       { version: "0011", name: "manual_guest_link_notifications" },
       { version: "0012", name: "state_guild_link_requests" },
       { version: "0013", name: "community_booking_window_defaults" },
+      { version: "0014", name: "legacy_announcement_repair" },
     ],
   );
   assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));
@@ -410,4 +411,17 @@ test("State guild requests extend the existing queue without rewriting topology"
   assert.match(migration, /requested_guild_kind IN \('state', 'alliance'\)/);
   assert.match(migration, /requested_guild_kind = 'state' AND alliance_abbreviation IS NULL/);
   assert.doesNotMatch(migration, /DROP TABLE|TRUNCATE|DELETE FROM|UPDATE community_guild_link_requests/i);
+});
+
+test("legacy announcement repair adds explicit state without rewriting booking data", () => {
+  const migration = fs.readFileSync(
+    path.join(migrationsDirectory, "0014_legacy_announcement_repair.sql"), "utf8",
+  );
+  assert.match(migration, /ADD COLUMN payload_version smallint NOT NULL DEFAULT 1/);
+  assert.match(migration, /ADD COLUMN repair_status text/);
+  assert.match(migration, /ADD COLUMN repaired_at timestamptz/);
+  assert.match(migration, /booking_guest_share_links_one_active_per_window/);
+  assert.match(migration, /WHERE booking_window_id IS NOT NULL AND revoked_at IS NULL/);
+  assert.doesNotMatch(migration, /DROP TABLE|TRUNCATE|DELETE FROM|ALTER COLUMN|CREATE TABLE/i);
+  assert.doesNotMatch(migration, /token[^\n]*text/i);
 });

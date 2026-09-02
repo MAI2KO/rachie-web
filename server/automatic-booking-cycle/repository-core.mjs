@@ -124,12 +124,20 @@ async function reconcileWindowAnnouncement(client, community, windowId, cycle, a
   if (!token) return 0;
 
   const current = (await client.query(
-    `SELECT id FROM booking_guest_share_links
-      WHERE game_profile=$1 AND community_id=$2 AND revoked_at IS NULL
-      ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`,
-    [PROFILE, community.id],
+    `SELECT link.id,notification.payload_version,notification.repair_status
+       FROM booking_guest_share_links AS link
+       LEFT JOIN booking_discord_notifications AS notification
+        ON notification.game_profile=link.game_profile
+        AND notification.booking_window_id=$3
+        AND notification.guest_share_link_id=link.id
+        AND notification.notification_type='booking_window_open'
+      WHERE link.game_profile=$1 AND link.community_id=$2 AND link.revoked_at IS NULL
+      ORDER BY link.created_at DESC,link.id DESC LIMIT 1 FOR UPDATE OF link`,
+    [PROFILE, community.id, windowId],
   )).rows[0] ?? null;
-  const linkId = automaticBookingUuid(community.id, windowId, "automatic-guest-link");
+  const repaired = current?.repair_status === "rotated" || Number(current?.payload_version) >= 2;
+  const linkId = repaired ? current.id
+    : automaticBookingUuid(community.id, windowId, "automatic-guest-link");
   if (current?.id !== linkId) {
     if (current) await client.query(
       `UPDATE booking_guest_share_links
@@ -162,6 +170,12 @@ async function reconcileWindowAnnouncement(client, community, windowId, cycle, a
      ON CONFLICT (game_profile,community_id,idempotency_key) DO NOTHING`,
     [PROFILE, automaticBookingUuid(windowId, "booking-open-notification"), community.id,
      windowId, linkId, cycle.opensAt, `booking-window-open:${windowId}`],
+  );
+  await client.query(
+    `UPDATE booking_discord_notifications SET payload_version=2
+      WHERE game_profile=$1 AND booking_window_id=$2
+        AND notification_type='booking_window_open' AND status<>'sent'`,
+    [PROFILE, windowId],
   );
   return inserted.rowCount;
 }

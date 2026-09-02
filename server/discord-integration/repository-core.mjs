@@ -4,7 +4,8 @@ import {
   automaticWindowGuestToken,
   manualGuestLinkToken,
 } from "../automatic-booking-cycle/announcement-core.mjs";
-import { hashGuestShareToken } from "../booking-approval/domain-core.mjs";
+import { automaticBookingUuid } from "../automatic-booking-cycle/domain-core.mjs";
+import { guestShareTokenHint, hashGuestShareToken } from "../booking-approval/domain-core.mjs";
 
 const PROFILES = new Set(["wos", "kingshot"]);
 const RETRY_MINUTES = [1, 5, 15, 30, 60];
@@ -290,6 +291,135 @@ class DiscordIntegrationSession {
     const result = await this.client.query(
       `INSERT INTO booking_integration_nonces (game_profile,nonce,expires_at)
        VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING nonce`, [this.profile, nonce, expiresAt],
+    );
+    return result.rowCount === 1;
+  }
+
+  async listLegacyAnnouncementRepairs(sentBefore) {
+    const result = await this.client.query(
+      `SELECT notification.id AS "notificationId",community.id AS "communityId",
+              community.location_code AS "communityCode",community.display_name AS "communityName",
+              booking_window.id AS "windowId",booking_window.opens_at AS "opensAt",
+              booking_window.closes_at AS "closesAt",link.id AS "guestLinkId",
+              link.token_hint AS "guestLinkHint",notification.sent_at AS "sentAt",
+              notification.discord_channel_id AS "discordChannelId",
+              notification.discord_message_id AS "discordMessageId",
+              notification.repair_status AS "repairStatus",
+              ARRAY(SELECT guild.discord_guild_id
+                FROM booking_discord_guilds AS guild
+                WHERE guild.game_profile=notification.game_profile
+                  AND guild.community_id=notification.community_id
+                  AND guild.link_status='active'
+                ORDER BY guild.discord_guild_id) AS guilds
+         FROM booking_discord_notifications AS notification
+         JOIN booking_communities AS community
+           ON community.game_profile=notification.game_profile
+          AND community.id=notification.community_id AND community.status='active'
+         JOIN booking_windows AS booking_window
+           ON booking_window.game_profile=notification.game_profile
+          AND booking_window.id=notification.booking_window_id
+          AND booking_window.community_id=notification.community_id
+         JOIN booking_guest_share_links AS link
+           ON link.game_profile=notification.game_profile
+          AND link.id=notification.guest_share_link_id
+          AND link.community_id=notification.community_id
+        WHERE notification.game_profile=$1
+          AND notification.notification_type='booking_window_open'
+          AND notification.status='sent' AND notification.payload_version=1
+          AND notification.sent_at<$2
+          AND notification.repair_status IS DISTINCT FROM 'completed'
+          AND booking_window.status='open'
+          AND (booking_window.opens_at IS NULL OR booking_window.opens_at<=clock_timestamp())
+          AND (booking_window.closes_at IS NULL OR booking_window.closes_at>clock_timestamp())
+          AND link.revoked_at IS NULL
+          AND (link.expires_at IS NULL OR link.expires_at>clock_timestamp())
+        ORDER BY community.location_code,community.id,booking_window.id`,
+      [this.profile, sentBefore],
+    );
+    return result.rows.map((row) => ({ ...row, profile: this.profile, guilds: row.guilds ?? [] }));
+  }
+
+  async beginLegacyAnnouncementRepair(notificationId, guestTokenSecret, sentBefore) {
+    const result = await this.client.query(
+      `SELECT notification.*,community.location_code,booking_window.status AS window_status,
+              booking_window.opens_at,booking_window.closes_at,link.revoked_at,link.expires_at
+         FROM booking_discord_notifications AS notification
+         JOIN booking_communities AS community
+           ON community.game_profile=notification.game_profile AND community.id=notification.community_id
+         JOIN booking_windows AS booking_window
+           ON booking_window.game_profile=notification.game_profile
+          AND booking_window.id=notification.booking_window_id
+         JOIN booking_guest_share_links AS link
+           ON link.game_profile=notification.game_profile AND link.id=notification.guest_share_link_id
+        WHERE notification.game_profile=$1 AND notification.id=$2
+          AND notification.sent_at<$3
+        FOR UPDATE OF notification,booking_window,link`,
+      [this.profile, notificationId, sentBefore],
+    );
+    const row = result.rows[0];
+    if (!row || row.notification_type !== "booking_window_open" || row.status !== "sent"
+        || Number(row.payload_version) !== 1 || row.repair_status === "completed"
+        || row.window_status !== "open"
+        || (row.opens_at && new Date(row.opens_at) > new Date())
+        || (row.closes_at && new Date(row.closes_at) <= new Date())) return null;
+
+    let linkId = row.guest_share_link_id;
+    if (row.repair_status !== "rotated") {
+      if (row.revoked_at || (row.expires_at && new Date(row.expires_at) <= new Date())) return null;
+      linkId = automaticBookingUuid(notificationId, "legacy-public-url-repair-v1-link");
+      const token = manualGuestLinkToken(
+        guestTokenSecret, this.profile, row.community_id, linkId,
+      );
+      if (!token) throw new Error("announcement_repair_token_unavailable");
+      await this.client.query(
+        `UPDATE booking_guest_share_links
+            SET revoked_at=now(),revoked_by_actor_id='legacy-announcement-repair-v1',updated_at=now()
+          WHERE game_profile=$1 AND id=$2 AND revoked_at IS NULL`,
+        [this.profile, row.guest_share_link_id],
+      );
+      await this.client.query(
+        `INSERT INTO booking_guest_share_links
+           (game_profile,id,community_id,token_hash,token_hint,label,created_by_actor_id,
+            expires_at,rotated_from_link_id,booking_window_id)
+         VALUES ($1,$2,$3,$4,$5,'Repaired automatic booking announcement',
+                 'legacy-announcement-repair-v1',$6,$7,$8)
+         ON CONFLICT (game_profile,id) DO NOTHING`,
+        [this.profile, linkId, row.community_id, hashGuestShareToken(token),
+         guestShareTokenHint(token), row.closes_at, row.guest_share_link_id, row.booking_window_id],
+      );
+      await this.client.query(
+        `UPDATE booking_discord_notifications
+            SET guest_share_link_id=$3,repair_status='rotated',updated_at=now()
+          WHERE game_profile=$1 AND id=$2`,
+        [this.profile, notificationId, linkId],
+      );
+      await this.client.query(
+        `INSERT INTO booking_discord_notifications
+           (game_profile,id,community_id,notification_type,guest_share_link_id,due_at,idempotency_key)
+         VALUES ($1,$2,$3,'manager_guest_link',$4,now(),$5)
+         ON CONFLICT (game_profile,community_id,idempotency_key) DO NOTHING`,
+        [this.profile, automaticBookingUuid(notificationId, "legacy-repair-manager-notification-v1"),
+         row.community_id, linkId, `legacy-announcement-repair-manager:v1:${notificationId}`],
+      );
+    }
+    const token = manualGuestLinkToken(
+      guestTokenSecret, this.profile, row.community_id, linkId,
+    );
+    if (!token) throw new Error("announcement_repair_token_unavailable");
+    return { notificationId, profile: this.profile, communityCode: row.location_code,
+      communityId: row.community_id, windowId: row.booking_window_id,
+      closesAt: row.closes_at, guestPath: `/book/${token}` };
+  }
+
+  async completeLegacyAnnouncementRepair(notificationId, message) {
+    const result = await this.client.query(
+      `UPDATE booking_discord_notifications
+          SET payload_version=2,repair_status='completed',repaired_at=now(),
+              discord_channel_id=$3,discord_message_id=$4,last_error_code=NULL,updated_at=now()
+        WHERE game_profile=$1 AND id=$2 AND notification_type='booking_window_open'
+          AND status='sent' AND payload_version=1 AND repair_status='rotated'
+        RETURNING id`,
+      [this.profile, notificationId, message.discordChannelId, message.discordMessageId],
     );
     return result.rowCount === 1;
   }
