@@ -79,7 +79,9 @@ test("reconciliation candidates are deterministic current and future cycles", ()
     ["2026-09-02T00:00:00.000Z", "2026-09-30T00:00:00.000Z"],
   );
   assert.equal(automaticWosCycleForDisplay(new Date("2026-09-04T00:00:00.000Z")).index, 1);
-  assert.equal(automaticWosCycleForDisplay(new Date("2026-09-06T12:00:00.000Z")).index, 2);
+  assert.equal(automaticWosCycleForDisplay(new Date("2026-09-06T12:00:00.000Z")).index, 1);
+  assert.equal(automaticWosCycleForDisplay(new Date("2026-09-10T23:59:59.999Z")).index, 1);
+  assert.equal(automaticWosCycleForDisplay(new Date("2026-09-11T00:00:00.000Z")).index, 2);
   assert.equal(automaticBookingUuid("community", "cycle"), automaticBookingUuid("community", "cycle"));
 });
 

@@ -353,6 +353,10 @@ button:focus-visible,
 @keyframes booking-spin { to { transform: rotate(360deg); } }
 
 .appointment-board { width: 100%; }
+.manager-schedule-status { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0 0 1rem; padding: 0.75rem; border: 1px solid var(--brand-border); border-radius: 0.65rem; background: var(--brand-surface); align-items: end; }
+.manager-schedule-status > div, .manager-schedule-status label { display: grid; gap: 0.2rem; color: var(--brand-text-muted); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
+.manager-schedule-status strong { color: var(--brand-text); font-size: 0.875rem; }
+.manager-schedule-status select { min-height: 2.25rem; padding: 0.35rem 0.55rem; border: 1px solid var(--brand-border); border-radius: 0.4rem; background: var(--brand-surface-muted); color: var(--brand-text); font: inherit; text-transform: none; }
 .appointment-panels { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(18rem, 1fr); gap: 1rem; margin-top: 1.5rem; overflow-x: auto; overscroll-behavior-inline: contain; padding: 0.125rem 0.125rem 1rem; scroll-snap-type: inline mandatory; }
 .appointment-panel { min-width: 0; border: 1px solid var(--brand-border); border-radius: 5px; background: var(--brand-surface); scroll-snap-align: start; }
 .appointment-panel > header { padding: 1rem; border-bottom: 1px solid var(--brand-border); }

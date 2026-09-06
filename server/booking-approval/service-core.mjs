@@ -461,18 +461,23 @@ export function createBookingBoardReadService({
         return publicAppointmentBoard(community, await session.listBoardRows(communityId, now()));
       });
     },
-    async managerBoard() {
+    async managerBoard(selectedWindowId = /** @type {string | null} */ (null)) {
       assertTrustedManagerContext(managerContext, gameProfile, communityId);
       return repository.withTransaction(async (session) => {
         const community = await session.findActiveCommunityById(communityId);
         if (!community) throw new BookingApprovalTransitionError("community_not_found", "Community was not found.");
-        const rows = await session.listManagerBoardRows(communityId, now());
-        const activity = await session.listRecentApprovalActivity(communityId, 100);
-        const settings = await session.findSettings(communityId);
+        const at = now();
+        const [rows, scheduleOptions, activity, settings] = await Promise.all([
+          session.listManagerBoardRows(communityId, at, selectedWindowId),
+          session.listManagerScheduleOptions(communityId, at),
+          session.listRecentApprovalActivity(communityId, 100),
+          session.findSettings(communityId),
+        ]);
         return managerAppointmentBoard(community, rows, activity, {
           gameProfile,
           settings,
           currentDiscordUserId: managerContext.discordUserId,
+          scheduleOptions,
         });
       });
     },

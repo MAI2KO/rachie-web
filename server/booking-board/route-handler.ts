@@ -129,7 +129,11 @@ export async function handleManagerAppointmentBoard(request: Request, communityC
       return json({ ok: true, ...(await service.managerActivity(activityCursor)),
         authorization: { via: scope.managerContext.authorization.via } });
     }
-    const board = await service.managerBoard();
+    const selectedWindowId = new URL(request.url).searchParams.get("windowId");
+    const board = await service.managerBoard(
+      selectedWindowId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedWindowId)
+        ? selectedWindowId : null,
+    );
     return json({ ok: true, board, authorization: { via: scope.managerContext.authorization.via } });
   } catch (error) {
     return managerError(error);

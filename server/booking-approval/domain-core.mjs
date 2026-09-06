@@ -182,7 +182,7 @@ export function managerAppointmentBoard(
   community,
   rows,
   activityPage,
-  { gameProfile, settings, currentDiscordUserId } = {},
+  { gameProfile, settings, currentDiscordUserId, scheduleOptions = [] } = {},
 ) {
   const services = [];
   for (const row of rows) {
@@ -231,6 +231,16 @@ export function managerAppointmentBoard(
   }
   return Object.freeze({
     community: Object.freeze({ code: community.location_code, displayName: community.display_name }),
+    bookingWindow: Object.freeze({ status: rows[0]?.window_status ?? "unavailable" }),
+    schedule: Object.freeze({
+      selectedWindowId: rows[0]?.window_id ?? scheduleOptions[0]?.id ?? null,
+      options: Object.freeze(scheduleOptions.map((option) => Object.freeze({
+        windowId: option.id,
+        status: option.status,
+        kind: option.kind,
+        startsOn: approvalDateOnly(option.service_start),
+      }))),
+    }),
     services: Object.freeze(services.map((service) => Object.freeze({
       ...service, slots: Object.freeze(service.slots),
     }))),
