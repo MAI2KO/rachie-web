@@ -496,19 +496,40 @@ class ProfileScopedApprovalSession {
     return result.rows;
   }
 
-  async listManagerBoardRows(communityId, at) {
+  async listManagerBoardRows(communityId, at, selectedWindowId = null) {
     const result = await this.client.query(
-      `WITH current_window AS (
-         SELECT booking_window.id
-         FROM booking_windows AS booking_window
-         WHERE booking_window.game_profile=$1 AND booking_window.community_id=$2
-           AND booking_window.status<>'archived'
-         ORDER BY CASE booking_window.status WHEN 'open' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
-                  booking_window.created_at DESC,booking_window.id DESC
+      `WITH schedule_windows AS (
+         SELECT booking_window.id,booking_window.status,booking_window.opens_at,
+                booking_window.created_at,MIN(dates.booking_date) AS service_start,
+                (MAX(dates.booking_date)::timestamp + interval '1 day') AT TIME ZONE 'UTC' AS service_end
+           FROM booking_windows AS booking_window
+           JOIN booking_service_dates AS dates
+             ON dates.game_profile=booking_window.game_profile
+            AND dates.community_id=booking_window.community_id
+            AND dates.window_id=booking_window.id
+          WHERE booking_window.game_profile=$1 AND booking_window.community_id=$2
+            AND booking_window.status<>'archived'
+          GROUP BY booking_window.id,booking_window.status,booking_window.opens_at,booking_window.created_at
+       ), current_window AS (
+         SELECT id,status FROM schedule_windows
+          WHERE ($4::uuid IS NOT NULL AND id=$4)
+             OR ($4::uuid IS NULL)
+          ORDER BY CASE
+             WHEN $4::uuid IS NOT NULL THEN 0
+             WHEN $1='wos' AND ((opens_at IS NULL AND status='open')
+               OR (opens_at <= $3 AND $3 < service_end)) THEN 0
+             WHEN $1='wos' AND service_start > $3::date THEN 1
+             WHEN $1='wos' THEN 2
+             ELSE CASE status WHEN 'open' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END
+           END,
+           CASE WHEN $1='wos' AND service_start > $3::date THEN service_start END ASC,
+           CASE WHEN $1='wos' THEN service_end END DESC,
+           created_at DESC,id DESC
          LIMIT 1
        )
        SELECT slot.id AS slot_id,slot.service_code,service.display_label AS service_label,
               service.sort_order,slot.booking_date,slot.display_time_label,slot.ordinal,
+              current_window.id AS window_id,current_window.status AS window_status,
               booking.id AS confirmed_booking_id,
               booking.in_game_name_snapshot AS confirmed_player_name,
               booking.player_id_snapshot AS confirmed_player_id,
@@ -549,6 +570,46 @@ class ProfileScopedApprovalSession {
            WHERE block.game_profile=slot.game_profile AND block.slot_id=slot.id
              AND block.cancelled_at IS NULL)
        ORDER BY service.sort_order,slot.booking_date,slot.ordinal,slot.id`,
+      [this.gameProfile, communityId, at, selectedWindowId],
+    );
+    return result.rows;
+  }
+
+  async listManagerScheduleOptions(communityId, at) {
+    const result = await this.client.query(
+      `WITH schedule_windows AS (
+         SELECT booking_window.id,booking_window.status,booking_window.opens_at,
+                booking_window.created_at,MIN(dates.booking_date) AS service_start,
+                (MAX(dates.booking_date)::timestamp + interval '1 day') AT TIME ZONE 'UTC' AS service_end
+           FROM booking_windows AS booking_window
+           JOIN booking_service_dates AS dates
+             ON dates.game_profile=booking_window.game_profile
+            AND dates.community_id=booking_window.community_id
+            AND dates.window_id=booking_window.id
+          WHERE booking_window.game_profile=$1 AND booking_window.community_id=$2
+            AND booking_window.status<>'archived'
+          GROUP BY booking_window.id,booking_window.status,booking_window.opens_at,booking_window.created_at
+       ), current_window AS (
+         SELECT * FROM schedule_windows
+          ORDER BY CASE
+             WHEN $1='wos' AND ((opens_at IS NULL AND status='open')
+               OR (opens_at <= $3 AND $3 < service_end)) THEN 0
+             WHEN $1='wos' AND service_start > $3::date THEN 1
+             WHEN $1='wos' THEN 2
+             ELSE CASE status WHEN 'open' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END
+           END,
+           CASE WHEN $1='wos' AND service_start > $3::date THEN service_start END ASC,
+           CASE WHEN $1='wos' THEN service_end END DESC,
+           created_at DESC,id DESC
+         LIMIT 1
+       ), previous_window AS (
+         SELECT schedule_windows.* FROM schedule_windows,current_window
+          WHERE schedule_windows.id<>current_window.id AND schedule_windows.service_end <= $3
+          ORDER BY schedule_windows.service_end DESC,schedule_windows.id DESC LIMIT 1
+       )
+       SELECT id,status,service_start,'current'::text AS kind FROM current_window
+       UNION ALL
+       SELECT id,status,service_start,'previous'::text AS kind FROM previous_window`,
       [this.gameProfile, communityId, at],
     );
     return result.rows;

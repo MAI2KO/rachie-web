@@ -77,7 +77,10 @@ export function automaticWosCycleForDisplay(at, recurringDefault = null) {
   const current = resolveWosBookingCycleWindow(
     cycle(Math.max(FIRST_AUTOMATIC_INDEX, currentIndex)), recurringDefault,
   );
-  if (atMs < Date.parse(current.closesAt)) return current;
+  // This is a display/schedule selection, not booking eligibility.  The window
+  // may be closed before the Minister days it populated have finished.
+  const scheduleEndsAt = Date.parse(`${current.dates.troop}T00:00:00.000Z`) + DAY_MS;
+  if (atMs < scheduleEndsAt) return current;
   return resolveWosBookingCycleWindow(cycle(current.index + 1), recurringDefault);
 }
 

@@ -38,6 +38,11 @@ type ManagerActivity = {
 };
 type ManagerBoard = {
   community: PublicBoard["community"];
+  bookingWindow: { status: string };
+  schedule: {
+    selectedWindowId: string | null;
+    options: Array<{ windowId: string; status: string; kind: "current" | "previous"; startsOn: string }>;
+  };
   services: Array<{
     code: string;
     name: string;
@@ -105,6 +110,10 @@ function activityTime(instant: string) {
   return `${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric",
     hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "UTC" })
     .format(new Date(instant))} UTC`;
+}
+
+function bookingWindowStatusLabel(status: string) {
+  return status === "open" ? "OPEN" : status === "closed" ? "CLOSED" : status.toUpperCase();
 }
 
 function PublicPanels({ services }: { services: PublicService[] }) {
@@ -282,10 +291,11 @@ export function AppointmentBoard({ profile, initialBoard }: {
   const [notice, setNotice] = useState("");
   const endpoint = `/api/v1/appointment-board/${encodeURIComponent(initialBoard.community.code)}/manager`;
 
-  const loadManagerBoard = useCallback(async () => {
+  const loadManagerBoard = useCallback(async (windowId?: string) => {
+    const boardUrl = windowId ? `${endpoint}?windowId=${encodeURIComponent(windowId)}` : endpoint;
     const [sessionResponse, boardResponse] = await Promise.all([
       fetch("/api/v1/auth/session", { cache: "no-store" }),
-      fetch(endpoint, { cache: "no-store" }),
+      fetch(boardUrl, { cache: "no-store" }),
     ]);
     if (!boardResponse.ok) return;
     const [sessionPayload, boardPayload] = await Promise.all([sessionResponse.json(), boardResponse.json()]);
@@ -450,15 +460,27 @@ export function AppointmentBoard({ profile, initialBoard }: {
         </div> : null}
       </CommunityPageChrome>
       {notice ? <p aria-live="polite" className="booking-notice">{notice}</p> : null}
-      {managerBoard
-        ? <ManagerPanels board={managerBoard} busyBooking={busyBooking} busyRequest={busyRequest}
+      {managerBoard ? <>
+        <section className="manager-schedule-status" aria-label="Minister schedule status">
+          <div><span>Booking window</span><strong>{bookingWindowStatusLabel(managerBoard.bookingWindow.status)}</strong></div>
+          <div><span>Minister schedule</span><strong>Current cycle</strong></div>
+          {managerBoard.schedule.options.length > 1 ? <label>Schedule cycle
+            <select value={managerBoard.schedule.selectedWindowId ?? ""}
+              onChange={(event) => void loadManagerBoard(event.currentTarget.value)}>
+              {managerBoard.schedule.options.map((option) => <option key={option.windowId} value={option.windowId}>
+                {option.kind === "current" ? "Current cycle" : "Previous cycle"} — {readableDate(option.startsOn)}
+              </option>)}
+            </select>
+          </label> : null}
+        </section>
+        <ManagerPanels board={managerBoard} busyBooking={busyBooking} busyRequest={busyRequest}
           busyManual={busyManual} cancellingBooking={cancellingBooking} copiedKey={copiedKey}
           editMode={editMode} manualSlot={manualSlot}
           onApprovalAction={approvalAction} onBookingAction={bookingAction} onCancelChoice={cancelChoice}
           onCopy={copy} onManualChoice={manualChoice} onManualSubmit={manualBookingAction}
           onRescheduleChoice={rescheduleChoice} rescheduleSlot={rescheduleSlot}
           reschedulingBooking={reschedulingBooking} />
-        : <PublicPanels services={initialBoard.services} />}
+        </> : <PublicPanels services={initialBoard.services} />}
       {managerBoard ? <details className="manager-activity" open>
         <summary>Recent activity</summary>
         {managerBoard.activity.length
