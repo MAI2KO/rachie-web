@@ -169,6 +169,91 @@ export function createGuestBookingRequestService({
 
           const settings = await session.findSettings(link.community_id);
           const answers = validateGuestRequirementAnswers(gameProfile, input, settings);
+          await session.lockRegisteredPlayerIdentity(link.community_id, input.playerId);
+          const registeredMatches = await session.findRegisteredParticipantsByPlayerId(
+            link.community_id, input.playerId,
+          );
+          const registered = registeredMatches.length === 1 ? registeredMatches[0] : null;
+          const ambiguous = registeredMatches.length > 1;
+          const requireApproval = ambiguous
+            || (!registered && settings?.require_unregistered_guest_approval !== false);
+
+          if (!requireApproval) {
+            const bookingId = createId();
+            const provenance = registered ? "guest_registered" : "guest_unregistered";
+            const booking = await session.insertConfirmedGuestBooking({
+              id: bookingId, communityId: link.community_id, windowId: slot.window_id,
+              serviceDateId: slot.service_date_id, serviceCode: slot.service_code,
+              bookingDate: slot.booking_date, slotId: slot.id,
+              participantId: registered?.id ?? null,
+              discordUserId: registered?.discord_user_id ?? null,
+              playerId: registered?.player_id ?? input.playerId,
+              inGameName: registered?.in_game_name ?? input.inGameName,
+              alliance: registered?.alliance ?? input.alliance,
+              displayTime: slot.display_time_label, idempotencyKey: scopedKey,
+              correlationId, sourceGuildId: registered?.source_discord_guild_id ?? null,
+              provenance, shareLinkId: link.id,
+            });
+            for (const answer of answers) {
+              await session.insertGuestBookingAnswer({ bookingId, ...answer });
+            }
+            const eventType = registered
+              ? "guest_registered_booking_confirmed"
+              : "guest_unregistered_booking_confirmed";
+            const boundedEvent = {
+              bookingId, serviceCode: slot.service_code, slotId: slot.id,
+              participant: {
+                playerId: booking.player_id_snapshot,
+                inGameName: booking.in_game_name_snapshot,
+                alliance: booking.alliance_snapshot,
+              },
+              provenance, correlationId,
+            };
+            await session.insertGuestBookingEvent({
+              id: createId(), communityId: link.community_id, bookingId,
+              eventType, correlationId, afterData: boundedEvent,
+            });
+            await session.insertApprovalOutbox({
+              id: createId(), communityId: link.community_id,
+              eventType: "booking.created",
+              idempotencyKey: `booking.created:${bookingId}`,
+              correlationId, payload: boundedEvent,
+            });
+            if (registered) {
+              await session.insertPlayerPointsEntry({
+                id: createId(), participantId: registered.id,
+                communityId: link.community_id,
+                discordUserId: registered.discord_user_id,
+                pointsDelta: APPOINTMENT_CONFIRMED_POINTS,
+                reason: POINT_REASONS.appointmentConfirmed,
+                bookingWindowId: slot.window_id, bookingId,
+                sourceGuildId: registered.source_discord_guild_id,
+                idempotencyKey: `appointment_confirmed:${registered.id}:${slot.window_id}:${slot.service_code}`,
+                metadata: { serviceCode: slot.service_code, provenance },
+              });
+              if (registered.source_discord_guild_id) {
+                await session.insertCommunityParticipationPoints({
+                  id: createId(), communityId: link.community_id,
+                  sourceGuildId: registered.source_discord_guild_id,
+                  bookingWindowId: slot.window_id,
+                  pointsDelta: CYCLE_DISCORD_PARTICIPATION_POINTS,
+                  reason: POINT_REASONS.cycleDiscordParticipation,
+                  idempotencyKey: `cycle_discord_participation:${slot.window_id}:${registered.source_discord_guild_id}`,
+                  metadata: { firstQualifyingBookingId: bookingId },
+                });
+              }
+            }
+            const body = { request: {
+              service: booking.service_code,
+              date: approvalDateOnly(booking.booking_date),
+              time: booking.display_time_label_snapshot,
+              status: "confirmed",
+              holdExpiresAt: null,
+              recognizedRegisteredPlayer: Boolean(registered),
+            } };
+            await session.completeIdempotency(link.community_id, scopedKey, 201, body);
+            return { status: 201, body, replayed: false };
+          }
           const holdSeconds = Number.isInteger(settings?.pending_hold_duration_seconds)
             ? settings.pending_hold_duration_seconds
             : DEFAULT_PENDING_HOLD_SECONDS;
@@ -202,7 +287,8 @@ export function createGuestBookingRequestService({
             actorType: "guest",
             resultingState: APPROVAL_REQUEST_STATES.PENDING_APPROVAL,
             correlationId,
-            metadata: { serviceCode: slot.service_code, slotId: slot.id },
+            metadata: { serviceCode: slot.service_code, slotId: slot.id,
+              provenance: ambiguous ? "ambiguous_registered_player" : "unregistered_guest" },
           });
           await session.insertApprovalOutbox({
             id: createId(),

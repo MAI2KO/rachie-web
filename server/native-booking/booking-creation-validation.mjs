@@ -27,7 +27,14 @@ export function validateBookingChoice(value) {
   if (!requirements || typeof requirements !== "object" || Array.isArray(requirements)) {
     throw new InvalidBookingRequestError("invalid_requirements", "Requirement answers are invalid.");
   }
-  return { serviceCode: value.serviceCode, slotId, requirements };
+  const participantId = value.participantId == null ? null
+    : typeof value.participantId === "string" ? value.participantId.trim() : "";
+  if (participantId !== null
+      && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(participantId)) {
+    throw new InvalidBookingRequestError("invalid_character", "Invalid registered character.");
+  }
+  return { serviceCode: value.serviceCode, slotId,
+    ...(participantId ? { participantId } : {}), requirements };
 }
 
 export function validateRescheduleChoice(value) {

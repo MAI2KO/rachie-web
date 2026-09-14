@@ -50,7 +50,8 @@ export const RUNTIME_ADMIN_UPDATE_COLUMNS = Object.freeze({
   booking_settings: Object.freeze([
     "construction_fc_required", "construction_rfc_required",
     "construction_speedups_required", "research_shards_required",
-    "research_speedups_required", "troop_speedups_required", "version", "updated_at",
+    "research_speedups_required", "troop_speedups_required",
+    "require_unregistered_guest_approval", "version", "updated_at",
   ]),
 });
 

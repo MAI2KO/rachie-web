@@ -90,7 +90,7 @@ export function createBookingAdminService({
 
   async function update(rawChange) {
     const change = validateBookingAdminChange(rawChange);
-    if (!["booking", "service", "requirement"].includes(change.section)) {
+    if (!["booking", "service", "requirement", "guestApproval"].includes(change.section)) {
       throw new BookingAdminValidationError();
     }
     const snapshot = await repository.withTransaction(async (session) => {
@@ -107,13 +107,16 @@ export function createBookingAdminService({
           (service) => service.service_code === change.serviceCode,
         )?.enabled);
         await session.setServiceEnabled(communityId, change.serviceCode, change.enabled, actor.discordUserId);
-      } else {
+      } else if (change.section === "requirement") {
         previousEnabled = Boolean(beforeSnapshot.settings?.[
           `${change.serviceCode}_${change.requirementCode}_required`
         ]);
         await session.setRequirementEnabled(
           communityId, change.serviceCode, change.requirementCode, change.enabled,
         );
+      } else {
+        previousEnabled = beforeSnapshot.settings?.require_unregistered_guest_approval !== false;
+        await session.setGuestApprovalRequired(communityId, change.enabled);
       }
       const correlationId = createId();
       await session.insertAudit({

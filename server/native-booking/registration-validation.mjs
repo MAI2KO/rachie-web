@@ -30,6 +30,15 @@ function normalizedString(value) {
   return typeof value === "string" ? value.trim().normalize("NFC") : "";
 }
 
+export function validatePlayerId(value) {
+  const playerId = normalizedString(value);
+  if (!PLAYER_ID_PATTERN.test(playerId)
+      || playerId.length > REGISTRATION_LIMITS.playerIdMaxLength) {
+    throw new InvalidRegistrationError({ playerId: "Must contain 1 to 32 digits." });
+  }
+  return playerId;
+}
+
 export function validateRegistrationInput(input) {
   const fields = {};
   const playerId = normalizedString(input?.playerId);

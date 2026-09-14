@@ -3,7 +3,10 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { createNativeBookingRepository } from "@/server/native-booking/repository";
-import { createRegistrationService } from "@/server/native-booking/registration-service-core.mjs";
+import {
+  createRegistrationService,
+  synchronizeAuthoritativePrimary,
+} from "@/server/native-booking/registration-service-core.mjs";
 
 import { createDiscordCommunitySetupService } from "./community-setup-service-core.mjs";
 
@@ -80,10 +83,18 @@ export async function handleDiscordCanonicalRegistration(request: Request) {
     const guildId = String(body.guildId ?? "");
     const discordUserId = String(body.discordUserId ?? "");
     const communityCode = String(body.communityCode ?? "");
-    if (!SNOWFLAKE.test(guildId) || !SNOWFLAKE.test(discordUserId)
-        || !COMMUNITY.test(communityCode)) throw new TypeError("invalid_registration_scope");
     const repository = createNativeBookingRepository(scope.profile);
     if (!repository) throw new Error("booking_database_unavailable");
+    if (body.primarySyncOnly === true) {
+      if (!SNOWFLAKE.test(discordUserId) || typeof body.isPrimary !== "boolean"
+          || body.isPrimary !== true) throw new TypeError("invalid_primary_sync");
+      const primary = await synchronizeAuthoritativePrimary({
+        gameProfile: scope.profile, discordUserId, playerId: body.playerId, repository,
+      });
+      return json({ ok: true, outcome: "primary_synchronized", primary });
+    }
+    if (!SNOWFLAKE.test(guildId) || !SNOWFLAKE.test(discordUserId)
+        || !COMMUNITY.test(communityCode)) throw new TypeError("invalid_registration_scope");
     const community = await repository.withTransaction((session) =>
       session.findCommunityForDiscordGuild(guildId));
     if (!community || community.location_code !== communityCode || community.status !== "active") {
@@ -104,7 +115,9 @@ export async function handleDiscordCanonicalRegistration(request: Request) {
         discordUser: { id: discordUserId },
       },
       repository,
-    }).upsert(registration, idempotencyKey);
+    }).upsert(registration, idempotencyKey, {
+      isPrimary: typeof body.isPrimary === "boolean" ? body.isPrimary : undefined,
+    });
     return json({ ok: true, ...result.body }, result.status);
   } catch (error) {
     return discordIntegrationError(error, "canonical_registration");

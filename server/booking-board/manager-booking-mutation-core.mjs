@@ -133,7 +133,7 @@ export function createManagerBookingMutationService({
             source: "admin", actorType: "admin",
             participantId: participant?.id, discordUserId: participant?.discord_user_id,
             sourceGuildId: participant?.source_discord_guild_id,
-            idempotencyKey: key, correlationId,
+            idempotencyKey: key, correlationId, entryProvenance: "admin",
           });
           for (const answer of answers) {
             await session.insertBookingRequirementAnswer({ bookingId, ...answer });

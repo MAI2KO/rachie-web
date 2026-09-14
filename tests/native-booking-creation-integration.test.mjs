@@ -86,12 +86,13 @@ test("native booking creation is atomic under restricted PostgreSQL RLS", { skip
       assert.deepEqual(kingshot.body.booking.requirements.find((answer) => answer.code === "speedups"), { code: "speedups", label: "Speed-ups (days)", value: 7, unit: "days" });
       assert.deepEqual(Object.keys(wos.body.booking), ["bookingId", "serviceCode", "serviceLabel", "date", "displayTime", "playerName", "alliance", "requirements", "status"]);
       const rows = await withProfile(runtime, "wos", async (client) => ({
-        booking: await client.query("SELECT player_id_snapshot,in_game_name_snapshot,alliance_snapshot FROM minister_bookings WHERE id=$1", [wos.body.booking.bookingId]),
+        booking: await client.query("SELECT player_id_snapshot,in_game_name_snapshot,alliance_snapshot,entry_provenance FROM minister_bookings WHERE id=$1", [wos.body.booking.bookingId]),
         audit: await client.query("SELECT event_type,source,actor_type FROM booking_change_events WHERE aggregate_id=$1", [wos.body.booking.bookingId]),
         outbox: await client.query("SELECT event_type,status FROM booking_outbox WHERE payload->>'bookingId'=$1", [wos.body.booking.bookingId]),
         speedups: await client.query("SELECT numeric_value::int AS value,unit,display_label FROM booking_requirement_answers WHERE booking_id=$1 AND requirement_code='speedups'", [wos.body.booking.bookingId]),
       }));
       assert.equal(rows.booking.rows[0].player_id_snapshot, "101");
+      assert.equal(rows.booking.rows[0].entry_provenance, "member");
       assert.deepEqual(rows.audit.rows, [{ event_type: "booking_created", source: "website", actor_type: "discord_user" }]);
       assert.deepEqual(rows.outbox.rows, [{ event_type: "booking.created", status: "pending" }]);
       assert.deepEqual(rows.speedups.rows, [{ value: 7, unit: "days", display_label: "Speed-ups (days)" }]);

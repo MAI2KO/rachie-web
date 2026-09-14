@@ -295,6 +295,15 @@ button:focus-visible,
 .booking-confirmation dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
 
 .booking-dashboard { display: grid; gap: 2.5rem; margin-top: 1.5rem; }
+.character-selection { padding: 1rem; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--brand-surface-muted); }
+.character-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.65rem; }
+.character-option { position: relative; cursor: pointer; }
+.character-option input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.character-option > span { display: grid; gap: 0.15rem; min-height: 6rem; padding: 0.8rem; border: 1px solid var(--brand-border); border-radius: 4px; background: var(--brand-surface); }
+.character-option strong { overflow-wrap: anywhere; }
+.character-option small { color: var(--brand-text-muted); }
+.character-option--selected > span { border-color: var(--brand-accent-strong); box-shadow: inset 4px 0 0 var(--brand-accent-strong); }
+.character-option input:focus-visible + span { outline: 3px solid var(--brand-focus-ring); outline-offset: 2px; }
 .booking-summary { padding: 1rem 0; border-bottom: 1px solid var(--brand-border); align-items: stretch; }
 .booking-summary > div { display: grid; flex: 1; gap: 0.15rem; }
 .booking-summary span,

@@ -9,9 +9,10 @@ type Session = { authenticated: boolean; gameProfile?: "wos" | "kingshot"; user?
 type RequirementConfig = Record<string, Record<string, boolean>>;
 type Service = { code: string; displayLabel: string; appointmentLabel: string; date: string | null };
 type BookingContext = { community: Community; bookingsOpen: boolean; windowState: string; requirements: RequirementConfig | null; services: Service[] };
-type Registration = { status: "unregistered" } | { status: "registered"; playerId: string; inGameName: string; alliance: string };
-type Booking = { bookingId: string; serviceCode: string; date: string; displayTime: string; ordinal: number };
-type Me = { community: Community; registration: Registration; bookings: Booking[] };
+type Character = { participantId: string; playerId: string; inGameName: string; alliance: string; isPrimary: boolean };
+type Registration = { status: "unregistered" } | ({ status: "registered" } & Character);
+type Booking = { bookingId: string; serviceCode: string; date: string; displayTime: string; ordinal: number; participantId: string; playerId: string; playerName: string; alliance: string };
+type Me = { community: Community; registration: Registration; characters: Character[]; bookings: Booking[] };
 type Slot = { slotId: string; displayTime: string; ordinal: number };
 type Availability = { service: { code: string; displayLabel: string }; date: string | null; bookingsOpen: boolean; slots: Slot[] };
 type ApiError = { code?: string; error?: string; fields?: Record<string, string> };
@@ -72,6 +73,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [selectedService, setSelectedService] = useState("construction");
   const [selectedSlot, setSelectedSlot] = useState("");
+  const [selectedParticipantId, setSelectedParticipantId] = useState("");
   const [requirements, setRequirements] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<{ type: "reschedule" | "cancel"; booking: Booking } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,6 +103,8 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
     try {
       const [nextContext, nextMe] = await Promise.all([jsonRequest<BookingContext>("/api/v1/booking/context"), jsonRequest<Me>("/api/v1/booking/me")]);
       setContext(nextContext); setMe(nextMe);
+      setSelectedParticipantId((current) => nextMe.characters.some((item) => item.participantId === current)
+        ? current : nextMe.characters.find((item) => item.isPrimary)?.participantId ?? nextMe.characters[0]?.participantId ?? "");
       if (!nextContext.services.some((service) => service.code === selectedService)) setSelectedService(nextContext.services[0]?.code ?? "construction");
     } catch (caught) { explainError(caught); }
   }, [explainError, selectedService]);
@@ -140,7 +144,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
     const key = `booking:${session.gameProfile ?? profile}:${session.selectedCommunity.locationCode}:${session.expiresAt ?? "session"}`;
     const request = bootstrapRequests.current.run(key, () => Promise.all([jsonRequest<BookingContext>("/api/v1/booking/context"), jsonRequest<Me>("/api/v1/booking/me")])) as Promise<[BookingContext, Me]>;
     void request
-      .then(([nextContext, nextMe]) => { if (active) { setContext(nextContext); setMe(nextMe); } })
+      .then(([nextContext, nextMe]) => { if (active) { setContext(nextContext); setMe(nextMe); setSelectedParticipantId((current) => nextMe.characters.some((item) => item.participantId === current) ? current : nextMe.characters.find((item) => item.isPrimary)?.participantId ?? nextMe.characters[0]?.participantId ?? ""); } })
       .catch((caught) => { if (active) explainError(caught); });
     return () => { active = false; };
   }, [session, profile, explainError]);
@@ -159,9 +163,9 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   const bookingsOpen = context?.bookingsOpen ?? false;
   const services = context?.services ?? [];
   const currentBookings = me?.bookings ?? [];
-  const registration = me?.registration.status === "registered"
-    ? me.registration
-    : { status: "registered" as const, playerId: "", inGameName: "", alliance: "" };
+  const characters = me?.characters ?? [];
+  const registration = characters.find((item) => item.participantId === selectedParticipantId)
+    ?? (me?.registration.status === "registered" ? me.registration : null);
 
   async function mutation<T>(attempt: string, url: string, method: string, body?: unknown): Promise<T> {
     let key = attempts.current.get(attempt);
@@ -217,7 +221,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   async function submitBooking(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!selectedSlot) return;
     setBusy(true); setError("");
-    const payload = { serviceCode: selectedService, slotId: selectedSlot, requirements: Object.fromEntries(fields.map(({ code }) => [code, requirements[code]])) };
+    const payload = { serviceCode: selectedService, slotId: selectedSlot, participantId: selectedParticipantId || undefined, requirements: Object.fromEntries(fields.map(({ code }) => [code, requirements[code]])) };
     try {
       const result = await mutation<{ booking: BookingConfirmation }>(`create:${JSON.stringify(payload)}`, "/api/v1/bookings", "POST", payload);
       setConfirmation(result.booking); setSuccess(`${appointmentTypeLabel(selectedService, result.booking.serviceLabel)} booked for ${result.booking.date} at ${result.booking.displayTime}.`); setSelectedSlot(""); setRequirements({}); await Promise.all([loadBookingData(), loadAvailability(selectedService)]); queueMicrotask(() => successRef.current?.focus());
@@ -269,8 +273,9 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
     : uiState === "loading-booking" ? <div className="booking-gate" aria-busy="true"><h2>Preparing your {terms.community}</h2><div className="booking-loading" /></div>
     : uiState === "registration" && context ? <form className="registration-form" onSubmit={register}><div><p className="booking-kicker">{bookingCommunityPresentation.compactLabel}</p><h2>Register your player</h2><p>Your saved identity is copied into each appointment confirmation.</p></div><label>Player ID<input autoComplete="off" inputMode="numeric" name="playerId" pattern="[0-9]+" required /></label><label>In-game name<input autoComplete="nickname" maxLength={30} name="inGameName" required /></label><label>Alliance<input autoCapitalize="characters" maxLength={3} minLength={3} name="alliance" pattern="[A-Za-z0-9]{3}" required /></label><Button disabled={busy} type="submit">{busy ? "Saving..." : "Save registration"}</Button></form>
     : <div className="booking-dashboard">
-      <div className="booking-summary"><div><span>{bookingCommunityPresentation.codeLabel}</span><strong>{bookingCommunityPresentation.displayName}</strong></div><div><span>Registered player</span><strong>{registration.inGameName} · {registration.alliance}</strong><small>ID {registration.playerId}</small></div><div><span>Booking window</span><strong>{bookingsOpen ? "Open" : "Closed"}</strong></div></div>
-      <section className="current-bookings" aria-labelledby="current-bookings-title"><div className="section-heading"><h2 id="current-bookings-title">Current appointments</h2><span>{currentBookings.length}</span></div>{currentBookings.length ? <div className="booking-card-list">{currentBookings.map((booking) => { const item = services.find((candidate) => candidate.code === booking.serviceCode); return <article className="booking-card" key={booking.bookingId}><div><p>{appointmentTypeLabel(booking.serviceCode, item?.displayLabel ?? booking.serviceCode)}</p><strong>{booking.date}</strong><span>{booking.displayTime}</span></div><div className="booking-card__actions"><Button disabled={mode?.type === "reschedule" && availabilityLoading} secondary onClick={() => beginReschedule(booking)}>{mode?.type === "reschedule" && mode.booking.bookingId === booking.bookingId && availabilityLoading ? "Loading times..." : "Reschedule"}</Button><Button secondary onClick={() => setMode({ type: "cancel", booking })}>Cancel</Button></div></article>; })}</div> : <p className="booking-empty">No active appointments.</p>}</section>
+      {characters.length > 1 && <section className="character-selection" aria-labelledby="character-selection-title"><div className="section-heading"><div><p className="booking-kicker">Book for</p><h2 id="character-selection-title">Choose your character</h2></div></div><div className="character-options">{characters.map((character) => <label className={`character-option${selectedParticipantId === character.participantId ? " character-option--selected" : ""}`} key={character.participantId}><input checked={selectedParticipantId === character.participantId} name="character" onChange={() => setSelectedParticipantId(character.participantId)} type="radio" value={character.participantId} /><span><strong>{character.isPrimary ? "★ MAIN · " : ""}{character.inGameName}</strong><small>Player ID: {character.playerId}</small><small>{bookingCommunityPresentation.codeLabel} · Alliance {character.alliance}</small></span></label>)}</div></section>}
+      <div className="booking-summary"><div><span>{bookingCommunityPresentation.codeLabel}</span><strong>{bookingCommunityPresentation.displayName}</strong></div><div><span>Registered player</span><strong>{registration?.inGameName} · {registration?.alliance}</strong><small>ID {registration?.playerId}</small></div><div><span>Booking window</span><strong>{bookingsOpen ? "Open" : "Closed"}</strong></div></div>
+      <section className="current-bookings" aria-labelledby="current-bookings-title"><div className="section-heading"><h2 id="current-bookings-title">Current appointments</h2><span>{currentBookings.length}</span></div>{currentBookings.length ? <div className="booking-card-list">{currentBookings.map((booking) => { const item = services.find((candidate) => candidate.code === booking.serviceCode); return <article className="booking-card" key={booking.bookingId}><div><p>{appointmentTypeLabel(booking.serviceCode, item?.displayLabel ?? booking.serviceCode)}</p><strong>{booking.date}</strong><span>{booking.displayTime}{characters.length > 1 ? ` · ${booking.playerName}` : ""}</span></div><div className="booking-card__actions"><Button disabled={mode?.type === "reschedule" && availabilityLoading} secondary onClick={() => beginReschedule(booking)}>{mode?.type === "reschedule" && mode.booking.bookingId === booking.bookingId && availabilityLoading ? "Loading times..." : "Reschedule"}</Button><Button secondary onClick={() => setMode({ type: "cancel", booking })}>Cancel</Button></div></article>; })}</div> : <p className="booking-empty">No active appointments.</p>}</section>
       {mode?.type === "cancel" && <section className="cancel-confirmation" aria-labelledby="cancel-title"><h2 id="cancel-title">Cancel this appointment?</h2><p>{mode.booking.date} at {mode.booking.displayTime}. This cannot be undone from this screen.</p><div><Button disabled={busy} onClick={() => void cancel()}>{busy ? "Cancelling..." : "Confirm cancellation"}</Button><Button disabled={busy} onClick={() => setMode(null)} secondary>Keep appointment</Button></div></section>}
       <section className="service-booking" aria-labelledby="service-title"><div className="section-heading"><div><p className="booking-kicker">Schedule</p><h2 id="service-title">{mode?.type === "reschedule" ? "Choose a replacement time" : "Book an appointment"}</h2></div><span className={bookingsOpen ? "status-open" : "status-closed"}>{bookingsOpen ? "Open" : "Closed"}</span></div>
         <div className="service-tabs" role="tablist" aria-label="Minister services">{SERVICE_ORDER.map((code) => { const item = services.find((candidate) => candidate.code === code); if (!item) return null; return <button aria-selected={selectedService === code} className="service-tab" disabled={mode?.type === "reschedule" && selectedService !== code} key={code} onClick={() => chooseService(code)} role="tab" type="button"><strong>{appointmentTypeLabel(item.code, item.displayLabel)}</strong><span>{item.date ?? "Date pending"}</span></button>; })}</div>

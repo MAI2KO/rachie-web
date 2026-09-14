@@ -28,7 +28,7 @@ const canonicalRequirements = (requirements) => Object.fromEntries(
       return [code, typeof text === "string" && /^\d+$/.test(text) ? Number(text) : text];
     }),
 );
-const fingerprint = (context, choice) => sha256(JSON.stringify({ operation: OPERATION, gameProfile: context.gameProfile, communityId: context.community.id, discordUserId: context.discordUser.id, serviceCode: choice.serviceCode, slotId: choice.slotId, requirements: canonicalRequirements(choice.requirements) }));
+const fingerprint = (context, choice) => sha256(JSON.stringify({ operation: OPERATION, gameProfile: context.gameProfile, communityId: context.community.id, discordUserId: context.discordUser.id, participantId: choice.participantId, serviceCode: choice.serviceCode, slotId: choice.slotId, requirements: canonicalRequirements(choice.requirements) }));
 
 function replay(claim, hash) {
   if (claim.state === "claimed") return null;
@@ -56,8 +56,12 @@ export function createBookingCreationService({ context, repository, createId = r
 
           if (!community || community.status !== "active" || !community.bookings_open) throw new BookingCreationError("bookings_closed", "Bookings are closed.");
           const participants = await session.lockActiveParticipantsByDiscordUser(context.community.id, context.discordUser.id);
-          if (participants.length !== 1) throw new BookingCreationError("registration_required", "An active participant registration is required.");
-          const participant = participants[0];
+          if (!participants.length) throw new BookingCreationError("registration_required", "An active participant registration is required.");
+          if (participants.length > 1 && !choice.participantId) throw new BookingCreationError("character_selection_required", "Choose a registered character before booking.");
+          const participant = choice.participantId
+            ? participants.find((candidate) => candidate.id === choice.participantId)
+            : participants[0];
+          if (!participant) throw new BookingCreationError("invalid_character", "That registered character is not available for this community.");
           const slot = await session.lockAppointmentSlot(context.community.id, choice.slotId);
           if (!slot || slot.service_code !== choice.serviceCode) throw new BookingCreationError("invalid_slot", "Invalid appointment slot.");
           if (!slot.service_active) throw new BookingCreationError("invalid_service", "The selected service is unavailable.");
@@ -73,7 +77,7 @@ export function createBookingCreationService({ context, repository, createId = r
           const bookingId = createId();
           const sourceGuildId = context.community.discordGuildId
             ?? participant.source_discord_guild_id ?? null;
-          const booking = await session.insertConfirmedBooking({ id: bookingId, communityId: context.community.id, windowId: slot.window_id, serviceDateId: slot.service_date_id, serviceCode: choice.serviceCode, bookingDate: slot.booking_date, slotId: slot.id, participantId: participant.id, discordUserId: context.discordUser.id, playerId: participant.player_id, inGameName: participant.in_game_name, alliance: participant.alliance, displayTime: slot.display_time_label, source: "website", actorType: "discord_user", actorId: context.discordUser.id, idempotencyKey: key, correlationId, sourceGuildId });
+          const booking = await session.insertConfirmedBooking({ id: bookingId, communityId: context.community.id, windowId: slot.window_id, serviceDateId: slot.service_date_id, serviceCode: choice.serviceCode, bookingDate: slot.booking_date, slotId: slot.id, participantId: participant.id, discordUserId: context.discordUser.id, playerId: participant.player_id, inGameName: participant.in_game_name, alliance: participant.alliance, displayTime: slot.display_time_label, source: "website", actorType: "discord_user", actorId: context.discordUser.id, idempotencyKey: key, correlationId, sourceGuildId, entryProvenance: "member" });
           for (const answer of answers) await session.insertBookingRequirementAnswer({ bookingId, ...answer });
           const body = { booking: { bookingId: booking.id, serviceCode: booking.service_code, serviceLabel: slot.service_label, date: booking.booking_date, displayTime: booking.display_time_label_snapshot, playerName: booking.in_game_name_snapshot, alliance: booking.alliance_snapshot, requirements: answers.map(publicAnswer), status: booking.status } };
           const boundedEvent = { bookingId, serviceCode: choice.serviceCode, slotId: slot.id, participant: { playerId: participant.player_id, inGameName: participant.in_game_name, alliance: participant.alliance }, correlationId };

@@ -59,7 +59,10 @@ interface ApprovalRepository {
   withTransaction<T>(work: (session: ApprovalSession) => Promise<T> | T): Promise<T>;
 }
 
-export async function authenticateDiscordIntegrationRequest(request: Request) {
+async function authenticateDiscordIntegrationRequestCore(
+  request: Request,
+  consumeNonce: boolean,
+) {
   const context = resolveNativeBookingRequestContext(request);
   const profileHeader = request.headers.get("x-booking-profile");
   if (!context || profileHeader !== context.gameProfile) {
@@ -78,12 +81,22 @@ export async function authenticateDiscordIntegrationRequest(request: Request) {
   });
   const repository = getDiscordIntegrationRepository(profile) as IntegrationRepository | null;
   if (!repository) throw new Error("integration_database_unavailable");
-  const fresh = await repository.withTransaction((session) =>
-    session.consumeNonce(verified.nonce, verified.expiresAt));
-  if (!fresh) throw new DiscordIntegrationAuthenticationError("replayed_request");
+  if (consumeNonce) {
+    const fresh = await repository.withTransaction((session) =>
+      session.consumeNonce(verified.nonce, verified.expiresAt));
+    if (!fresh) throw new DiscordIntegrationAuthenticationError("replayed_request");
+  }
   let body: unknown = {};
   try { body = bodyText === "" ? {} : JSON.parse(bodyText); } catch { throw new TypeError("invalid_json"); }
   return { profile, body, repository };
+}
+
+export function authenticateDiscordIntegrationRequest(request: Request) {
+  return authenticateDiscordIntegrationRequestCore(request, true);
+}
+
+export function authenticateDiscordIntegrationReadOnlyRequest(request: Request) {
+  return authenticateDiscordIntegrationRequestCore(request, false);
 }
 
 export function discordIntegrationError(error: unknown, operation: string) {

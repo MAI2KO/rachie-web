@@ -74,6 +74,7 @@ export function createGuestBookingApi(dependencies) {
           time: result.body.request.time,
           status: result.body.request.status,
           holdExpiresAt: result.body.request.holdExpiresAt,
+          recognizedRegisteredPlayer: result.body.request.recognizedRegisteredPlayer === true,
         };
         return response(result.status, { request: safeRequest }, result.replayed ? { "Idempotency-Replayed": "true" } : {});
       } catch (error) {

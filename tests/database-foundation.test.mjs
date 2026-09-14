@@ -196,6 +196,7 @@ test("migration files are ordered and checksummed", async () => {
       { version: "0012", name: "state_guild_link_requests" },
       { version: "0013", name: "community_booking_window_defaults" },
       { version: "0014", name: "legacy_announcement_repair" },
+      { version: "0015", name: "registered_guest_identity" },
     ],
   );
   assert.ok(migrations.every(({ checksum }) => /^[0-9a-f]{64}$/.test(checksum)));
@@ -424,4 +425,23 @@ test("legacy announcement repair adds explicit state without rewriting booking d
   assert.match(migration, /WHERE booking_window_id IS NOT NULL AND revoked_at IS NULL/);
   assert.doesNotMatch(migration, /DROP TABLE|TRUNCATE|DELETE FROM|ALTER COLUMN|CREATE TABLE/i);
   assert.doesNotMatch(migration, /token[^\n]*text/i);
+});
+
+test("registered guest identity migration is additive, scoped, and defaults approval safely", () => {
+  const migration = fs.readFileSync(
+    path.join(migrationsDirectory, "0015_registered_guest_identity.sql"), "utf8",
+  );
+  assert.match(migration, /require_unregistered_guest_approval boolean NOT NULL DEFAULT true/);
+  assert.match(migration, /is_primary boolean NOT NULL DEFAULT false/);
+  assert.match(migration, /booking_participants_one_active_owned_player/);
+  assert.match(migration, /booking_participants_one_active_primary/);
+  assert.match(migration, /entry_provenance text NOT NULL DEFAULT 'legacy'/);
+  assert.match(migration, /guest_share_link_id uuid/);
+  assert.match(migration, /REFERENCES booking_guest_share_links \(game_profile, id, community_id\)/);
+  assert.match(migration, /'guest_registered', 'guest_unregistered'/);
+  assert.match(migration, /request\.request_source='guest_link'/);
+  assert.match(migration, /event\.event_type='manager_manual_booking'/);
+  assert.match(migration, /event\.event_type='booking_created'/);
+  assert.match(migration, /'member', 'guest_registered', 'guest_unregistered', 'admin', 'legacy'/);
+  assert.doesNotMatch(migration, /DROP TABLE|TRUNCATE|DELETE FROM|UPDATE booking_participants/i);
 });

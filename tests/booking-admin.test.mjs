@@ -38,6 +38,7 @@ function snapshot() {
       construction_fc_required: true, construction_rfc_required: false,
       construction_speedups_required: true, research_shards_required: true,
       research_speedups_required: false, troop_speedups_required: true,
+      require_unregistered_guest_approval: true,
     },
     windows: [{ id: "window", status: "open", opens_at: null, closes_at: null }],
     dates: [{ service_code: "construction", display_label: "Construction",
@@ -64,6 +65,9 @@ function fakeRepository() {
     },
     async setRequirementEnabled(_id, service, requirement, enabled) {
       state.settings[`${service}_${requirement}_required`] = enabled;
+    },
+    async setGuestApprovalRequired(_id, enabled) {
+      state.settings.require_unregistered_guest_approval = enabled;
     },
     async insertAudit(input) { audits.push(input); },
     async lockGuestLinks() {
@@ -167,7 +171,7 @@ test("authorised exact-community manager reads booking, services, requirements, 
   ]);
 });
 
-test("booking, service, resource, and speed-ups toggles persist and are audited", async () => {
+test("booking, service, requirement, and guest-approval toggles persist and are audited", async () => {
   const repository = fakeRepository();
   let id = 0;
   const service = createBookingAdminService({
@@ -185,7 +189,11 @@ test("booking, service, resource, and speed-ups toggles persist and are audited"
     section: "requirement", serviceCode: "research", requirementCode: "speedups", enabled: true,
   });
   assert.equal(updated.services[1].requirements.find(({ code }) => code === "speedups").enabled, true);
-  assert.equal(repository.audits.length, 4);
+  updated = await service.update({ section: "guestApproval", enabled: false });
+  assert.equal(updated.guestApproval.requireUnregistered, false);
+  assert.equal(repository.audits.at(-1).afterData.section, "guestApproval");
+  assert.equal(repository.audits.at(-1).afterData.enabled, false);
+  assert.equal(repository.audits.length, 5);
   assert.equal(repository.audits.every((audit) => audit.communityId === communityId
     && audit.actorId === manager.discordUserId), true);
 });
@@ -243,6 +251,11 @@ test("unauthorised, cross-profile, and other-community manager contexts fail clo
 test("admin mutations accept only known, strictly scoped boolean changes", () => {
   assert.deepEqual(validateBookingAdminChange({ section: "booking", enabled: false }),
     { section: "booking", enabled: false });
+  assert.deepEqual(validateBookingAdminChange({ section: "guestApproval", enabled: false }),
+    { section: "guestApproval", enabled: false });
+  assert.throws(() => validateBookingAdminChange({
+    section: "guestApproval", enabled: false, communityId: "other",
+  }), BookingAdminValidationError);
   assert.throws(() => validateBookingAdminChange({ section: "service", serviceCode: "unknown", enabled: true }),
     BookingAdminValidationError);
   assert.throws(() => validateBookingAdminChange({ section: "booking", enabled: true, communityId: "other" }),
@@ -569,6 +582,8 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
   assert.match(ui, /Discord access/); assert.match(ui, /Unlink alliance/);
   assert.match(ui, /members may lose website access/);
   assert.match(ui, /Guest booking link/); assert.match(ui, /Generate new link/);
+  assert.match(ui, /Require approval for unregistered guest players/);
+  assert.match(ui, /Registered Player IDs are always confirmed immediately/);
   assert.match(ui, /Replace link/); assert.match(ui, /Disable link/); assert.match(ui, /Copy/);
   assert.match(ui, /current link cannot be shown again/);
   assert.match(ui, /Appointment types/); assert.match(ui, /Troop Training/);
@@ -592,6 +607,10 @@ test("public admin model contains only display-safe configuration and linked gui
   const model = bookingAdminModel("wos", snapshot());
   assert.doesNotMatch(JSON.stringify(model), /audit|password|token|revoked_by|source_guild/i);
   assert.deepEqual(model.activity, []);
+  assert.equal(model.guestApproval.requireUnregistered, true);
+  const approvalDisabled = snapshot();
+  approvalDisabled.settings.require_unregistered_guest_approval = false;
+  assert.equal(bookingAdminModel("wos", approvalDisabled).guestApproval.requireUnregistered, false);
   assert.equal(bookingAdminModel("kingshot", snapshot()).automaticCycle, null);
 });
 

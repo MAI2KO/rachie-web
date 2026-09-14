@@ -49,7 +49,7 @@ export function GuestBookingForm({ token, profile, page }: { token: string; prof
   const [requirements, setRequirements] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState<{ service: string; date: string; time: string } | null>(null);
+  const [success, setSuccess] = useState<{ service: string; date: string; time: string; status: string; recognized: boolean } | null>(null);
   const service = useMemo(() => page.services.find((item) => item.code === serviceCode), [page.services, serviceCode]);
   const term = profile === "kingshot" ? "Kingdom" : "State";
 
@@ -68,16 +68,19 @@ export function GuestBookingForm({ token, profile, page }: { token: string; prof
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Booking request could not be submitted.");
       setSuccess({ service: appointmentTypeName(serviceCode, service?.name ?? body.request.service),
-        date: body.request.date, time: body.request.time });
+        date: body.request.date, time: body.request.time, status: body.request.status,
+        recognized: body.request.recognizedRegisteredPlayer === true });
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Booking request could not be submitted."); }
     finally { setSubmitting(false); }
   }
 
   if (success) return <section className="guest-success">
-    <p className="booking-kicker">Booking request submitted</p><h1>Awaiting administrator approval</h1>
-    <p>Your slot is being held temporarily while a {term} administrator reviews it.</p>
+    <p className="booking-kicker">{success.status === "confirmed" ? "Booking confirmed" : "Booking request submitted"}</p><h1>{success.status === "confirmed" ? "Booking confirmed" : "Awaiting administrator approval"}</h1>
+    {success.status === "confirmed"
+      ? <p>{success.recognized ? "This Player ID is already registered, so your booking was confirmed automatically. Confirmation and reminders will be sent to the linked Discord account." : "Your booking was confirmed automatically under this community’s guest booking policy."}</p>
+      : <p>Your slot is being held temporarily while a {term} administrator reviews it.</p>}
     <dl><div><dt>{term}</dt><dd>{page.community.code}</dd></div><div><dt>Service</dt><dd>{success.service}</dd></div><div><dt>Date</dt><dd>{dateLabel(success.date)}</dd></div><div><dt>Time</dt><dd>{success.time}</dd></div></dl>
-    <p><strong>The request is not confirmed until approved.</strong></p>
+    {success.status !== "confirmed" && <p><strong>The request is not confirmed until approved.</strong></p>}
     <aside className="guest-member-callout">
       <h2>Want faster booking next time?</h2>
       <p>Log in with Discord through your alliance to use the full {term} member booking system.</p>
@@ -110,7 +113,7 @@ export function GuestBookingForm({ token, profile, page }: { token: string; prof
       </fieldset>
       {error ? <p className="booking-notice booking-notice--error" role="alert">{error}</p> : null}
       <button className="booking-button" disabled={!slotId || submitting} type="submit">{submitting ? "Submitting…" : "Submit booking request"}</button>
-      <p className="booking-note">A temporary hold is created. An administrator must approve your request before it is confirmed.</p>
+      <p className="booking-note">Registered Player IDs may be confirmed automatically. Other guest requests follow this community&apos;s approval policy.</p>
     </form>
   </article>;
 }

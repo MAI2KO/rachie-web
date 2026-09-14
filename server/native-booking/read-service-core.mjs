@@ -151,17 +151,14 @@ export function createNativeBookingReadService({
             community.id,
             trustedDiscordUserId,
           );
-        if (participants.length > 1) {
-          throw new NativeBookingParticipantAmbiguousError();
-        }
         const participant = participants[0];
         if (!participant) {
-          return { registration: { status: "unregistered" }, bookings: [] };
+          return { registration: { status: "unregistered" }, characters: [], bookings: [] };
         }
 
-        const bookings = await session.listConfirmedBookingsForParticipant(
+        const bookings = await session.listConfirmedBookingsForDiscordUser(
           community.id,
-          participant.id,
+          trustedDiscordUserId,
         );
 
         return {
@@ -170,13 +167,26 @@ export function createNativeBookingReadService({
             playerId: participant.player_id,
             inGameName: participant.in_game_name,
             alliance: participant.alliance,
+            participantId: participant.id,
+            isPrimary: participant.is_primary,
           },
+          characters: participants.map((character) => ({
+            participantId: character.id,
+            playerId: character.player_id,
+            inGameName: character.in_game_name,
+            alliance: character.alliance,
+            isPrimary: character.is_primary,
+          })),
           bookings: bookings.map((booking) => ({
             bookingId: booking.id,
             serviceCode: booking.service_code,
             date: booking.booking_date,
             displayTime: booking.display_time_label_snapshot,
             ordinal: booking.ordinal,
+            participantId: booking.participant_id,
+            playerId: booking.player_id,
+            playerName: booking.in_game_name,
+            alliance: booking.alliance,
           })),
         };
       });

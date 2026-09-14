@@ -223,17 +223,18 @@ test("owned booking reschedule and cancellation are atomic under forced RLS", { 
       await assert.rejects(guest("wos").create(fixtures.wos.shareToken, input(44),
         "guest-duplicate-manual-0001"), (error) => error.code === "booking_already_exists");
       const persisted = await withProfile(runtime, "wos", (c) => c.query(
-        `SELECT booking.source,booking.actor_type,booking.actor_id,
+        `SELECT booking.source,booking.actor_type,booking.actor_id,booking.entry_provenance,
                 count(answer.requirement_code)::integer AS answers
            FROM minister_bookings booking
            LEFT JOIN booking_requirement_answers answer
              ON answer.game_profile=booking.game_profile AND answer.booking_id=booking.id
           WHERE booking.id=$1
-          GROUP BY booking.id,booking.source,booking.actor_type,booking.actor_id`,
+          GROUP BY booking.id,booking.source,booking.actor_type,booking.actor_id,
+                   booking.entry_provenance`,
         [created.body.booking.bookingId],
       ));
       assert.deepEqual(persisted.rows, [{ source: "admin", actor_type: "admin",
-        actor_id: "manual-actor", answers: 2 }]);
+        actor_id: "manual-actor", entry_provenance: "admin", answers: 2 }]);
       const points = await withProfile(runtime, "wos", (c) => c.query(
         `SELECT count(*)::integer AS count FROM player_points_ledger
           WHERE booking_id=$1 AND reason='appointment_confirmed'`,

@@ -9,6 +9,7 @@ import { createRegistrationApi } from "../server/native-booking/registration-api
 import {
   createRegistrationService,
   RegistrationIdempotencyConflictError,
+  synchronizeAuthoritativePrimary,
 } from "../server/native-booking/registration-service-core.mjs";
 import {
   InvalidIdempotencyKeyError,
@@ -60,6 +61,44 @@ function createTransactionalRepository(gameProfile = "wos") {
     async withTransaction(work) {
       const draft = copyState(state);
       const session = {
+        async lockAuthoritativePrimaryOwner() {},
+        async lockParticipantRegistrationOwner() {},
+        async lockRegisteredPlayerIdentity() {},
+        async lockActiveParticipantsByPlayerId(communityId, playerId) {
+          return draft.participants.filter((participant) =>
+            participant.community_id === communityId && participant.player_id === playerId
+              && participant.status === "active");
+        },
+        async lockActivePrimaryTargets(discordUserId, playerId) {
+          return draft.participants.filter((participant) =>
+            participant.discord_user_id === discordUserId
+              && participant.player_id === playerId && participant.status === "active");
+        },
+        async clearAuthoritativePrimaryParticipants(discordUserId) {
+          for (const participant of draft.participants) {
+            if (participant.discord_user_id === discordUserId
+                && participant.status === "active") participant.is_primary = false;
+          }
+        },
+        async clearAuthoritativePlayerPrimary(discordUserId, playerId) {
+          for (const participant of draft.participants) {
+            if (participant.discord_user_id === discordUserId
+                && participant.player_id === playerId
+                && participant.status === "active") participant.is_primary = false;
+          }
+        },
+        async markAuthoritativePrimaryParticipants(discordUserId, playerId) {
+          let updated = 0;
+          for (const participant of draft.participants) {
+            if (participant.discord_user_id === discordUserId
+                && participant.player_id === playerId && participant.status === "active"
+                && !participant.is_primary) {
+              participant.is_primary = true;
+              updated += 1;
+            }
+          }
+          return updated;
+        },
         async claimRegistrationIdempotency(input) {
           const existing = draft.idempotency.get(input.idempotencyKey);
           if (existing) return { state: "existing", record: existing };
@@ -78,7 +117,7 @@ function createTransactionalRepository(gameProfile = "wos") {
           responseStatus,
           responseBody,
         ) {
-          assert.equal(communityId, `${gameProfile}-community`);
+          assert.ok(communityId.startsWith(`${gameProfile}-community`));
           Object.assign(draft.idempotency.get(idempotencyKey), {
             status: "completed",
             response_status: responseStatus,
@@ -104,6 +143,7 @@ function createTransactionalRepository(gameProfile = "wos") {
             alliance: input.alliance,
             source_discord_guild_id: input.sourceGuildId ?? null,
             status: "active",
+            is_primary: input.isPrimary,
           };
           draft.participants.push(participant);
           return participant;
@@ -122,6 +162,7 @@ function createTransactionalRepository(gameProfile = "wos") {
           participant.alliance = input.alliance;
           participant.source_discord_guild_id = input.sourceGuildId
             ?? participant.source_discord_guild_id;
+          participant.is_primary = input.isPrimary;
           return participant;
         },
         async insertPlayerPointsEntry(input) {
@@ -268,10 +309,57 @@ test("registration creates, updates, audits, and never duplicates the owned row"
     playerId: "123456789",
     inGameName: "Player One",
     alliance: "ABC",
+    isPrimary: false,
   });
 });
 
-test("ownership is context-bound while player IDs may repeat", async () => {
+test("authoritative primary is order-independent and synchronized across community mirrors", async () => {
+  const repository = createTransactionalRepository();
+  const firstCommunity = service(trustedContext(), repository).instance;
+  const secondCommunity = service(trustedContext("wos", {
+    community: { id: "wos-community-two", discordGuildId: "wos-guild-two" },
+  }), repository).instance;
+  await firstCommunity.upsert(
+    registration({ playerId: "222222222", inGameName: "Secondary" }),
+    "registration-secondary-0001", { isPrimary: false },
+  );
+  await firstCommunity.upsert(
+    registration({ playerId: "111111111", inGameName: "Primary" }),
+    "registration-primary-0001", { isPrimary: true },
+  );
+  await secondCommunity.upsert(
+    registration({ playerId: "111111111", inGameName: "Primary" }),
+    "registration-primary-community-two-0001", { isPrimary: true },
+  );
+  assert.deepEqual(repository.state.participants.filter((row) => row.is_primary)
+    .map((row) => row.player_id), ["111111111", "111111111"]);
+
+  await firstCommunity.upsert(
+    registration({ playerId: "111111111", inGameName: "Primary" }),
+    "registration-primary-demoted-0001", { isPrimary: false },
+  );
+  assert.deepEqual(repository.state.participants.filter((row) => row.is_primary), []);
+  await secondCommunity.upsert(
+    registration({ playerId: "111111111", inGameName: "Primary" }),
+    "registration-primary-restored-0001", { isPrimary: true },
+  );
+
+  await synchronizeAuthoritativePrimary({
+    gameProfile: "wos", discordUserId: "wos-discord-user",
+    playerId: "222222222", repository,
+  });
+  assert.deepEqual(repository.state.participants.filter((row) => row.is_primary)
+    .map((row) => row.player_id), ["222222222"]);
+});
+
+test("registration without trusted primary authority never invents MAIN", async () => {
+  const fixture = service();
+  const created = await fixture.instance.upsert(registration(), "registration-no-primary-0001");
+  assert.equal(created.body.registration.isPrimary, false);
+  assert.equal(fixture.repository.state.participants[0].is_primary, false);
+});
+
+test("Player ID ownership is unique within a profile and community", async () => {
   const repository = createTransactionalRepository();
   const first = createRegistrationService({
     context: trustedContext(),
@@ -287,15 +375,13 @@ test("ownership is context-bound while player IDs may repeat", async () => {
     createId: idFactory(),
   });
   await first.upsert(registration(), "registration-first-0001");
-  await other.upsert(
+  await assert.rejects(other.upsert(
     registration({ inGameName: "Other Player" }),
     "registration-other-0001",
-  );
-  assert.equal(repository.state.participants.length, 2);
+  ), /ambiguous/i);
+  assert.equal(repository.state.participants.length, 1);
   assert.equal(repository.state.participants[0].in_game_name, "Player One");
-  assert.equal(repository.state.participants[1].in_game_name, "Other Player");
   assert.equal(repository.state.participants[0].player_id, "123456789");
-  assert.equal(repository.state.participants[1].player_id, "123456789");
 });
 
 test("WOS and Kingshot services reject repository profile crossover", () => {
@@ -378,11 +464,12 @@ test("API ignores hostile ownership fields and returns only normalized registrat
       game_profile: "kingshot",
       community_id: "hostile",
       discordUserId: "other-user",
+      isPrimary: true,
     }),
   );
   assert.equal(response.status, 201);
   assert.deepEqual(captured, registration());
-  assert.doesNotMatch(await response.text(), /hostile|other-user|community_id/);
+  assert.doesNotMatch(await response.text(), /hostile|other-user|community_id|isPrimary/);
 });
 
 test("API returns stable auth, membership, CSRF, rate, and validation errors", async () => {

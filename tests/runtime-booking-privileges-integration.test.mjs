@@ -190,6 +190,7 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
            has_column_privilege(current_user,'booking_communities','updated_at','UPDATE') AS community_lock_column,
            has_column_privilege(current_user,'booking_communities','bookings_open','UPDATE') AS community_business_column,
            has_column_privilege(current_user,'booking_communities','status','UPDATE') AS community_status_column,
+           has_column_privilege(current_user,'booking_settings','require_unregistered_guest_approval','UPDATE') AS guest_approval_column,
            has_table_privilege(current_user,'appointment_slots','UPDATE') AS slot_table_update,
            has_column_privilege(current_user,'appointment_slots','updated_at','UPDATE') AS slot_lock_column,
            has_column_privilege(current_user,'appointment_slots','status','UPDATE') AS slot_business_column`,
@@ -199,6 +200,7 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
         community_lock_column: true,
         community_business_column: true,
         community_status_column: false,
+        guest_approval_column: true,
         slot_table_update: false,
         slot_lock_column: true,
         slot_business_column: false,
@@ -232,6 +234,8 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
         section: "requirement", serviceCode: "construction", requirementCode: "fc", enabled: true,
       })).services.find(({ code }) => code === "construction")
         .requirements.find(({ code }) => code === "fc").enabled, true);
+      assert.equal((await adminService.update({ section: "guestApproval", enabled: false }))
+        .guestApproval.requireUnregistered, false);
       assert.equal((await adminService.updateRecurringWindowDefault({
         section: "recurringWindowDefault", openMinuteUtc: 0,
         closeOffsetMinutes: (5 * 1440) + 1439,

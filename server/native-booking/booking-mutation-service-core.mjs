@@ -31,12 +31,15 @@ const bookingPublic = (booking, serviceLabel, answers) => ({ bookingId: booking.
 async function lockOwnedActive(session, context, bookingId, lockedCommunity = null) {
   const community = lockedCommunity ?? await session.lockCommunityForBooking(context.community.id);
   if (!community || community.status !== "active") throw new BookingMutationError("booking_not_found", "Booking was not found.");
-  const participants = await session.lockActiveParticipantsByDiscordUser(context.community.id, context.discordUser.id);
-  if (participants.length !== 1) throw new BookingMutationError("registration_required", "An active participant registration is required.");
-  const participant = participants[0];
-  const booking = await session.lockOwnedBooking(context.community.id, participant.id, bookingId);
+  const booking = await session.lockOwnedBookingByDiscordUser(
+    context.community.id, context.discordUser.id, bookingId,
+  );
   if (!booking) throw new BookingMutationError("booking_not_found", "Booking was not found.");
   if (booking.status !== "confirmed") throw new BookingMutationError("booking_not_active", "Booking is not active.");
+  const participant = {
+    id: booking.participant_id, player_id: booking.player_id,
+    in_game_name: booking.in_game_name, alliance: booking.alliance,
+  };
   return { community, participant, booking };
 }
 

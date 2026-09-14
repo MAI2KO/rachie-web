@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   validateIdempotencyKey,
+  validatePlayerId,
   validateRegistrationInput,
 } from "./registration-validation.mjs";
 import {
@@ -25,6 +26,26 @@ export class RegistrationOwnershipAmbiguousError extends Error {
   }
 }
 
+export async function synchronizeAuthoritativePrimary({
+  gameProfile, discordUserId, playerId, repository,
+}) {
+  if (repository.gameProfile !== gameProfile) {
+    throw new TypeError("Registration repository profile mismatch.");
+  }
+  const normalizedPlayerId = validatePlayerId(playerId);
+  return repository.withTransaction(async (session) => {
+    await session.lockAuthoritativePrimaryOwner(discordUserId);
+    const targets = await session.lockActivePrimaryTargets(discordUserId, normalizedPlayerId);
+    if (!targets.length) throw new RegistrationOwnershipAmbiguousError();
+    await session.clearAuthoritativePrimaryParticipants(discordUserId);
+    const updated = await session.markAuthoritativePrimaryParticipants(
+      discordUserId, normalizedPlayerId,
+    );
+    if (updated !== targets.length) throw new RegistrationOwnershipAmbiguousError();
+    return Object.freeze({ playerId: normalizedPlayerId, mirroredCharacters: updated });
+  });
+}
+
 function sha256(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -35,7 +56,7 @@ function scopedIdempotencyKey(context, publicKey) {
   );
 }
 
-function requestFingerprint(context, registration) {
+function requestFingerprint(context, registration, options = {}) {
   return sha256(
     JSON.stringify({
       operation: REGISTRATION_OPERATION,
@@ -45,6 +66,7 @@ function requestFingerprint(context, registration) {
       playerId: registration.playerId,
       inGameName: registration.inGameName,
       alliance: registration.alliance,
+      isPrimary: typeof options.isPrimary === "boolean" ? options.isPrimary : null,
     }),
   );
 }
@@ -54,6 +76,7 @@ function auditRegistration(participant) {
     playerId: participant.player_id,
     inGameName: participant.in_game_name,
     alliance: participant.alliance,
+    isPrimary: participant.is_primary,
   };
 }
 
@@ -63,6 +86,7 @@ function publicRegistration(participant) {
     playerId: participant.player_id,
     inGameName: participant.in_game_name,
     alliance: participant.alliance,
+    isPrimary: participant.is_primary,
   };
 }
 
@@ -96,7 +120,7 @@ export function createRegistrationService({
   }
 
   return Object.freeze({
-    async upsert(registration, publicIdempotencyKey) {
+    async upsert(registration, publicIdempotencyKey, options = {}) {
       const normalizedRegistration = validateRegistrationInput(registration);
       const normalizedIdempotencyKey = validateIdempotencyKey(
         publicIdempotencyKey,
@@ -105,7 +129,7 @@ export function createRegistrationService({
         context,
         normalizedIdempotencyKey,
       );
-      const requestHash = requestFingerprint(context, normalizedRegistration);
+      const requestHash = requestFingerprint(context, normalizedRegistration, options);
 
       return repository.withTransaction(async (session) => {
         const correlationId = createId();
@@ -118,15 +142,36 @@ export function createRegistrationService({
         const replay = replayOrConflict(claim, requestHash);
         if (replay) return replay;
 
-        const existing = await session.lockActiveParticipantsByDiscordUser(
+        await session.lockAuthoritativePrimaryOwner(context.discordUser.id);
+        await session.lockParticipantRegistrationOwner(
           context.community.id,
           context.discordUser.id,
         );
-        if (existing.length > 1) {
+        await session.lockRegisteredPlayerIdentity(
+          context.community.id,
+          normalizedRegistration.playerId,
+        );
+        const matches = await session.lockActiveParticipantsByPlayerId(
+          context.community.id,
+          normalizedRegistration.playerId,
+        );
+        if (matches.length > 1 || (matches[0]
+            && matches[0].discord_user_id !== context.discordUser.id)) {
           throw new RegistrationOwnershipAmbiguousError();
         }
-
-        const before = existing[0] ?? null;
+        await session.lockActiveParticipantsByDiscordUser(
+          context.community.id,
+          context.discordUser.id,
+        );
+        const before = matches[0] ?? null;
+        const authoritativePrimary = typeof options.isPrimary === "boolean";
+        const isPrimary = authoritativePrimary
+          ? options.isPrimary
+          : before?.is_primary ?? false;
+        const participantId = before?.id ?? createId();
+        if (authoritativePrimary && isPrimary) {
+          await session.clearAuthoritativePrimaryParticipants(context.discordUser.id);
+        }
         const beforeData = before ? auditRegistration(before) : null;
         const participant = before
           ? await session.updateWebsiteParticipant({
@@ -139,9 +184,10 @@ export function createRegistrationService({
               idempotencyKey,
               correlationId,
               sourceGuildId: context.community.discordGuildId ?? null,
+              isPrimary: authoritativePrimary ? false : isPrimary,
             })
           : await session.insertWebsiteParticipant({
-              id: createId(),
+              id: participantId,
               communityId: context.community.id,
               discordUserId: context.discordUser.id,
               playerId: normalizedRegistration.playerId,
@@ -150,8 +196,20 @@ export function createRegistrationService({
               idempotencyKey,
               correlationId,
               sourceGuildId: context.community.discordGuildId ?? null,
+              isPrimary: authoritativePrimary ? false : isPrimary,
             });
         if (!participant) throw new RegistrationOwnershipAmbiguousError();
+        if (authoritativePrimary && isPrimary) {
+          await session.markAuthoritativePrimaryParticipants(
+            context.discordUser.id, normalizedRegistration.playerId,
+          );
+          participant.is_primary = true;
+        } else if (authoritativePrimary) {
+          await session.clearAuthoritativePlayerPrimary(
+            context.discordUser.id, normalizedRegistration.playerId,
+          );
+          participant.is_primary = false;
+        }
 
         if (!before) {
           await session.insertPlayerPointsEntry({

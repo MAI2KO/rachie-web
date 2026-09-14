@@ -43,6 +43,7 @@ type BookingAdminConfiguration = {
   readonly guestLink: {
     readonly status: "active" | "inactive" | "revoked";
   };
+  readonly guestApproval: { readonly requireUnregistered: boolean };
   readonly discordAccess: {
     readonly stateGuildConfigured: boolean;
     readonly pendingRequests: readonly {
@@ -101,6 +102,7 @@ type BookingAdminConfiguration = {
 
 type Change =
   | { readonly section: "booking"; readonly enabled: boolean }
+  | { readonly section: "guestApproval"; readonly enabled: boolean }
   | { readonly section: "service"; readonly serviceCode: string; readonly enabled: boolean }
   | {
       readonly section: "requirement";
@@ -159,6 +161,8 @@ const CLOSE_DAY_LABELS = Object.freeze([
 
 function activityActionLabel(activity: Activity) {
   if (activity.action === "booking_created") return "Booked appointment";
+  if (activity.action === "guest_registered_booking_confirmed") return "Booking confirmed";
+  if (activity.action === "guest_unregistered_booking_confirmed") return "Guest booking confirmed";
   if (activity.action === "manager_manual_booking") return "Added booking manually";
   if (["booking_rescheduled", "manager_booking_rescheduled"].includes(activity.action)) {
     return "Rescheduled booking";
@@ -208,6 +212,12 @@ function readableSetting(value: string | null) {
 }
 
 function activityDetails(activity: Activity) {
+  if (activity.action === "guest_registered_booking_confirmed") {
+    return "Registered player via guest link";
+  }
+  if (activity.action === "guest_unregistered_booking_confirmed") {
+    return "Unregistered guest — approval disabled";
+  }
   if (activity.action === "booking_admin_updated") {
     const service = activity.serviceCode ? serviceDisplayName({ code: activity.serviceCode,
       displayName: activity.serviceCode.replace(/^./, (letter) => letter.toUpperCase()) }) : null;
@@ -519,7 +529,17 @@ export function BookingAdmin({ initialConfiguration }: {
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-guest-link">
       <div><h2 id="booking-admin-guest-link">Guest booking link</h2>
-        <p>Create a link for players who cannot use the normal Discord login. Guest bookings still require manager approval.</p></div>
+        <p>Create a link for players who cannot use the normal Discord login.</p></div>
+      <div className="booking-admin-setting">
+        <div><strong>Guest booking approval</strong>
+          <span>Require approval for unregistered guest players. Registered Player IDs are always confirmed immediately.</span></div>
+        <SettingSwitch checked={configuration.guestApproval.requireUnregistered}
+          disabled={controlsDisabled || busy === "guestApproval"}
+          label="Require approval for unregistered guest players"
+          onChange={() => void changeSetting("guestApproval", {
+            section: "guestApproval", enabled: !configuration.guestApproval.requireUnregistered,
+          }, `Approval for unregistered guest players ${configuration.guestApproval.requireUnregistered ? "disabled" : "enabled"}.`)} />
+      </div>
       <div className="booking-admin-guest-link">
         <p><strong>Status:</strong> {configuration.guestLink.status === "active" ? "Link active"
           : "No active link"}</p>

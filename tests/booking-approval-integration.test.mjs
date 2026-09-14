@@ -64,6 +64,119 @@ function manager(profile, communityId, user = "manager-1") {
   };
 }
 
+function guestDecisionFixture({ matches = [], requireApproval = true } = {}) {
+  const state = { bookings: [], requests: [], events: [], outbox: [], points: [] };
+  const communityId = randomUUID();
+  const slotId = randomUUID();
+  const linkId = randomUUID();
+  const session = {
+    async findActiveShareLink() { return { id: linkId, community_id: communityId,
+      community_status: "active", bookings_open: true }; },
+    async lockCommunity() { return { id: communityId, status: "active", bookings_open: true }; },
+    async claimGuestRequestIdempotency() { return { state: "claimed" }; },
+    async lockSlot() { return { id: slotId, community_id: communityId, window_id: randomUUID(),
+      service_date_id: randomUUID(), service_code: "construction", booking_date: "2030-08-22",
+      display_time_label: "08:00", slot_status: "available", window_status: "open",
+      service_active: true }; },
+    async lockGuestPlayerService() {}, async expirePendingForSlot() { return []; },
+    async expirePendingForPlayerService() { return []; }, async hasActiveApprovalHold() { return false; },
+    async hasActiveSlotBlock() { return false; }, async hasConfirmedBooking() { return false; },
+    async hasActivePendingForPlayerService() { return false; },
+    async hasConfirmedBookingForPlayerService() { return false; },
+    async findSettings() { return { require_unregistered_guest_approval: requireApproval,
+      pending_hold_duration_seconds: 1800, construction_speedups_required: true }; },
+    async lockRegisteredPlayerIdentity() {},
+    async findRegisteredParticipantsByPlayerId() { return matches; },
+    async insertConfirmedGuestBooking(input) { const row = { ...input,
+      id: input.id, service_code: input.serviceCode, booking_date: input.bookingDate,
+      display_time_label_snapshot: input.displayTime, player_id_snapshot: input.playerId,
+      in_game_name_snapshot: input.inGameName, alliance_snapshot: input.alliance };
+      state.bookings.push(row); return row; },
+    async insertGuestBookingAnswer() {},
+    async insertGuestBookingEvent(input) { state.events.push(input); },
+    async insertApprovalOutbox(input) { state.outbox.push(input); },
+    async insertPlayerPointsEntry(input) { state.points.push(input); return true; },
+    async insertCommunityParticipationPoints() { return true; },
+    async insertApprovalRequest(input) { const row = { ...input, id: input.id,
+      service_code: input.serviceCode, booking_date: input.bookingDate,
+      display_time_label_snapshot: input.displayTime, status: "pending_approval",
+      hold_expires_at: input.holdExpiresAt }; state.requests.push(row); return row; },
+    async insertRequestAnswer() {}, async insertApprovalEvent(input) { state.events.push(input); },
+    async completeIdempotency() {},
+  };
+  return { state, slotId, repository: { gameProfile: "wos",
+    async withTransaction(work) { return work(session); } } };
+}
+
+test("exact registered guest identity auto-confirms with provenance, notification work, and points", async () => {
+  const participant = { id: randomUUID(), discord_user_id: "registered-user",
+    player_id: "90000001", in_game_name: "Canonical", alliance: "REG",
+    source_discord_guild_id: null };
+  const fixture = guestDecisionFixture({ matches: [participant] });
+  const result = await createGuestBookingRequestService({ gameProfile: "wos",
+    repository: fixture.repository }).create(tokens.wos,
+    guestInput(fixture.slotId, 1), "registered-guest-request-0001");
+  assert.equal(result.status, 201);
+  assert.equal(result.body.request.status, "confirmed");
+  assert.equal(result.body.request.recognizedRegisteredPlayer, true);
+  assert.equal(fixture.state.bookings[0].participantId, participant.id);
+  assert.equal(fixture.state.bookings[0].discordUserId, "registered-user");
+  assert.equal(fixture.state.bookings[0].inGameName, "Canonical");
+  assert.equal(fixture.state.bookings[0].provenance, "guest_registered");
+  assert.equal(fixture.state.outbox[0].eventType, "booking.created");
+  assert.equal(fixture.state.points.length, 1);
+  assert.equal(fixture.state.requests.length, 0);
+});
+
+test("registered guest without a linked Discord owner confirms without inventing an identity", async () => {
+  const participant = { id: randomUUID(), discord_user_id: null,
+    player_id: "90000005", in_game_name: "Legacy Registered", alliance: "REG",
+    source_discord_guild_id: null };
+  const fixture = guestDecisionFixture({ matches: [participant] });
+  const result = await createGuestBookingRequestService({ gameProfile: "wos",
+    repository: fixture.repository }).create(tokens.wos,
+    guestInput(fixture.slotId, 5), "registered-guest-no-owner-0001");
+  assert.equal(result.status, 201);
+  assert.equal(result.body.request.recognizedRegisteredPlayer, true);
+  assert.equal(fixture.state.bookings[0].participantId, participant.id);
+  assert.equal(fixture.state.bookings[0].discordUserId, null);
+  assert.equal(fixture.state.outbox.length, 1,
+    "the shared notification materializer may safely skip a null recipient");
+});
+
+test("unmatched guest follows the community policy and name alone never matches", async () => {
+  const pending = guestDecisionFixture({ matches: [], requireApproval: true });
+  const pendingResult = await createGuestBookingRequestService({ gameProfile: "wos",
+    repository: pending.repository }).create(tokens.wos,
+    guestInput(pending.slotId, 2), "unmatched-guest-pending-0001");
+  assert.equal(pendingResult.status, 202);
+  assert.equal(pending.state.requests.length, 1);
+  assert.equal(pending.state.bookings.length, 0);
+
+  const automatic = guestDecisionFixture({ matches: [], requireApproval: false });
+  const automaticResult = await createGuestBookingRequestService({ gameProfile: "wos",
+    repository: automatic.repository }).create(tokens.wos,
+    guestInput(automatic.slotId, 3), "unmatched-guest-confirmed-0001");
+  assert.equal(automaticResult.status, 201);
+  assert.equal(automaticResult.body.request.recognizedRegisteredPlayer, false);
+  assert.equal(automatic.state.bookings[0].provenance, "guest_unregistered");
+  assert.equal(automatic.state.points.length, 0);
+});
+
+test("ambiguous registered Player ID always remains pending", async () => {
+  const fixture = guestDecisionFixture({ requireApproval: false, matches: [
+    { id: randomUUID(), player_id: "90000004" },
+    { id: randomUUID(), player_id: "90000004" },
+  ] });
+  const result = await createGuestBookingRequestService({ gameProfile: "wos",
+    repository: fixture.repository }).create(tokens.wos,
+    guestInput(fixture.slotId, 4), "ambiguous-guest-request-0001");
+  assert.equal(result.status, 202);
+  assert.equal(fixture.state.bookings.length, 0);
+  assert.equal(fixture.state.requests.length, 1);
+  assert.equal(fixture.state.events[0].metadata.provenance, "ambiguous_registered_player");
+});
+
 test("guest booking API consumes the dedicated bounded rate-limit policy", async () => {
   let captured;
   const api = createGuestBookingApi({
@@ -116,6 +229,26 @@ test("guest booking API reads anonymously and strips internal request IDs on sub
   const response = await api.submit(new Request("https://example.test", { method: "POST", headers: { "idempotency-key": "guest-safe-api-0001" }, body: "{}" }), tokens.wos);
   const body = await response.json();
   assert.equal(response.status, 202); assert.doesNotMatch(JSON.stringify(body), /secret-id|requestId/);
+});
+
+test("recognized guest response exposes confirmation but no registered account identity", async () => {
+  const api = createGuestBookingApi({
+    createService: () => ({ create: async () => ({ status: 201, replayed: false,
+      body: { request: { service: "construction", date: "2030-01-01", time: "10:00",
+        status: "confirmed", holdExpiresAt: null, recognizedRegisteredPlayer: true,
+        discordUserId: "123456789012345678", discordUsername: "private-user",
+        participantId: randomUUID(), pointsAccount: { total: 99 } } } }) }),
+    verifyOrigin: () => true, resolveRateLimitSubject: () => "client",
+    consumeRateLimit: async () => ({ allowed: true }),
+  });
+  const response = await api.submit(new Request("https://example.test", {
+    method: "POST", headers: { "idempotency-key": "recognized-safe-api-0001" }, body: "{}",
+  }), tokens.wos);
+  const body = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(response.headers.get("set-cookie"), null);
+  assert.equal(body.request.recognizedRegisteredPlayer, true);
+  assert.doesNotMatch(JSON.stringify(body), /123456789012345678|private-user|participantId|pointsAccount/);
 });
 
 test("migration 0005 preserves existing confirmed booking data and defaults communities to auto-approve", { skip: !databaseUrl && "TEST_DATABASE_URL is not configured" }, async () => {
@@ -178,12 +311,19 @@ test("migration 0005 preserves existing confirmed booking data and defaults comm
     });
 
     assert.deepEqual((await runMigrations(pool, migrations)).applied,
-      ["0005", "0006", "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014"]);
+      ["0005", "0006", "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015"]);
     const preserved = await withProfile(pool, "wos", (client) => client.query(
       `SELECT booking.id,booking.status,booking.in_game_name_snapshot,
-              booking.approval_request_id,settings.booking_approval_policy,
+              booking.approval_request_id,booking.entry_provenance,
+              booking.guest_share_link_id,participant.is_primary,
+              settings.booking_approval_policy,
+              settings.require_unregistered_guest_approval,
               settings.pending_hold_duration_seconds
        FROM minister_bookings AS booking
+       JOIN booking_participants AS participant
+         ON participant.game_profile=booking.game_profile
+        AND participant.id=booking.participant_id
+        AND participant.community_id=booking.community_id
        JOIN booking_settings AS settings
          ON settings.game_profile=booking.game_profile
         AND settings.community_id=booking.community_id
@@ -195,9 +335,153 @@ test("migration 0005 preserves existing confirmed booking data and defaults comm
       status: "confirmed",
       in_game_name_snapshot: "Existing Player",
       approval_request_id: null,
+      entry_provenance: "legacy",
+      guest_share_link_id: null,
+      is_primary: false,
       booking_approval_policy: "auto_approve",
+      require_unregistered_guest_approval: true,
       pending_hold_duration_seconds: 1800,
     }]);
+  } finally {
+    await pool.query(`DROP SCHEMA ${schema} CASCADE`);
+    await pool.end();
+  }
+});
+
+test("migration 0015 backfills only provable historical provenance", {
+  skip: !databaseUrl && "TEST_DATABASE_URL is not configured",
+}, async () => {
+  const schema = `provenance_upgrade_${randomUUID().replaceAll("-", "")}`;
+  const pool = new pg.Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` });
+  await pool.query(`CREATE SCHEMA ${schema}`);
+  try {
+    const migrations = await loadMigrations(fileURLToPath(new URL("../db/migrations/", import.meta.url)));
+    await runMigrations(pool, migrations.slice(0, 14));
+    const ids = { community: randomUUID(), window: randomUUID(), date: randomUUID(),
+      participant: randomUUID(), link: randomUUID(), request: randomUUID() };
+    const slots = Array.from({ length: 4 }, () => randomUUID());
+    const bookings = Array.from({ length: 4 }, () => randomUUID());
+    await withProfile(pool, "wos", async (client) => {
+      await client.query(
+        "INSERT INTO booking_communities (game_profile,id,location_code,display_name) VALUES ('wos',$1,'9915','Provenance')",
+        [ids.community],
+      );
+      await client.query("INSERT INTO booking_settings (game_profile,community_id) VALUES ('wos',$1)", [ids.community]);
+      await client.query(
+        "INSERT INTO booking_windows (game_profile,id,community_id,status,created_by_actor_type) VALUES ('wos',$1,$2,'open','system')",
+        [ids.window, ids.community],
+      );
+      await client.query(
+        "INSERT INTO booking_service_dates (game_profile,id,community_id,window_id,service_code,booking_date) VALUES ('wos',$1,$2,$3,'construction','2030-09-01')",
+        [ids.date, ids.community, ids.window],
+      );
+      for (const [ordinal, slot] of slots.entries()) {
+        await client.query(
+          `INSERT INTO appointment_slots
+             (game_profile,id,community_id,window_id,service_date_id,service_code,
+              booking_date,ordinal,display_time_label,local_start_time,time_zone)
+           VALUES ('wos',$1,$2,$3,$4,'construction','2030-09-01',$5,$6,$7,'UTC')`,
+          [slot, ids.community, ids.window, ids.date, ordinal,
+           `${String(8 + ordinal).padStart(2, "0")}:00`,
+           `${String(8 + ordinal).padStart(2, "0")}:00`],
+        );
+      }
+      await client.query(
+        `INSERT INTO booking_idempotency_keys
+           (game_profile,community_id,idempotency_key,operation,request_hash,correlation_id,status)
+         VALUES ('wos',$1,'provenance-participant','participant_registration_upsert',$2,
+                 'provenance-participant','started')`,
+        [ids.community, "b".repeat(64)],
+      );
+      await client.query(
+        `INSERT INTO booking_participants
+           (game_profile,id,community_id,discord_user_id,player_id,in_game_name,
+            alliance,source,idempotency_key,correlation_id)
+         VALUES ('wos',$1,$2,'provenance-user','100001','Member','MEM',
+                 'website','provenance-participant','provenance-participant')`,
+        [ids.participant, ids.community],
+      );
+      await client.query(
+        `INSERT INTO booking_guest_share_links
+           (game_profile,id,community_id,token_hash,label)
+         VALUES ('wos',$1,$2,$3,'Historical guest')`,
+        [ids.link, ids.community, "a".repeat(64)],
+      );
+      for (let index = 0; index < bookings.length; index += 1) {
+        await client.query(
+          `INSERT INTO booking_idempotency_keys
+             (game_profile,community_id,idempotency_key,operation,request_hash,correlation_id,status)
+           VALUES ('wos',$1,$2,'fixture',$3,$4,'completed')`,
+          [ids.community, `provenance-booking-${index}`, String(index).repeat(64), `correlation-${index}`],
+        );
+      }
+      await client.query(
+        `INSERT INTO booking_approval_requests
+           (game_profile,id,community_id,window_id,service_date_id,service_code,
+            booking_date,slot_id,request_source,share_link_id,player_id_snapshot,
+            in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
+            hold_expires_at,idempotency_key,correlation_id)
+         VALUES ('wos',$1,$2,$3,$4,'construction','2030-09-01',$5,'guest_link',$6,
+                 '100002','Guest','GST','09:00',now()+interval '30 minutes',
+                 'provenance-booking-1','correlation-1')`,
+        [ids.request, ids.community, ids.window, ids.date, slots[1], ids.link],
+      );
+      const shapes = [
+        { source: "website", actor: "discord_user", actorId: "provenance-user",
+          participant: ids.participant, discord: "provenance-user", approval: null },
+        { source: "website", actor: "admin", actorId: "manager",
+          participant: null, discord: null, approval: ids.request },
+        { source: "admin", actor: "admin", actorId: "manager",
+          participant: null, discord: null, approval: null },
+        { source: "legacy_import", actor: "legacy_import", actorId: null,
+          participant: null, discord: null, approval: null },
+      ];
+      for (const [index, shape] of shapes.entries()) {
+        await client.query(
+          `INSERT INTO minister_bookings
+             (game_profile,id,community_id,window_id,service_date_id,service_code,
+              booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
+              in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
+              source,actor_type,actor_id,idempotency_key,correlation_id,approval_request_id)
+           VALUES ('wos',$1,$2,$3,$4,'construction','2030-09-01',$5,$6,$7,$8,$9,'TAG',$10,
+                   $11,$12,$13,$14,$15,$16)`,
+          [bookings[index], ids.community, ids.window, ids.date, slots[index],
+           shape.participant, shape.discord, `10000${index + 1}`,
+           ["Member", "Guest", "Manual", "Unknown"][index],
+           `${String(8 + index).padStart(2, "0")}:00`,
+           shape.source, shape.actor, shape.actorId, `provenance-booking-${index}`,
+           `correlation-${index}`, shape.approval],
+        );
+      }
+      await client.query(
+        `UPDATE booking_approval_requests SET status='confirmed',decided_at=now(),
+                decided_by_discord_user_id='manager',confirmed_booking_id=$3
+          WHERE game_profile='wos' AND id=$1 AND community_id=$2`,
+        [ids.request, ids.community, bookings[1]],
+      );
+      for (const [bookingId, eventType, actorType] of [
+        [bookings[0], "booking_created", "discord_user"],
+        [bookings[2], "manager_manual_booking", "admin"],
+      ]) {
+        await client.query(
+          `INSERT INTO booking_change_events
+             (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,
+              source,actor_type,actor_id,correlation_id)
+           VALUES ('wos',$1,$2,'minister_booking',$3,$4,'website',$5,'manager',$6)`,
+          [randomUUID(), ids.community, bookingId, eventType, actorType, `event-${eventType}`],
+        );
+      }
+    });
+    assert.deepEqual((await runMigrations(pool, migrations)).applied, ["0015"]);
+    const result = await withProfile(pool, "wos", (client) => client.query(
+      `SELECT id,entry_provenance,guest_share_link_id
+         FROM minister_bookings WHERE community_id=$1 ORDER BY id`, [ids.community],
+    ));
+    const byId = new Map(result.rows.map((row) => [row.id, row]));
+    assert.deepEqual(bookings.map((id) => byId.get(id).entry_provenance),
+      ["member", "guest_unregistered", "admin", "legacy"]);
+    assert.equal(byId.get(bookings[1]).guest_share_link_id, ids.link);
+    assert.equal(byId.get(bookings[0]).guest_share_link_id, null);
   } finally {
     await pool.query(`DROP SCHEMA ${schema} CASCADE`);
     await pool.end();
@@ -222,7 +506,7 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       const serviceDateId = randomUUID();
       const linkId = randomUUID();
       const guildId = profile === "wos" ? "111111111111111111" : "222222222222222222";
-      const slots = Array.from({ length: 14 }, () => randomUUID());
+      const slots = Array.from({ length: 16 }, () => randomUUID());
       fixtures[profile] = { communityId, windowId, serviceDateId, linkId, guildId, slots };
       await withProfile(owner, profile, async (client) => {
         await client.query(
@@ -326,6 +610,86 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       return context;
     };
 
+    await t.test("registered guest auto-confirms through the normal notification and points path", async () => {
+      await register("wos", "1234567");
+      await withProfile(owner, "wos", (client) => client.query(
+        "UPDATE appointment_slots SET starts_at=now()+interval '20 minutes' WHERE id=$1",
+        [fixtures.wos.slots[14]],
+      ));
+      const input = { ...guestInput(fixtures.wos.slots[14], 70),
+        playerId: "81234567", inGameName: "Spoofed name", alliance: "BAD" };
+      const result = await guestService("wos", "2030-08-21T09:00:00.000Z").create(
+        tokens.wos, input, "registered-guest-database-0001",
+      );
+      assert.equal(result.status, 201);
+      assert.equal(result.body.request.recognizedRegisteredPlayer, true);
+      const stored = await withProfile(runtime, "wos", (client) => client.query(
+        `SELECT booking.entry_provenance,booking.guest_share_link_id,
+                booking.discord_user_id,booking.in_game_name_snapshot,
+                booking.participant_id,
+                (SELECT count(*)::int FROM booking_approval_requests
+                  WHERE slot_id=booking.slot_id) AS request_count,
+                (SELECT count(*)::int FROM player_points_ledger
+                  WHERE booking_id=booking.id) AS points_count
+           FROM minister_bookings AS booking WHERE booking.slot_id=$1`,
+        [fixtures.wos.slots[14]],
+      ));
+      assert.equal(stored.rows[0].entry_provenance, "guest_registered");
+      assert.equal(stored.rows[0].guest_share_link_id, fixtures.wos.linkId);
+      assert.equal(stored.rows[0].discord_user_id, "1234567");
+      assert.equal(stored.rows[0].in_game_name_snapshot, "1234567");
+      assert.ok(stored.rows[0].participant_id);
+      assert.equal(stored.rows[0].request_count, 0);
+      assert.equal(stored.rows[0].points_count, 1);
+      const replayed = await guestService("wos", "2030-08-21T09:01:00.000Z").create(
+        tokens.wos, input, "registered-guest-database-0001",
+      );
+      assert.equal(replayed.replayed, true);
+      assert.equal(replayed.body.request.status, "confirmed");
+
+      const discord = createDiscordIntegrationRepository("wos", runtime);
+      await discord.withTransaction((session) => session.claim(25));
+      const notifications = await withProfile(runtime, "wos", (client) => client.query(
+        `SELECT notification_type,recipient_discord_user_id
+           FROM booking_discord_notifications
+          WHERE booking_id=(SELECT id FROM minister_bookings WHERE slot_id=$1)
+          ORDER BY notification_type`,
+        [fixtures.wos.slots[14]],
+      ));
+      assert.deepEqual(notifications.rows, [
+        { notification_type: "appointment_reminder", recipient_discord_user_id: "1234567" },
+        { notification_type: "player_confirmed", recipient_discord_user_id: "1234567" },
+      ]);
+    });
+
+    await t.test("unregistered guest auto-confirm policy is community scoped", async () => {
+      await withProfile(runtime, "wos", (client) => client.query(
+        `UPDATE booking_settings SET require_unregistered_guest_approval=false
+          WHERE community_id=$1`, [fixtures.wos.communityId],
+      ));
+      const result = await guestService("wos", "2030-08-21T09:10:00.000Z").create(
+        tokens.wos, guestInput(fixtures.wos.slots[15], 71),
+        "unregistered-guest-database-0001",
+      );
+      assert.equal(result.status, 201);
+      const stored = await withProfile(runtime, "wos", (client) => client.query(
+        `SELECT entry_provenance,participant_id,discord_user_id,guest_share_link_id
+           FROM minister_bookings WHERE slot_id=$1`, [fixtures.wos.slots[15]],
+      ));
+      assert.deepEqual(stored.rows, [{ entry_provenance: "guest_unregistered",
+        participant_id: null, discord_user_id: null,
+        guest_share_link_id: fixtures.wos.linkId }]);
+      const kingshotPolicy = await withProfile(runtime, "kingshot", (client) => client.query(
+        "SELECT require_unregistered_guest_approval FROM booking_settings WHERE community_id=$1",
+        [fixtures.kingshot.communityId],
+      ));
+      assert.equal(kingshotPolicy.rows[0].require_unregistered_guest_approval, true);
+      await withProfile(runtime, "wos", (client) => client.query(
+        `UPDATE booking_settings SET require_unregistered_guest_approval=true
+          WHERE community_id=$1`, [fixtures.wos.communityId],
+      ));
+    });
+
     await t.test("guest stores alliance in a 30-minute pending hold and manager views expose it safely", async () => {
       const result = await guestService("wos", "2030-08-21T10:00:00.000Z").create(
         tokens.wos, guestInput(fixtures.wos.slots[0], 1), "guest-pending-request-0001",
@@ -416,10 +780,11 @@ test("guest approval foundation is transactional and profile-isolated in Postgre
       assert.equal(detail.audit.at(-1).previousState, "pending_approval");
       assert.equal(detail.audit.at(-1).resultingState, "confirmed");
       const approvedBooking = await withProfile(runtime, "wos", (client) => client.query(
-        "SELECT alliance_snapshot FROM minister_bookings WHERE approval_request_id=$1",
+        "SELECT alliance_snapshot,entry_provenance,guest_share_link_id FROM minister_bookings WHERE approval_request_id=$1",
         [fixtures.wos.pendingRequestId],
       ));
-      assert.deepEqual(approvedBooking.rows, [{ alliance_snapshot: "GST" }]);
+      assert.deepEqual(approvedBooking.rows, [{ alliance_snapshot: "GST",
+        entry_provenance: "guest_unregistered", guest_share_link_id: fixtures.wos.linkId }]);
       const confirmedManagerSlot = (await boardService("wos", manager("wos", fixtures.wos.communityId)).managerBoard())
         .services[0].slots.find((slot) => slot.time === "08:00");
       assert.equal(confirmedManagerSlot.player.alliance, "GST");

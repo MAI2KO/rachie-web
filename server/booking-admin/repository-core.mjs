@@ -45,7 +45,8 @@ class BookingAdminSession {
       this.client.query(
         `SELECT construction_fc_required,construction_rfc_required,
                 construction_speedups_required,research_shards_required,
-                research_speedups_required,troop_speedups_required
+                research_speedups_required,troop_speedups_required,
+                require_unregistered_guest_approval
            FROM booking_settings
           WHERE game_profile=$1 AND community_id=$2`,
         [this.gameProfile, communityId],
@@ -151,7 +152,9 @@ class BookingAdminSession {
                 CASE
                   WHEN event.event_type LIKE '%cancel%' THEN 'cancellations'
                   WHEN event.event_type IN ('booking_created','booking_rescheduled',
-                    'manager_booking_rescheduled','manager_manual_booking') THEN 'bookings'
+                    'manager_booking_rescheduled','manager_manual_booking',
+                    'guest_registered_booking_confirmed',
+                    'guest_unregistered_booking_confirmed') THEN 'bookings'
                   WHEN event.event_type='booking_admin_updated'
                     OR event.event_type LIKE 'booking_cycle_override_%'
                     OR event.event_type LIKE 'booking_recurring_window_default_%'
@@ -497,6 +500,15 @@ class BookingAdminSession {
       [this.gameProfile, communityId, enabled],
     );
     if (result.rowCount !== 1) throw new Error("Booking settings are unavailable.");
+  }
+
+  async setGuestApprovalRequired(communityId, enabled) {
+    await this.client.query(
+      `UPDATE booking_settings
+          SET require_unregistered_guest_approval=$3,version=version+1,updated_at=now()
+        WHERE game_profile=$1 AND community_id=$2`,
+      [this.gameProfile, communityId, enabled],
+    );
   }
 
   async insertAudit(input) {

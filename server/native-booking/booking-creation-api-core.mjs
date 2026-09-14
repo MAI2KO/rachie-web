@@ -74,7 +74,7 @@ export function createBookingCreationApi(dependencies) {
         if (error instanceof InvalidBookingRequestError) return errorResponse(400, error.message, error.code, { fields: error.fields });
         if (error instanceof BookingIdempotencyConflictError) return errorResponse(409, error.message, "idempotency_conflict");
         if (error instanceof BookingCreationError) {
-          const status = ["booking_already_exists", "slot_unavailable"].includes(error.code) ? 409 : error.code === "registration_required" ? 409 : error.code === "invalid_service" || error.code === "invalid_slot" ? 400 : 409;
+          const status = ["booking_already_exists", "slot_unavailable"].includes(error.code) ? 409 : ["registration_required", "character_selection_required"].includes(error.code) ? 409 : ["invalid_service", "invalid_slot", "invalid_character"].includes(error.code) ? 400 : 409;
           return errorResponse(status, error.message, error.code);
         }
         unexpected(dependencies, "booking_create", error, request);

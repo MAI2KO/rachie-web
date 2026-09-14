@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { BookingAuthenticationRequiredError, BookingMembershipRefreshRequiredError } from "../server/auth/authenticated-booking-context-core.mjs";
 import { createBookingCreationApi } from "../server/native-booking/booking-creation-api-core.mjs";
+import { createBookingCreationService } from "../server/native-booking/booking-creation-service-core.mjs";
 import { validateBookingChoice, validateRequirementAnswers } from "../server/native-booking/booking-creation-validation.mjs";
 
 const slotId = "00000000-0000-4000-8000-000000000001";
@@ -82,4 +83,59 @@ test("API returns stable controlled booking errors without internals", async () 
   const response = await api({ createService() { return { async create() { const error = new Error("closed"); error.name = "BookingCreationError"; throw error; } }; } }).create(request());
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { ok: false, error: "Booking service is unavailable.", code: "service_unavailable" });
+});
+
+function memberBookingFixture(participants) {
+  let inserted = null;
+  const session = {
+    async lockCommunityForBooking() { return { status: "active", bookings_open: true }; },
+    async claimBookingIdempotency() { return { state: "claimed" }; },
+    async lockActiveParticipantsByDiscordUser() { return participants; },
+    async lockAppointmentSlot() { return { id: slotId, window_id: "window", service_date_id: "date",
+      service_code: "construction", booking_date: "2030-01-01", display_time_label: "08:00",
+      service_label: "Construction", slot_status: "available", window_status: "open",
+      service_active: true }; },
+    async hasActiveSlotBlock() { return false; }, async hasActiveApprovalHoldForSlot() { return false; },
+    async hasConfirmedBookingForSlot() { return false; },
+    async hasConfirmedBookingForParticipantService() { return false; },
+    async findBookingSettings() { return {}; },
+    async insertConfirmedBooking(input) { inserted = input; return { id: input.id,
+      service_code: input.serviceCode, booking_date: input.bookingDate,
+      display_time_label_snapshot: input.displayTime, in_game_name_snapshot: input.inGameName,
+      alliance_snapshot: input.alliance, status: "confirmed" }; },
+    async insertBookingRequirementAnswer() {}, async insertBookingCreatedEvent() {},
+    async insertBookingOutboxEvent() {}, async insertPlayerPointsEntry() { return true; },
+    async insertCommunityParticipationPoints() { return true; }, async completeBookingIdempotency() {},
+  };
+  return { get inserted() { return inserted; }, repository: { gameProfile: "wos",
+    async withTransaction(work) { return work(session); } } };
+}
+
+test("member booking auto-selects one character and persists an explicitly selected non-main character", async () => {
+  const main = { id: "00000000-0000-4000-8000-000000000010", player_id: "10",
+    in_game_name: "Main", alliance: "ONE", is_primary: true };
+  const alt = { id: "00000000-0000-4000-8000-000000000011", player_id: "11",
+    in_game_name: "Alt", alliance: "TWO", is_primary: false };
+  const one = memberBookingFixture([main]);
+  await createBookingCreationService({ context, repository: one.repository }).create(
+    { serviceCode: "construction", slotId, requirements: {} }, "single-character-0001");
+  assert.equal(one.inserted.participantId, main.id);
+
+  const multiple = memberBookingFixture([main, alt]);
+  await createBookingCreationService({ context, repository: multiple.repository }).create(
+    { serviceCode: "construction", slotId, participantId: alt.id, requirements: {} },
+    "selected-character-0001");
+  assert.equal(multiple.inserted.participantId, alt.id);
+  assert.equal(multiple.inserted.playerId, "11");
+});
+
+test("member booking cannot select another owner's or another community's character", async () => {
+  const owned = { id: "00000000-0000-4000-8000-000000000010", player_id: "10",
+    in_game_name: "Owned", alliance: "OWN", is_primary: true };
+  const fixture = memberBookingFixture([owned]);
+  await assert.rejects(createBookingCreationService({ context, repository: fixture.repository }).create(
+    { serviceCode: "construction", slotId,
+      participantId: "00000000-0000-4000-8000-000000000099", requirements: {} },
+    "foreign-character-0001"), (error) => error.code === "invalid_character");
+  assert.equal(fixture.inserted, null);
 });

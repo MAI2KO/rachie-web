@@ -13,6 +13,7 @@ class ProfileScopedApprovalSession {
       `SELECT link.id, link.community_id, community.location_code,
               community.display_name, community.status AS community_status,
               community.bookings_open, settings.booking_approval_policy,
+              settings.require_unregistered_guest_approval,
               settings.pending_hold_duration_seconds,
               settings.construction_fc_required,settings.construction_rfc_required,
               settings.construction_speedups_required,settings.research_shards_required,
@@ -103,6 +104,7 @@ class ProfileScopedApprovalSession {
   async findSettings(communityId) {
     const result = await this.client.query(
       `SELECT community_id,booking_approval_policy,pending_hold_duration_seconds,
+              require_unregistered_guest_approval,
               construction_fc_required,construction_rfc_required,
               construction_speedups_required,research_shards_required,
               research_speedups_required,troop_speedups_required
@@ -111,6 +113,25 @@ class ProfileScopedApprovalSession {
       [this.gameProfile, communityId],
     );
     return result.rows[0] ?? null;
+  }
+
+  async findRegisteredParticipantsByPlayerId(communityId, playerId) {
+    return (await this.client.query(
+      `SELECT id,community_id,discord_user_id,player_id,in_game_name,alliance,
+              source_discord_guild_id,is_primary
+         FROM booking_participants
+        WHERE game_profile=$1 AND community_id=$2 AND player_id=$3
+          AND status='active'
+        ORDER BY id LIMIT 2 FOR SHARE`,
+      [this.gameProfile, communityId, playerId],
+    )).rows;
+  }
+
+  async lockRegisteredPlayerIdentity(communityId, playerId) {
+    await this.client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`registered-player:${this.gameProfile}:${communityId}:${playerId}`],
+    );
   }
 
   async hasActiveSlotBlock(slotId) {
@@ -254,6 +275,45 @@ class ProfileScopedApprovalSession {
     return result.rows[0];
   }
 
+  async insertConfirmedGuestBooking(input) {
+    return (await this.client.query(
+      `INSERT INTO minister_bookings
+         (game_profile,id,community_id,window_id,service_date_id,service_code,
+          booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
+          in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
+          source,actor_type,idempotency_key,correlation_id,source_discord_guild_id,
+          entry_provenance,guest_share_link_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+               'website','website_user',$15,$16,$17,$18,$19)
+       RETURNING *`,
+      [this.gameProfile,input.id,input.communityId,input.windowId,input.serviceDateId,
+       input.serviceCode,input.bookingDate,input.slotId,input.participantId ?? null,
+       input.discordUserId ?? null,input.playerId,input.inGameName,input.alliance,
+       input.displayTime,input.idempotencyKey,input.correlationId,
+       input.sourceGuildId ?? null,input.provenance,input.shareLinkId],
+    )).rows[0];
+  }
+
+  async insertGuestBookingAnswer({ bookingId, code, value, displayLabel, unit }) {
+    await this.client.query(
+      `INSERT INTO booking_requirement_answers
+         (game_profile,booking_id,requirement_code,raw_value,numeric_value,unit,display_label)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [this.gameProfile,bookingId,code,String(value),value,unit,displayLabel],
+    );
+  }
+
+  async insertGuestBookingEvent(input) {
+    await this.client.query(
+      `INSERT INTO booking_change_events
+         (game_profile,id,community_id,aggregate_type,aggregate_id,event_type,
+          source,actor_type,correlation_id,after_data)
+       VALUES ($1,$2,$3,'minister_booking',$4,$5,'website','website_user',$6,$7)`,
+      [this.gameProfile,input.id,input.communityId,input.bookingId,input.eventType,
+       input.correlationId,input.afterData],
+    );
+  }
+
   async insertRequestAnswer({ requestId, code, value, displayLabel, unit }) {
     await this.client.query(
       `INSERT INTO booking_approval_request_answers
@@ -354,16 +414,20 @@ class ProfileScopedApprovalSession {
           booking_date,slot_id,player_id_snapshot,in_game_name_snapshot,
           alliance_snapshot,display_time_label_snapshot,source,actor_type,
           actor_id,idempotency_key,correlation_id,approval_request_id,
-          participant_id,discord_user_id,source_discord_guild_id)
+          participant_id,discord_user_id,source_discord_guild_id,
+          entry_provenance,guest_share_link_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-               'website','admin',$13,$14,$15,$16,$17,$18,$19)
+               'website','admin',$13,$14,$15,$16,$17,$18,$19,
+               $20,$21)
        RETURNING *`,
       [this.gameProfile, bookingId, request.community_id, request.window_id,
        request.service_date_id, request.service_code, request.booking_date,
        request.slot_id, request.player_id_snapshot, request.in_game_name_snapshot,
        request.alliance_snapshot, request.display_time_label_snapshot,
        actor.discordUserId, request.idempotency_key, correlationId, request.id,
-       request.participant_id ?? null, request.discord_user_id ?? null, participantSource],
+       request.participant_id ?? null, request.discord_user_id ?? null, participantSource,
+       request.request_source === "guest_link" ? "guest_unregistered" : "member",
+       request.request_source === "guest_link" ? request.share_link_id : null],
     );
     return result.rows[0];
   }

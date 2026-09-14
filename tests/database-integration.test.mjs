@@ -396,7 +396,7 @@ test(
         );
       });
 
-      await t.test("Discord registration is community-unique while player IDs are not global", async () => {
+      await t.test("Discord owners can register multiple community characters while player IDs are not global", async () => {
         await withProfile(runtimePool, "wos", async (client) => {
           for (const [communityId, key] of [
             [wosCommunity, "discord-registration-one"],
@@ -423,9 +423,8 @@ test(
           );
         });
 
-        await assert.rejects(
-          withProfile(runtimePool, "wos", (client) =>
-            client.query(
+        await withProfile(runtimePool, "wos", (client) =>
+          client.query(
               `INSERT INTO booking_participants
                  (game_profile, id, community_id, discord_user_id, player_id,
                   in_game_name, alliance, source, idempotency_key, correlation_id)
@@ -434,8 +433,6 @@ test(
                        'discord-registration-duplicate', 'discord-duplicate')`,
               [randomUUID(), wosCommunity],
             ),
-          ),
-          /duplicate key/i,
         );
 
         await withProfile(runtimePool, "wos", (client) =>
@@ -822,7 +819,11 @@ test(
             playerId: "player-one",
             inGameName: "Player One",
             alliance: "TAG",
+            participantId: participantOne,
+            isPrimary: false,
           },
+          characters: [{ participantId: participantOne, playerId: "player-one",
+            inGameName: "Player One", alliance: "TAG", isPrimary: false }],
           bookings: [
             {
               bookingId: bookingOne,
@@ -830,6 +831,10 @@ test(
               date: "2026-08-20",
               displayTime: "00:00",
               ordinal: 0,
+              participantId: participantOne,
+              playerId: "player-one",
+              playerName: "Player One",
+              alliance: "TAG",
             },
           ],
         });
@@ -866,20 +871,14 @@ test(
           },
           "snapshot-update-0001",
         );
-        assert.deepEqual(
-          await readService.getParticipantBookingsForDiscordUser(
-            "trusted-discord-user",
-          ),
-          {
-            registration: {
-              status: "registered",
-              playerId: "987654",
-              inGameName: "Updated Player",
-              alliance: "NEW",
-            },
-            bookings: participantBookings.bookings,
-          },
+        const afterSecondCharacter = await readService.getParticipantBookingsForDiscordUser(
+          "trusted-discord-user",
         );
+        assert.equal(afterSecondCharacter.registration.playerId, "player-one");
+        assert.equal(afterSecondCharacter.characters.length, 2);
+        assert.deepEqual(afterSecondCharacter.characters.map((character) => character.playerId),
+          ["player-one", "987654"]);
+        assert.deepEqual(afterSecondCharacter.bookings, participantBookings.bookings);
         const snapshotAfterRegistrationUpdate = await withProfile(
           runtimePool,
           "wos",
@@ -900,7 +899,7 @@ test(
           await readService.getParticipantBookingsForDiscordUser(
             "not-registered",
           ),
-          { registration: { status: "unregistered" }, bookings: [] },
+          { registration: { status: "unregistered" }, characters: [], bookings: [] },
         );
 
         const kingshotRepository = createProfileScopedBookingRepository(

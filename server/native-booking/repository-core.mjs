@@ -315,6 +315,27 @@ class ProfileScopedBookingSession {
     return result.rows[0] ?? null;
   }
 
+  async lockOwnedBookingByDiscordUser(communityId, discordUserId, bookingId) {
+    const result = await this.client.query(
+      `SELECT booking.*,service.display_label AS service_label,
+              participant.player_id,participant.in_game_name,participant.alliance
+         FROM minister_bookings AS booking
+         JOIN minister_services AS service
+           ON service.game_profile=booking.game_profile
+          AND service.service_code=booking.service_code
+         JOIN booking_participants AS participant
+           ON participant.game_profile=booking.game_profile
+          AND participant.id=booking.participant_id
+          AND participant.community_id=booking.community_id
+        WHERE booking.game_profile=$1 AND booking.community_id=$2
+          AND booking.discord_user_id=$3 AND booking.id=$4
+          AND participant.discord_user_id=$3 AND participant.status='active'
+        FOR UPDATE OF booking`,
+      [this.gameProfile, communityId, discordUserId, bookingId],
+    );
+    return result.rows[0] ?? null;
+  }
+
   async lockCommunityBooking(communityId, bookingId) {
     const result = await this.client.query(
       `SELECT booking.*, service.display_label AS service_label
@@ -365,16 +386,18 @@ class ProfileScopedBookingSession {
              cancelled_by_actor_id=$10, version=version+1, updated_at=now()
          WHERE game_profile=$1 AND id=$2 AND community_id=$3
            AND participant_id=$9 AND status='confirmed'
-         RETURNING id,source_discord_guild_id
+         RETURNING id,source_discord_guild_id,entry_provenance,guest_share_link_id
        )
        INSERT INTO minister_bookings
          (game_profile,id,community_id,window_id,service_date_id,service_code,
           booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
           in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
           source,actor_type,actor_id,idempotency_key,correlation_id,
-          rescheduled_from_booking_id,source_discord_guild_id)
+          rescheduled_from_booking_id,source_discord_guild_id,entry_provenance,
+          guest_share_link_id)
        SELECT $1,$4,$3,$5,$6,$7,$8,$11,$9,$10,$12,$13,$14,$15,
-              'website','discord_user',$10,$16,$17,$2,replaced.source_discord_guild_id
+              'website','discord_user',$10,$16,$17,$2,replaced.source_discord_guild_id,
+              replaced.entry_provenance,replaced.guest_share_link_id
        FROM replaced
        RETURNING id,service_code,booking_date,display_time_label_snapshot,
                  in_game_name_snapshot,alliance_snapshot,status`,
@@ -402,12 +425,14 @@ class ProfileScopedBookingSession {
           booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
           in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
           source,actor_type,actor_id,idempotency_key,correlation_id,
-          rescheduled_from_booking_id,approval_request_id,source_discord_guild_id)
+          rescheduled_from_booking_id,approval_request_id,source_discord_guild_id,
+          entry_provenance,guest_share_link_id)
        SELECT $1,$4,$3,replaced.window_id,$5,replaced.service_code,$6,$7,
               replaced.participant_id,replaced.discord_user_id,replaced.player_id_snapshot,
               replaced.in_game_name_snapshot,replaced.alliance_snapshot,$8,
               'website','admin',$10,$9,$11,$2,replaced.approval_request_id,
-              replaced.source_discord_guild_id
+              replaced.source_discord_guild_id,replaced.entry_provenance,
+              replaced.guest_share_link_id
        FROM replaced
        RETURNING id,service_code,booking_date,display_time_label_snapshot,
                  in_game_name_snapshot,alliance_snapshot,status,discord_user_id`,
@@ -593,9 +618,9 @@ class ProfileScopedBookingSession {
           booking_date,slot_id,participant_id,discord_user_id,player_id_snapshot,
           in_game_name_snapshot,alliance_snapshot,display_time_label_snapshot,
           source,actor_type,actor_id,idempotency_key,correlation_id,
-          source_discord_guild_id)
+          source_discord_guild_id,entry_provenance)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-               $15,$16,$17,$18,$19,$20)
+               $15,$16,$17,$18,$19,$20,$21)
        RETURNING id,service_code,booking_date,display_time_label_snapshot,
                  in_game_name_snapshot,alliance_snapshot,status`,
       [this.gameProfile, input.id, input.communityId, input.windowId,
@@ -603,7 +628,7 @@ class ProfileScopedBookingSession {
        input.participantId ?? null, input.discordUserId ?? null, input.playerId,
        input.inGameName, input.alliance, input.displayTime, input.source,
        input.actorType, input.actorId, input.idempotencyKey, input.correlationId,
-       input.sourceGuildId ?? null],
+       input.sourceGuildId ?? null,input.entryProvenance],
     );
     return result.rows[0];
   }
@@ -807,14 +832,13 @@ class ProfileScopedBookingSession {
   async listActiveParticipantsByDiscordUser(communityId, discordUserId) {
     const result = await this.client.query(
       `SELECT game_profile, id, community_id, discord_user_id, player_id,
-              in_game_name, alliance, source_discord_guild_id
+              in_game_name, alliance, source_discord_guild_id,is_primary
        FROM booking_participants
        WHERE game_profile = $1
          AND community_id = $2
          AND discord_user_id = $3
          AND status = 'active'
-       ORDER BY id
-       LIMIT 2`,
+       ORDER BY is_primary DESC,created_at,id`,
       [this.gameProfile, communityId, discordUserId],
     );
     return result.rows;
@@ -823,18 +847,215 @@ class ProfileScopedBookingSession {
   async lockActiveParticipantsByDiscordUser(communityId, discordUserId) {
     const result = await this.client.query(
       `SELECT game_profile, id, community_id, discord_user_id, player_id,
-              in_game_name, alliance, source_discord_guild_id
+              in_game_name, alliance, source_discord_guild_id,is_primary
        FROM booking_participants
        WHERE game_profile = $1
          AND community_id = $2
          AND discord_user_id = $3
          AND status = 'active'
-       ORDER BY id
-       LIMIT 2
+       ORDER BY is_primary DESC,created_at,id
        FOR UPDATE`,
       [this.gameProfile, communityId, discordUserId],
     );
     return result.rows;
+  }
+
+  async lockActiveParticipantsByPlayerId(communityId, playerId) {
+    return (await this.client.query(
+      `SELECT game_profile,id,community_id,discord_user_id,player_id,in_game_name,
+              alliance,source_discord_guild_id,is_primary
+         FROM booking_participants
+        WHERE game_profile=$1 AND community_id=$2 AND player_id=$3
+          AND status='active'
+        ORDER BY id LIMIT 2 FOR SHARE`,
+      [this.gameProfile, communityId, playerId],
+    )).rows;
+  }
+
+  async lockParticipantRegistrationOwner(communityId, discordUserId) {
+    await this.client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`participant-owner:${this.gameProfile}:${communityId}:${discordUserId}`],
+    );
+  }
+
+  async lockAuthoritativePrimaryOwner(discordUserId) {
+    await this.client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`participant-primary:${this.gameProfile}:${discordUserId}`],
+    );
+  }
+
+  async lockActivePrimaryTargets(discordUserId, playerId) {
+    return (await this.client.query(
+      `SELECT id,community_id,player_id,is_primary
+         FROM booking_participants
+        WHERE game_profile=$1 AND discord_user_id=$2 AND player_id=$3
+          AND status='active'
+        ORDER BY community_id,id FOR UPDATE`,
+      [this.gameProfile, discordUserId, playerId],
+    )).rows;
+  }
+
+  async clearAuthoritativePrimaryParticipants(discordUserId) {
+    await this.client.query(
+      `UPDATE booking_participants
+          SET is_primary=false,updated_at=now()
+        WHERE game_profile=$1 AND discord_user_id=$2
+          AND status='active' AND is_primary=true`,
+      [this.gameProfile, discordUserId],
+    );
+  }
+
+  async clearAuthoritativePlayerPrimary(discordUserId, playerId) {
+    await this.client.query(
+      `UPDATE booking_participants
+          SET is_primary=false,updated_at=now()
+        WHERE game_profile=$1 AND discord_user_id=$2 AND player_id=$3
+          AND status='active' AND is_primary=true`,
+      [this.gameProfile, discordUserId, playerId],
+    );
+  }
+
+  async markAuthoritativePrimaryParticipants(discordUserId, playerId) {
+    return (await this.client.query(
+      `UPDATE booking_participants
+          SET is_primary=true,updated_at=now()
+        WHERE game_profile=$1 AND discord_user_id=$2 AND player_id=$3
+          AND status='active' AND is_primary=false
+        RETURNING id`,
+      [this.gameProfile, discordUserId, playerId],
+    )).rowCount;
+  }
+
+  async lockRegisteredPlayerIdentity(communityId, playerId) {
+    await this.client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`registered-player:${this.gameProfile}:${communityId}:${playerId}`],
+    );
+  }
+
+  async listActiveParticipantMirrorsForPlayerIds(playerIds) {
+    return (await this.client.query(
+      `SELECT participant.id,participant.community_id,participant.discord_user_id,
+              participant.player_id,participant.in_game_name,participant.alliance,
+              participant.is_primary,community.location_code
+         FROM booking_participants AS participant
+         JOIN booking_communities AS community
+           ON community.game_profile=participant.game_profile
+          AND community.id=participant.community_id
+        WHERE participant.game_profile=$1 AND participant.player_id=ANY($2::text[])
+          AND participant.status='active'
+        ORDER BY participant.player_id,participant.community_id,participant.id`,
+      [this.gameProfile, playerIds],
+    )).rows;
+  }
+
+  async lockActiveParticipantMirrorsForPlayerIds(playerIds) {
+    return (await this.client.query(
+      `SELECT participant.id,participant.community_id,participant.discord_user_id,
+              participant.player_id,participant.in_game_name,participant.alliance,
+              participant.is_primary,community.location_code
+         FROM booking_participants AS participant
+         JOIN booking_communities AS community
+           ON community.game_profile=participant.game_profile
+          AND community.id=participant.community_id
+        WHERE participant.game_profile=$1 AND participant.player_id=ANY($2::text[])
+          AND participant.status='active'
+        ORDER BY participant.player_id,participant.community_id,participant.id
+        FOR UPDATE OF participant`,
+      [this.gameProfile, playerIds],
+    )).rows;
+  }
+
+  async listActiveParticipantMirrorsForOwner(discordUserId) {
+    return (await this.client.query(
+      `SELECT id,community_id,player_id,is_primary
+         FROM booking_participants
+        WHERE game_profile=$1 AND discord_user_id=$2 AND status='active'
+        ORDER BY community_id,player_id,id`,
+      [this.gameProfile, discordUserId],
+    )).rows;
+  }
+
+  async lockActiveParticipantMirrorsForOwner(discordUserId) {
+    return (await this.client.query(
+      `SELECT id,community_id,player_id,is_primary
+         FROM booking_participants
+        WHERE game_profile=$1 AND discord_user_id=$2 AND status='active'
+        ORDER BY community_id,player_id,id FOR UPDATE`,
+      [this.gameProfile, discordUserId],
+    )).rows;
+  }
+
+  async listParticipantOwnershipForPlayerIds(playerIds) {
+    return (await this.client.query(
+      `SELECT id,community_id,discord_user_id,player_id,status
+        FROM booking_participants
+        WHERE game_profile=$1 AND player_id=ANY($2::text[])
+        ORDER BY player_id,community_id,id`,
+      [this.gameProfile, playerIds],
+    )).rows;
+  }
+
+  async lockParticipantOwnershipForPlayerIds(playerIds) {
+    return (await this.client.query(
+      `SELECT id,community_id,discord_user_id,player_id,status
+         FROM booking_participants
+        WHERE game_profile=$1 AND player_id=ANY($2::text[])
+        ORDER BY player_id,community_id,id FOR UPDATE`,
+      [this.gameProfile, playerIds],
+    )).rows;
+  }
+
+  async insertPlayerMirrorReconciliationKey({
+    communityId, idempotencyKey, requestHash, correlationId,
+  }) {
+    await this.client.query(
+      `INSERT INTO booking_idempotency_keys
+         (game_profile,community_id,idempotency_key,operation,request_hash,
+          correlation_id,status,response_status,response_body,completed_at)
+       VALUES ($1,$2,$3,'player_mirror_reconciliation',$4,$5,
+               'completed',200,'{}'::jsonb,now())
+       ON CONFLICT (game_profile,community_id,idempotency_key) DO NOTHING`,
+      [this.gameProfile, communityId, idempotencyKey, requestHash, correlationId],
+    );
+  }
+
+  async insertReconciledParticipant({
+    id, communityId, discordUserId, playerId, inGameName, alliance,
+    idempotencyKey, correlationId,
+  }) {
+    await this.client.query(
+      `INSERT INTO booking_participants
+         (game_profile,id,community_id,discord_user_id,player_id,in_game_name,
+          alliance,source,idempotency_key,correlation_id,is_primary)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'discord',$8,$9,false)`,
+      [this.gameProfile, id, communityId, discordUserId, playerId, inGameName,
+       alliance, idempotencyKey, correlationId],
+    );
+  }
+
+  async updateReconciledParticipant({ id, discordUserId, inGameName, alliance }) {
+    return (await this.client.query(
+      `UPDATE booking_participants
+          SET in_game_name=$4,alliance=$5,updated_at=now()
+        WHERE game_profile=$1 AND id=$2 AND discord_user_id=$3 AND status='active'
+          AND (in_game_name IS DISTINCT FROM $4 OR alliance IS DISTINCT FROM $5)
+        RETURNING id`,
+      [this.gameProfile, id, discordUserId, inGameName, alliance],
+    )).rowCount;
+  }
+
+  async synchronizeReconciledOwnerPrimary(discordUserId, primaryPlayerId) {
+    return (await this.client.query(
+      `UPDATE booking_participants
+          SET is_primary=COALESCE(player_id=$3,false),updated_at=now()
+        WHERE game_profile=$1 AND discord_user_id=$2 AND status='active'
+          AND is_primary IS DISTINCT FROM COALESCE(player_id=$3,false)
+        RETURNING id`,
+      [this.gameProfile, discordUserId, primaryPlayerId],
+    )).rowCount;
   }
 
   async insertWebsiteParticipant({
@@ -847,15 +1068,16 @@ class ProfileScopedBookingSession {
     idempotencyKey,
     correlationId,
     sourceGuildId,
+    isPrimary,
   }) {
     const result = await this.client.query(
       `INSERT INTO booking_participants
          (game_profile, id, community_id, discord_user_id, player_id,
           in_game_name, alliance, source, idempotency_key, correlation_id,
-          source_discord_guild_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'website', $8, $9,$10)
+          source_discord_guild_id,is_primary)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'website', $8, $9,$10,$11)
        RETURNING game_profile, id, community_id, discord_user_id, player_id,
-                 in_game_name, alliance, source_discord_guild_id`,
+                 in_game_name, alliance, source_discord_guild_id,is_primary`,
       [
         this.gameProfile,
         id,
@@ -867,6 +1089,7 @@ class ProfileScopedBookingSession {
         idempotencyKey,
         correlationId,
         sourceGuildId,
+        isPrimary,
       ],
     );
     return result.rows[0];
@@ -882,6 +1105,7 @@ class ProfileScopedBookingSession {
     idempotencyKey,
     correlationId,
     sourceGuildId,
+    isPrimary,
   }) {
     const result = await this.client.query(
       `UPDATE booking_participants
@@ -892,6 +1116,7 @@ class ProfileScopedBookingSession {
            idempotency_key = $8,
            correlation_id = $9,
            source_discord_guild_id = COALESCE($10, source_discord_guild_id),
+           is_primary = $11,
            updated_at = now()
        WHERE game_profile = $1
          AND id = $2
@@ -899,7 +1124,7 @@ class ProfileScopedBookingSession {
          AND discord_user_id = $4
          AND status = 'active'
        RETURNING game_profile, id, community_id, discord_user_id, player_id,
-                 in_game_name, alliance, source_discord_guild_id`,
+                 in_game_name, alliance, source_discord_guild_id,is_primary`,
       [
         this.gameProfile,
         id,
@@ -911,6 +1136,7 @@ class ProfileScopedBookingSession {
         idempotencyKey,
         correlationId,
         sourceGuildId,
+        isPrimary,
       ],
     );
     return result.rows[0] ?? null;
@@ -964,6 +1190,27 @@ class ProfileScopedBookingSession {
       [this.gameProfile, communityId, participantId],
     );
     return result.rows;
+  }
+
+  async listConfirmedBookingsForDiscordUser(communityId, discordUserId) {
+    return (await this.client.query(
+      `SELECT booking.id,booking.service_code,booking.booking_date,
+              booking.display_time_label_snapshot,slot.ordinal,
+              participant.id AS participant_id,participant.player_id,
+              participant.in_game_name,participant.alliance
+         FROM minister_bookings AS booking
+         JOIN appointment_slots AS slot
+           ON slot.game_profile=booking.game_profile AND slot.id=booking.slot_id
+         JOIN booking_participants AS participant
+           ON participant.game_profile=booking.game_profile
+          AND participant.id=booking.participant_id
+          AND participant.community_id=booking.community_id
+        WHERE booking.game_profile=$1 AND booking.community_id=$2
+          AND participant.discord_user_id=$3 AND participant.status='active'
+          AND booking.status='confirmed'
+        ORDER BY booking.booking_date,slot.ordinal,booking.id`,
+      [this.gameProfile, communityId, discordUserId],
+    )).rows;
   }
 }
 

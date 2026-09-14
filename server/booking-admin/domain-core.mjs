@@ -165,6 +165,10 @@ export function validateBookingAdminChange(value) {
   if (value.section === "booking" && exactKeys(value, ["section", "enabled"])) {
     return Object.freeze({ section: "booking", enabled: value.enabled });
   }
+  if (value.section === "guestApproval"
+      && exactKeys(value, ["section", "enabled"])) {
+    return Object.freeze({ section: "guestApproval", enabled: value.enabled });
+  }
   if (value.section === "service" && exactKeys(value, ["section", "serviceCode", "enabled"])
       && isKnownMinisterServiceCode(value.serviceCode)) {
     return Object.freeze({ section: "service", serviceCode: value.serviceCode, enabled: value.enabled });
@@ -303,6 +307,9 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
     }))),
     guestLink: Object.freeze({
       status: guestLinkActive ? "active" : guestLink?.revoked_at ? "revoked" : "inactive",
+    }),
+    guestApproval: Object.freeze({
+      requireUnregistered: settings.require_unregistered_guest_approval !== false,
     }),
     discordAccess: Object.freeze({
       stateGuildConfigured,

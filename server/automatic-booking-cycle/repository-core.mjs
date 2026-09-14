@@ -148,11 +148,11 @@ async function reconcileWindowAnnouncement(client, community, windowId, cycle, a
     await client.query(
       `INSERT INTO booking_guest_share_links
          (game_profile,id,community_id,token_hash,token_hint,label,created_by_actor_id,
-          expires_at,rotated_from_link_id,booking_window_id)
-       VALUES ($1,$2,$3,$4,$5,'Automatic booking window',$6,$7,$8,$9)
+          expires_at,rotated_from_link_id,booking_window_id,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,'Automatic booking window',$6,$7,$8,$9,$10,$10)
        ON CONFLICT (game_profile,id) DO NOTHING`,
       [PROFILE, linkId, community.id, token.tokenHash, token.tokenHint, ACTOR_ID,
-       cycle.closesAt, current?.id ?? null, windowId],
+       cycle.closesAt, current?.id ?? null, windowId, at],
     );
   }
   await client.query(

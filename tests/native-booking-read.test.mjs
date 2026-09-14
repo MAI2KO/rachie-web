@@ -15,7 +15,6 @@ import { createNativeBookingReadApi } from "../server/native-booking/read-api-co
 import {
   createNativeBookingReadService,
   NativeBookingCommunityNotFoundError,
-  NativeBookingParticipantAmbiguousError,
 } from "../server/native-booking/read-service-core.mjs";
 import { createRateLimiter } from "../server/rate-limit/limiter-core.mjs";
 import { RATE_LIMIT_POLICIES } from "../server/rate-limit/policies.mjs";
@@ -128,7 +127,7 @@ function fakeRepository(overrides = {}, gameProfile = "wos") {
     async listActiveParticipantsByDiscordUser() {
       return [];
     },
-    async listConfirmedBookingsForParticipant() {
+    async listConfirmedBookingsForDiscordUser() {
       return [];
     },
     ...overrides,
@@ -308,9 +307,9 @@ test("participant ownership uses Discord identity and handles no or duplicate re
           },
         ];
       },
-      async listConfirmedBookingsForParticipant(communityId, participantId) {
+      async listConfirmedBookingsForDiscordUser(communityId, discordUserId) {
         assert.equal(communityId, "wos-community-id");
-        assert.equal(participantId, "participant-owned");
+        assert.equal(discordUserId, "trusted-discord");
         return [
           {
             id: "booking-owned",
@@ -318,6 +317,10 @@ test("participant ownership uses Discord identity and handles no or duplicate re
             booking_date: "2026-08-20",
             display_time_label_snapshot: "00:00",
             ordinal: 0,
+            participant_id: "participant-owned",
+            player_id: "player-owned",
+            in_game_name: "Owned Player",
+            alliance: "OWN",
           },
         ];
       },
@@ -330,20 +333,23 @@ test("participant ownership uses Discord identity and handles no or duplicate re
 
   assert.deepEqual(
     await readService().getParticipantBookingsForDiscordUser("unregistered"),
-    { registration: { status: "unregistered" }, bookings: [] },
+    { registration: { status: "unregistered" }, characters: [], bookings: [] },
   );
 
-  const duplicate = readService(
+  const multiple = readService(
     fakeRepository({
       async listActiveParticipantsByDiscordUser() {
-        return [{ id: "one" }, { id: "two" }];
+        return [
+          { id: "one", player_id: "1", in_game_name: "Main", alliance: "ONE", is_primary: true },
+          { id: "two", player_id: "2", in_game_name: "Alt", alliance: "TWO", is_primary: false },
+        ];
       },
+      async listConfirmedBookingsForDiscordUser() { return []; },
     }),
   );
-  await assert.rejects(
-    duplicate.getParticipantBookingsForDiscordUser("duplicate"),
-    NativeBookingParticipantAmbiguousError,
-  );
+  const multipleResult = await multiple.getParticipantBookingsForDiscordUser("multiple");
+  assert.equal(multipleResult.characters.length, 2);
+  assert.equal(multipleResult.registration.playerId, "1");
 });
 
 test("authenticated read API returns controlled auth, selection, stale, and rate errors", async () => {

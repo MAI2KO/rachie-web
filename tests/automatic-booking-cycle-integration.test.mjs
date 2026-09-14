@@ -183,14 +183,6 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
       expires_at: new Date("2026-09-06T18:00:00.000Z"),
       due_at: new Date("2026-09-01T18:00:00.000Z"),
     });
-    const discord = createDiscordIntegrationRepository("wos", pool);
-    const announcement = (await discord.withTransaction((session) => session.claim(10, {
-      guestTokenSecret,
-    }))).find((work) => work.type === "booking_window_open");
-    assert.match(announcement.guestPath, /^\/book\/[A-Za-z0-9_-]{43}$/);
-    assert.equal("guestUrl" in announcement, false);
-    assert.equal("memberUrl" in announcement, false);
-    assert.equal(JSON.stringify(announcement).includes("localhost"), false);
     await withProfile(pool, "wos", (client) => client.query(
       `UPDATE booking_cycle_schedule_overrides
           SET closes_at='2026-09-06T19:00:00Z',updated_at=now()
@@ -242,6 +234,20 @@ test("automatic WOS cycle reconciliation is isolated, idempotent, and respects m
       closes_at: new Date("2026-10-05T23:59:00.000Z"),
     }], "the following cycle uses the community recurring default");
 
+    await reconcileAutomaticWosBookingCycles({ pool, now: new Date("2026-09-30T00:00:00.000Z"), guestTokenSecret });
+    await withProfile(pool, "wos", (client) => client.query(
+      `UPDATE booking_discord_notifications SET due_at=now()
+        WHERE community_id=$1 AND notification_type='booking_window_open'
+          AND status='pending'`, [wosCommunityId],
+    ));
+    const discord = createDiscordIntegrationRepository("wos", pool);
+    const announcement = (await discord.withTransaction((session) => session.claim(10, {
+      guestTokenSecret,
+    }))).find((work) => work.type === "booking_window_open");
+    assert.match(announcement.guestPath, /^\/book\/[A-Za-z0-9_-]{43}$/);
+    assert.equal("guestUrl" in announcement, false);
+    assert.equal("memberUrl" in announcement, false);
+    assert.equal(JSON.stringify(announcement).includes("localhost"), false);
     await withProfile(pool, "wos", (client) => client.query(
       "UPDATE booking_communities SET bookings_open=false WHERE id=$1", [wosCommunityId],
     ));
