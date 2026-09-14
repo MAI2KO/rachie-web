@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { validateRegistrationInput } from "./registration-validation.mjs";
+import {
+  InvalidRegistrationError,
+  validatePlayerId,
+  validateRegistrationInput,
+} from "./registration-validation.mjs";
 
 const PROFILES = new Set(["wos", "kingshot"]);
 const DISCORD_USER_ID = /^\d{1,20}$/;
@@ -17,16 +21,31 @@ function normalizedAccounts(gameProfile, input) {
         || typeof value?.isPrimary !== "boolean") {
       throw new TypeError("invalid_reconciliation_account");
     }
-    const registration = validateRegistrationInput({
-      playerId: value.playerId,
-      inGameName: value.inGameName,
-      alliance: value.allianceAbbreviation,
-    });
+    let playerId;
+    try {
+      playerId = validatePlayerId(value.playerId);
+    } catch (error) {
+      if (error instanceof InvalidRegistrationError) {
+        throw new TypeError("invalid_reconciliation_account");
+      }
+      throw error;
+    }
+    let metadata = null;
+    try {
+      metadata = validateRegistrationInput({
+        playerId,
+        inGameName: value.inGameName,
+        alliance: value.allianceAbbreviation,
+      });
+    } catch (error) {
+      if (!(error instanceof InvalidRegistrationError)) throw error;
+    }
     return Object.freeze({
       gameProfile, discordUserId, communityCode,
-      playerId: registration.playerId,
-      inGameName: registration.inGameName,
-      alliance: registration.alliance,
+      playerId,
+      inGameName: metadata?.inGameName ?? null,
+      alliance: metadata?.alliance ?? null,
+      metadataValid: metadata !== null,
       isPrimary: value.isPrimary,
     });
   });
@@ -72,8 +91,23 @@ export async function reconcileAuthoritativePlayerMirrors({
   const accounts = normalizedAccounts(gameProfile, input);
   const discordUserId = accounts[0].discordUserId;
   const authoritativePrimaries = accounts.filter((account) => account.isPrimary);
+  const invalidMetadata = accounts.some((account) => !account.metadataValid);
 
   return repository.withTransaction(async (session) => {
+    if (invalidMetadata || authoritativePrimaries.length > 1) {
+      const playerIds = accounts.map((account) => account.playerId);
+      const mirrorRows = await session.listActiveParticipantMirrorsForPlayerIds(playerIds);
+      const mirrors = new Map(playerIds.map((playerId) => [playerId,
+        mirrorRows.filter((row) => row.player_id === playerId)]));
+      if (authoritativePrimaries.length > 1) {
+        return Object.freeze({ conflict: "multiple_authoritative_primaries", mutations: 0,
+          results: conflictedReports(accounts, mirrors, () => "ambiguous/conflict",
+            "multiple authoritative bot primaries") });
+      }
+      return Object.freeze({ conflict: "invalid_account_metadata", mutations: 0,
+        results: conflictedReports(accounts, mirrors, () => "ambiguous/conflict",
+          "owner group contains invalid account metadata") });
+    }
     if (!dryRun) await session.lockAuthoritativePrimaryOwner(discordUserId);
     const communities = new Map();
     for (const account of accounts) {
@@ -111,11 +145,6 @@ export async function reconcileAuthoritativePlayerMirrors({
     const mirrors = new Map(playerIds.map((playerId) => [playerId,
       mirrorRows.filter((row) => row.player_id === playerId)]));
 
-    if (authoritativePrimaries.length > 1) {
-      return Object.freeze({ conflict: "multiple_authoritative_primaries", mutations: 0,
-        results: conflictedReports(accounts, mirrors, () => "ambiguous/conflict",
-          "multiple authoritative bot primaries") });
-    }
     const unresolved = accounts.filter((account) => {
       const community = communities.get(account.playerId);
       return !community || community.status !== "active";

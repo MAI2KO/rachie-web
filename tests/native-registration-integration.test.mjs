@@ -6,6 +6,7 @@ import test from "node:test";
 import pg from "pg";
 
 import { loadMigrations, runMigrations } from "../server/database/migrations.mjs";
+import { inspectOrDeactivateLegacyPlayerAccounts } from "../server/native-booking/player-account-cleanup-core.mjs";
 import { reconcileAuthoritativePlayerMirrors } from "../server/native-booking/player-mirror-reconciliation-core.mjs";
 import { createProfileScopedBookingRepository } from "../server/native-booking/repository-core.mjs";
 import {
@@ -319,6 +320,36 @@ test(
         ))).rows[0].count, 0);
       });
 
+      await t.test("legacy cleanup inspects and deactivates participants without deleting history", async () => {
+        await createRegistrationService({
+          context: context("wos", wosCommunity, "5555555"), repository: wosRepository,
+        }).upsert({ playerId: "555551", inGameName: "Legacy Player", alliance: "LEG" },
+        "cleanup-existing-0001", { isPrimary: true });
+        const candidate = { accountRef: "0123456789abcdef", playerId: "555551",
+          discordUserId: "5555555", reasons: ["invalid_in_game_name"] };
+        const preview = await inspectOrDeactivateLegacyPlayerAccounts({ gameProfile: "wos",
+          candidates: [candidate], dryRun: true, repository: wosRepository });
+        assert.equal(preview.results[0].participantMirrors, 1);
+        assert.ok(preview.results[0].historyReferences > 0);
+        const executed = await inspectOrDeactivateLegacyPlayerAccounts({ gameProfile: "wos",
+          candidates: [candidate], dryRun: false, repository: wosRepository });
+        assert.equal(executed.mutations, 1);
+        const retried = await inspectOrDeactivateLegacyPlayerAccounts({ gameProfile: "wos",
+          candidates: [candidate], dryRun: false, repository: wosRepository });
+        assert.equal(retried.mutations, 0);
+        assert.equal(retried.results[0].cleanupStatus, "already_completed");
+        const footprint = await withProfile(runtimePool, "wos", (client) => client.query(
+          `SELECT participant.status,participant.is_primary,
+                  (SELECT count(*)::int FROM player_points_ledger AS points
+                    WHERE points.participant_id=participant.id) AS points_count
+             FROM booking_participants AS participant
+            WHERE participant.player_id='555551'`,
+        ));
+        assert.deepEqual(footprint.rows, [
+          { status: "inactive", is_primary: false, points_count: 1 },
+        ]);
+      });
+
       await t.test("ownership and player IDs are community/profile safe", async () => {
         const otherWos = createRegistrationService({
           context: context("wos", wosCommunity, "other-wos-user"),
@@ -346,6 +377,7 @@ test(
           ),
         );
         assert.deepEqual(wosRows.rows, [
+          { discord_user_id: "5555555", player_id: "555551" },
           { discord_user_id: "concurrent-user", player_id: "222222" },
           { discord_user_id: "other-wos-user", player_id: "654321" },
           { discord_user_id: "primary-user", player_id: "333331" },

@@ -126,6 +126,36 @@ test("execution safely creates, updates every mirror, and is idempotent", async 
   assert.ok(verification.results.every((row) => row.websiteMirrorStatus === "matching"));
 });
 
+test("invalid legacy metadata returns a structured preview conflict without creating a mirror", async () => {
+  const repository = repositoryFixture();
+  const before = structuredClone(repository.state);
+  const result = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: true,
+    repository, accounts: [account("111111", { inGameName: "", allianceAbbreviation: "" })],
+    createId: repository.nextId });
+  assert.equal(result.conflict, "invalid_account_metadata");
+  assert.equal(result.mutations, 0);
+  assert.equal(result.results[0].websiteMirrorStatus, "ambiguous/conflict");
+  assert.match(result.results[0].plannedAction, /^skip: .*invalid account metadata$/);
+  assert.deepEqual(repository.state, before);
+});
+
+test("invalid metadata preserves an existing mirror and atomically skips its owner group", async () => {
+  const repository = repositoryFixture({ participants: [
+    { id: "existing", community_id: "community-one", discord_user_id: "1234567",
+      player_id: "111111", in_game_name: "Valid Website Name", alliance: "WEB",
+      is_primary: false },
+  ] });
+  const before = structuredClone(repository.state);
+  const result = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: false,
+    repository, accounts: [account("111111", { inGameName: "", allianceAbbreviation: "",
+      isPrimary: true }), account("222222")], createId: repository.nextId });
+  assert.equal(result.conflict, "invalid_account_metadata");
+  assert.equal(result.mutations, 0);
+  assert.equal(result.results.length, 2);
+  assert.ok(result.results.every((row) => row.plannedAction.startsWith("skip:")));
+  assert.deepEqual(repository.state, before);
+});
+
 test("ownership, ambiguity, invalid bot primaries, and unresolved communities skip safely", async () => {
   for (const fixture of [
     { participants: [{ id: "foreign", community_id: "community-one",

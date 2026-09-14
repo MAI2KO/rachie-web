@@ -21,6 +21,15 @@ test("Discord setup and registration routes reuse signed profile scope and nativ
   const executeRoute = fs.readFileSync(new URL(
     "../app/api/internal/v1/discord/player-mirrors/execute/route.ts", import.meta.url,
   ), "utf8");
+  const cleanupHandler = fs.readFileSync(new URL(
+    "../server/discord-integration/player-account-cleanup-handler.ts", import.meta.url,
+  ), "utf8");
+  const cleanupPreviewRoute = fs.readFileSync(new URL(
+    "../app/api/internal/v1/discord/player-account-cleanup/preview/route.ts", import.meta.url,
+  ), "utf8");
+  const cleanupExecuteRoute = fs.readFileSync(new URL(
+    "../app/api/internal/v1/discord/player-account-cleanup/execute/route.ts", import.meta.url,
+  ), "utf8");
   const integrationHandler = fs.readFileSync(new URL(
     "../server/discord-integration/route-handler.ts", import.meta.url,
   ), "utf8");
@@ -42,6 +51,12 @@ test("Discord setup and registration routes reuse signed profile scope and nativ
   assert.doesNotMatch(reconciliationHandler, /getServerSession|cookies\(|authorization/i);
   assert.match(previewRoute, /handlePlayerMirrorReconciliationPreview/);
   assert.match(executeRoute, /handlePlayerMirrorReconciliationExecute/);
+  assert.match(cleanupHandler, /authenticateDiscordIntegrationReadOnlyRequest/);
+  assert.match(cleanupHandler, /authenticateDiscordIntegrationRequest/);
+  assert.match(cleanupHandler, /inspectOrDeactivateLegacyPlayerAccounts/);
+  assert.doesNotMatch(cleanupHandler, /getServerSession|cookies\(|authorization/i);
+  assert.match(cleanupPreviewRoute, /handlePlayerAccountCleanupPreview/);
+  assert.match(cleanupExecuteRoute, /handlePlayerAccountCleanupExecute/);
   assert.match(integrationHandler, /verifyDiscordIntegrationRequest/);
   assert.match(integrationHandler,
     /authenticateDiscordIntegrationRequestCore\(request, false\)/);

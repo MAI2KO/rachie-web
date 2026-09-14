@@ -998,6 +998,57 @@ class ProfileScopedBookingSession {
     )).rows;
   }
 
+  async listLegacyPlayerCleanupFootprints(playerIds) {
+    return (await this.client.query(
+      `SELECT participant.id,participant.player_id,participant.discord_user_id,
+              participant.status,
+              (SELECT count(*)::int FROM minister_bookings AS booking
+                WHERE booking.game_profile=participant.game_profile
+                  AND booking.participant_id=participant.id) AS booking_count,
+              (SELECT count(*)::int FROM booking_approval_requests AS request
+                WHERE request.game_profile=participant.game_profile
+                  AND request.participant_id=participant.id) AS approval_count,
+              (SELECT count(*)::int FROM player_points_ledger AS points
+                WHERE points.game_profile=participant.game_profile
+                  AND points.participant_id=participant.id) AS points_count
+         FROM booking_participants AS participant
+        WHERE participant.game_profile=$1 AND participant.player_id=ANY($2::text[])
+        ORDER BY participant.player_id,participant.community_id,participant.id`,
+      [this.gameProfile, playerIds],
+    )).rows;
+  }
+
+  async lockLegacyPlayerCleanupFootprints(playerIds) {
+    return (await this.client.query(
+      `SELECT participant.id,participant.player_id,participant.discord_user_id,
+              participant.status,
+              (SELECT count(*)::int FROM minister_bookings AS booking
+                WHERE booking.game_profile=participant.game_profile
+                  AND booking.participant_id=participant.id) AS booking_count,
+              (SELECT count(*)::int FROM booking_approval_requests AS request
+                WHERE request.game_profile=participant.game_profile
+                  AND request.participant_id=participant.id) AS approval_count,
+              (SELECT count(*)::int FROM player_points_ledger AS points
+                WHERE points.game_profile=participant.game_profile
+                  AND points.participant_id=participant.id) AS points_count
+         FROM booking_participants AS participant
+        WHERE participant.game_profile=$1 AND participant.player_id=ANY($2::text[])
+        ORDER BY participant.player_id,participant.community_id,participant.id
+        FOR UPDATE OF participant`,
+      [this.gameProfile, playerIds],
+    )).rows;
+  }
+
+  async deactivateLegacyPlayerParticipants(discordUserId, playerId) {
+    return (await this.client.query(
+      `UPDATE booking_participants
+          SET status='inactive',is_primary=false,updated_at=now()
+        WHERE game_profile=$1 AND discord_user_id=$2 AND player_id=$3 AND status='active'
+        RETURNING id`,
+      [this.gameProfile, discordUserId, playerId],
+    )).rowCount;
+  }
+
   async lockParticipantOwnershipForPlayerIds(playerIds) {
     return (await this.client.query(
       `SELECT id,community_id,discord_user_id,player_id,status
