@@ -26,6 +26,34 @@ export class RegistrationOwnershipAmbiguousError extends Error {
   }
 }
 
+export class RegistrationOwnershipMismatchError extends Error {
+  constructor() {
+    super("The Player ID is actively owned by another Discord user.");
+    this.name = "RegistrationOwnershipMismatchError";
+  }
+}
+
+export async function deactivateAuthoritativeParticipantMirrors({
+  gameProfile, discordUserId, playerId, repository,
+}) {
+  if (repository.gameProfile !== gameProfile) {
+    throw new TypeError("Registration repository profile mismatch.");
+  }
+  const normalizedPlayerId = validatePlayerId(playerId);
+  return repository.withTransaction(async (session) => {
+    await session.lockAuthoritativePrimaryOwner(discordUserId);
+    await session.lockRegisteredPlayerIdentity(null, normalizedPlayerId);
+    const mirrors = await session.lockActivePlayerOwnership(normalizedPlayerId);
+    if (mirrors.some((row) => row.discord_user_id !== discordUserId)) {
+      throw new RegistrationOwnershipMismatchError();
+    }
+    const deactivated = await session.deactivateAuthoritativeParticipantMirrors(
+      discordUserId, normalizedPlayerId,
+    );
+    return Object.freeze({ playerId: normalizedPlayerId, mirroredCharacters: deactivated });
+  });
+}
+
 export async function synchronizeAuthoritativePrimary({
   gameProfile, discordUserId, playerId, repository,
 }) {
@@ -151,6 +179,12 @@ export function createRegistrationService({
           context.community.id,
           normalizedRegistration.playerId,
         );
+        const ownership = await session.lockActivePlayerOwnership(
+          normalizedRegistration.playerId,
+        );
+        if (ownership.some((row) => row.discord_user_id !== context.discordUser.id)) {
+          throw new RegistrationOwnershipMismatchError();
+        }
         const matches = await session.lockActiveParticipantsByPlayerId(
           context.community.id,
           normalizedRegistration.playerId,

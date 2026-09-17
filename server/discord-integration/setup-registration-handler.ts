@@ -5,10 +5,20 @@ import { createHash } from "node:crypto";
 import { createNativeBookingRepository } from "@/server/native-booking/repository";
 import {
   createRegistrationService,
+  deactivateAuthoritativeParticipantMirrors,
+  RegistrationOwnershipAmbiguousError,
+  RegistrationOwnershipMismatchError,
   synchronizeAuthoritativePrimary,
 } from "@/server/native-booking/registration-service-core.mjs";
+import { InvalidRegistrationError } from "@/server/native-booking/registration-validation.mjs";
 
 import { createDiscordCommunitySetupService } from "./community-setup-service-core.mjs";
+import {
+  canonicalRegistrationScope,
+  canonicalRegistrationIdempotencyKey,
+  CanonicalRegistrationContractError,
+  resolveCanonicalRegistrationCommunity,
+} from "./canonical-registration-core.mjs";
 
 import {
   authenticateDiscordIntegrationRequest,
@@ -77,49 +87,99 @@ export async function handleDiscordCommunitySetup(request: Request) {
 }
 
 export async function handleDiscordCanonicalRegistration(request: Request) {
+  let diagnosticBody: Record<string, unknown> = {};
+  let diagnosticProfile = "unknown";
   try {
     const scope = await authenticateDiscordIntegrationRequest(request);
+    diagnosticProfile = scope.profile;
     const body = scope.body as Record<string, unknown>;
-    const guildId = String(body.guildId ?? "");
+    diagnosticBody = body;
     const discordUserId = String(body.discordUserId ?? "");
-    const communityCode = String(body.communityCode ?? "");
     const repository = createNativeBookingRepository(scope.profile);
     if (!repository) throw new Error("booking_database_unavailable");
+    if (body.deactivateSyncOnly === true && body.primarySyncOnly === true) {
+      throw new CanonicalRegistrationContractError(
+        "invalid_request", 400, "malformed_integration_payload",
+      );
+    }
+    if (body.deactivateSyncOnly === true) {
+      if (!SNOWFLAKE.test(discordUserId)) {
+        throw new CanonicalRegistrationContractError(
+          "invalid_request", 400, "malformed_integration_payload",
+        );
+      }
+      const deactivation = await deactivateAuthoritativeParticipantMirrors({
+        gameProfile: scope.profile, discordUserId, playerId: body.playerId, repository,
+      });
+      return json({ ok: true, outcome: "participant_mirrors_deactivated", deactivation });
+    }
     if (body.primarySyncOnly === true) {
       if (!SNOWFLAKE.test(discordUserId) || typeof body.isPrimary !== "boolean"
-          || body.isPrimary !== true) throw new TypeError("invalid_primary_sync");
+          || body.isPrimary !== true) {
+        throw new CanonicalRegistrationContractError(
+          "invalid_request", 400, "malformed_integration_payload",
+        );
+      }
       const primary = await synchronizeAuthoritativePrimary({
         gameProfile: scope.profile, discordUserId, playerId: body.playerId, repository,
       });
       return json({ ok: true, outcome: "primary_synchronized", primary });
     }
-    if (!SNOWFLAKE.test(guildId) || !SNOWFLAKE.test(discordUserId)
-        || !COMMUNITY.test(communityCode)) throw new TypeError("invalid_registration_scope");
-    const community = await repository.withTransaction((session) =>
-      session.findCommunityForDiscordGuild(guildId));
-    if (!community || community.location_code !== communityCode || community.status !== "active") {
-      return json({ ok: false, code: "community_mismatch", error: "Registration does not match this Discord community." }, 409);
-    }
+    const registrationScope = canonicalRegistrationScope(body);
+    const resolution = await repository.withTransaction((session) =>
+      resolveCanonicalRegistrationCommunity({ session, scope: registrationScope }));
+    const community = resolution.community;
     const registration = {
       playerId: body.playerId,
       inGameName: body.inGameName,
       alliance: body.allianceAbbreviation,
     };
-    const idempotencyKey = createHash("sha256").update(JSON.stringify({
-      profile: scope.profile, guildId, discordUserId, communityCode, registration,
-    })).digest("hex");
+    const idempotencyKey = canonicalRegistrationIdempotencyKey({
+      profile: scope.profile, discordUserId,
+      communityCode: registrationScope.communityCode, registration,
+      isPrimary: body.isPrimary,
+    });
     const result = await createRegistrationService({
       context: {
         gameProfile: scope.profile,
-        community: { id: community.id, discordGuildId: guildId },
+        community: { id: community.id, discordGuildId: resolution.sourceGuildId },
         discordUser: { id: discordUserId },
       },
       repository,
     }).upsert(registration, idempotencyKey, {
       isPrimary: typeof body.isPrimary === "boolean" ? body.isPrimary : undefined,
     });
-    return json({ ok: true, ...result.body }, result.status);
+    return json({ ok: true, ...result.body,
+      sync: { sourceGuildRelation: resolution.sourceGuildRelation } }, result.status);
   } catch (error) {
+    const controlled = error instanceof CanonicalRegistrationContractError
+      ? error
+      : error instanceof InvalidRegistrationError
+        ? new CanonicalRegistrationContractError(
+          "invalid_identity_metadata", 409, "invalid_identity_metadata",
+        )
+        : error instanceof RegistrationOwnershipMismatchError
+          ? new CanonicalRegistrationContractError(
+            "ownership_mismatch", 409, "ownership_mismatch",
+          )
+          : error instanceof RegistrationOwnershipAmbiguousError
+            ? new CanonicalRegistrationContractError(
+              "stale_mirror_relationship", 409, "stale_mirror_relationship",
+            ) : null;
+    if (controlled) {
+      const ownerRef = createHash("sha256").update(
+        `${diagnosticProfile}\0owner\0${String(diagnosticBody.discordUserId ?? "missing")}`,
+      ).digest("hex").slice(0, 16);
+      const accountRef = createHash("sha256").update(
+        `${diagnosticProfile}\0account\0${String(diagnosticBody.discordUserId ?? "missing")}\0${String(diagnosticBody.playerId ?? "missing")}`,
+      ).digest("hex").slice(0, 16);
+      console.warn("canonical_registration_sync_refused", {
+        profile: diagnosticProfile, category: controlled.category, ownerRef, accountRef,
+      });
+      return json({ ok: false, code: controlled.code,
+        error: "Canonical registration could not be synchronized.",
+        diagnostic: { category: controlled.category, ownerRef, accountRef } }, controlled.status);
+    }
     return discordIntegrationError(error, "canonical_registration");
   }
 }

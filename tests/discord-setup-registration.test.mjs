@@ -35,8 +35,8 @@ test("Discord setup and registration routes reuse signed profile scope and nativ
   ), "utf8");
   assert.match(handler, /authenticateDiscordIntegrationRequest/);
   assert.match(handler, /createDiscordCommunitySetupService/);
-  assert.match(handler, /findCommunityForDiscordGuild/);
-  assert.match(handler, /community\.location_code !== communityCode/);
+  assert.match(handler, /resolveCanonicalRegistrationCommunity/);
+  assert.match(handler, /deactivateAuthoritativeParticipantMirrors/);
   assert.match(handler, /createRegistrationService/);
   assert.match(handler, /synchronizeAuthoritativePrimary/);
   assert.match(handler, /primarySyncOnly === true/);

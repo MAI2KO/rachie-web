@@ -8,7 +8,9 @@ import {
 import { createRegistrationApi } from "../server/native-booking/registration-api-core.mjs";
 import {
   createRegistrationService,
+  deactivateAuthoritativeParticipantMirrors,
   RegistrationIdempotencyConflictError,
+  RegistrationOwnershipMismatchError,
   synchronizeAuthoritativePrimary,
 } from "../server/native-booking/registration-service-core.mjs";
 import {
@@ -64,6 +66,22 @@ function createTransactionalRepository(gameProfile = "wos") {
         async lockAuthoritativePrimaryOwner() {},
         async lockParticipantRegistrationOwner() {},
         async lockRegisteredPlayerIdentity() {},
+        async lockActivePlayerOwnership(playerId) {
+          return draft.participants.filter((participant) =>
+            participant.player_id === playerId && participant.status === "active");
+        },
+        async deactivateAuthoritativeParticipantMirrors(discordUserId, playerId) {
+          let updated = 0;
+          for (const participant of draft.participants) {
+            if (participant.discord_user_id === discordUserId
+                && participant.player_id === playerId && participant.status === "active") {
+              participant.status = "inactive";
+              participant.is_primary = false;
+              updated += 1;
+            }
+          }
+          return updated;
+        },
         async lockActiveParticipantsByPlayerId(communityId, playerId) {
           return draft.participants.filter((participant) =>
             participant.community_id === communityId && participant.player_id === playerId
@@ -359,7 +377,7 @@ test("registration without trusted primary authority never invents MAIN", async 
   assert.equal(fixture.repository.state.participants[0].is_primary, false);
 });
 
-test("Player ID ownership is unique within a profile and community", async () => {
+test("Player ID active ownership is unique across a profile", async () => {
   const repository = createTransactionalRepository();
   const first = createRegistrationService({
     context: trustedContext(),
@@ -378,10 +396,37 @@ test("Player ID ownership is unique within a profile and community", async () =>
   await assert.rejects(other.upsert(
     registration({ inGameName: "Other Player" }),
     "registration-other-0001",
-  ), /ambiguous/i);
+  ), RegistrationOwnershipMismatchError);
   assert.equal(repository.state.participants.length, 1);
   assert.equal(repository.state.participants[0].in_game_name, "Player One");
   assert.equal(repository.state.participants[0].player_id, "123456789");
+});
+
+test("trusted sync enforces profile-wide active ownership and supports release then reclaim", async () => {
+  const repository = createTransactionalRepository();
+  const first = service(trustedContext(), repository).instance;
+  await first.upsert(registration(), "registration-owner-one-0001", { isPrimary: true });
+  await assert.rejects(createRegistrationService({
+    context: trustedContext("wos", {
+      discordUser: { id: "other-owner" },
+      community: { id: "wos-community-two", discordGuildId: "wos-guild-two" },
+    }), repository,
+  }).upsert(registration(), "registration-owner-two-0001", { isPrimary: true }),
+  RegistrationOwnershipMismatchError);
+
+  const deactivated = await deactivateAuthoritativeParticipantMirrors({
+    gameProfile: "wos", discordUserId: "wos-discord-user",
+    playerId: "123456789", repository,
+  });
+  assert.equal(deactivated.mirroredCharacters, 1);
+  await createRegistrationService({
+    context: trustedContext("wos", {
+      discordUser: { id: "other-owner" },
+      community: { id: "wos-community-two", discordGuildId: "wos-guild-two" },
+    }), repository,
+  }).upsert(registration(), "registration-reclaimed-0001", { isPrimary: true });
+  assert.equal(repository.state.participants.filter((row) => row.status === "active").length, 1);
+  assert.equal(repository.state.participants.at(-1).discord_user_id, "other-owner");
 });
 
 test("WOS and Kingshot services reject repository profile crossover", () => {
@@ -470,6 +515,21 @@ test("API ignores hostile ownership fields and returns only normalized registrat
   assert.equal(response.status, 201);
   assert.deepEqual(captured, registration());
   assert.doesNotMatch(await response.text(), /hostile|other-user|community_id|isPrimary/);
+});
+
+test("ordinary registration returns a controlled profile-wide ownership conflict", async () => {
+  const api = registrationApi({
+    createService() {
+      return { async upsert() { throw new RegistrationOwnershipMismatchError(); } };
+    },
+  });
+  const response = await api.upsert(mutationRequest(registration()));
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: "That Player ID is linked to another Discord account.",
+    code: "participant_ownership_mismatch",
+  });
 });
 
 test("API returns stable auth, membership, CSRF, rate, and validation errors", async () => {

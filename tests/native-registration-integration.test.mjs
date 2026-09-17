@@ -11,7 +11,9 @@ import { reconcileAuthoritativePlayerMirrors } from "../server/native-booking/pl
 import { createProfileScopedBookingRepository } from "../server/native-booking/repository-core.mjs";
 import {
   createRegistrationService,
+  deactivateAuthoritativeParticipantMirrors,
   RegistrationIdempotencyConflictError,
+  RegistrationOwnershipMismatchError,
   synchronizeAuthoritativePrimary,
 } from "../server/native-booking/registration-service-core.mjs";
 
@@ -440,6 +442,45 @@ test(
         }));
         assert.equal(counts.participants.rows[0].count, 0);
         assert.equal(counts.idempotency.rows[0].count, 0);
+      });
+
+      await t.test("active ownership is profile-wide and release permits a controlled reclaim", async () => {
+        const destinationCommunity = randomUUID();
+        await withProfile(runtimePool, "wos", (client) => client.query(
+          `INSERT INTO booking_communities
+             (game_profile,id,location_code,display_name)
+           VALUES ('wos',$1,'1888','State 1888')`, [destinationCommunity],
+        ));
+        await createRegistrationService({
+          context: context("wos", wosCommunity, "release-owner"), repository: wosRepository,
+        }).upsert({ playerId: "888881", inGameName: "Released", alliance: "OLD" },
+        "release-owner-register-0001", { isPrimary: true });
+        const claimant = createRegistrationService({
+          context: context("wos", destinationCommunity, "reclaim-owner"),
+          repository: wosRepository,
+        });
+        await assert.rejects(claimant.upsert(
+          { playerId: "888881", inGameName: "Reclaimed", alliance: "NEW" },
+          "reclaim-before-release-0001", { isPrimary: true },
+        ), RegistrationOwnershipMismatchError);
+        const deactivated = await deactivateAuthoritativeParticipantMirrors({
+          gameProfile: "wos", discordUserId: "release-owner", playerId: "888881",
+          repository: wosRepository,
+        });
+        assert.equal(deactivated.mirroredCharacters, 1);
+        await claimant.upsert(
+          { playerId: "888881", inGameName: "Reclaimed", alliance: "NEW" },
+          "reclaim-after-release-0001", { isPrimary: true },
+        );
+        const rows = await withProfile(runtimePool, "wos", (client) => client.query(
+          `SELECT discord_user_id,status,is_primary
+             FROM booking_participants WHERE player_id='888881'
+            ORDER BY created_at,id`,
+        ));
+        assert.deepEqual(rows.rows, [
+          { discord_user_id: "release-owner", status: "inactive", is_primary: false },
+          { discord_user_id: "reclaim-owner", status: "active", is_primary: true },
+        ]);
       });
     } finally {
       await runtimePool?.end();

@@ -10,6 +10,7 @@ import {
 import {
   RegistrationIdempotencyConflictError,
   RegistrationOwnershipAmbiguousError,
+  RegistrationOwnershipMismatchError,
 } from "./registration-service-core.mjs";
 import {
   InvalidIdempotencyKeyError,
@@ -163,6 +164,13 @@ export function createRegistrationApi(dependencies) {
             409,
             "Participant registration could not be resolved safely.",
             "participant_ambiguous",
+          );
+        }
+        if (error instanceof RegistrationOwnershipMismatchError) {
+          return errorResponse(
+            409,
+            "That Player ID is linked to another Discord account.",
+            "participant_ownership_mismatch",
           );
         }
         return errorResponse(503, "Native booking data is unavailable.", "unavailable");

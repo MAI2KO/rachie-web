@@ -931,8 +931,29 @@ class ProfileScopedBookingSession {
   async lockRegisteredPlayerIdentity(communityId, playerId) {
     await this.client.query(
       "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-      [`registered-player:${this.gameProfile}:${communityId}:${playerId}`],
+      [`registered-player:${this.gameProfile}:${playerId}`],
     );
+  }
+
+  async lockActivePlayerOwnership(playerId) {
+    return (await this.client.query(
+      `SELECT id,community_id,discord_user_id,player_id
+         FROM booking_participants
+        WHERE game_profile=$1 AND player_id=$2 AND status='active'
+        ORDER BY community_id,id FOR UPDATE`,
+      [this.gameProfile, playerId],
+    )).rows;
+  }
+
+  async deactivateAuthoritativeParticipantMirrors(discordUserId, playerId) {
+    return (await this.client.query(
+      `UPDATE booking_participants
+          SET status='inactive',is_primary=false,updated_at=now()
+        WHERE game_profile=$1 AND discord_user_id=$2 AND player_id=$3
+          AND status='active'
+        RETURNING id`,
+      [this.gameProfile, discordUserId, playerId],
+    )).rowCount;
   }
 
   async listActiveParticipantMirrorsForPlayerIds(playerIds) {
