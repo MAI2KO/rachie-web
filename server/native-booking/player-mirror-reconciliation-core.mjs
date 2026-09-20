@@ -82,6 +82,15 @@ function conflictedReports(accounts, mirrors, status, reason) {
   ));
 }
 
+function outsideScopeReport(account, mirrors) {
+  return accountReport(
+    account,
+    "outside booking scope",
+    (mirrors.get(account.playerId) ?? []).map((row) => row.location_code),
+    "not applicable: no booking community configured",
+  );
+}
+
 export async function reconcileAuthoritativePlayerMirrors({
   gameProfile, accounts: input, dryRun, repository, createId = randomUUID,
 }) {
@@ -91,23 +100,8 @@ export async function reconcileAuthoritativePlayerMirrors({
   const accounts = normalizedAccounts(gameProfile, input);
   const discordUserId = accounts[0].discordUserId;
   const authoritativePrimaries = accounts.filter((account) => account.isPrimary);
-  const invalidMetadata = accounts.some((account) => !account.metadataValid);
 
   return repository.withTransaction(async (session) => {
-    if (invalidMetadata || authoritativePrimaries.length > 1) {
-      const playerIds = accounts.map((account) => account.playerId);
-      const mirrorRows = await session.listActiveParticipantMirrorsForPlayerIds(playerIds);
-      const mirrors = new Map(playerIds.map((playerId) => [playerId,
-        mirrorRows.filter((row) => row.player_id === playerId)]));
-      if (authoritativePrimaries.length > 1) {
-        return Object.freeze({ conflict: "multiple_authoritative_primaries", mutations: 0,
-          results: conflictedReports(accounts, mirrors, () => "ambiguous/conflict",
-            "multiple authoritative bot primaries") });
-      }
-      return Object.freeze({ conflict: "invalid_account_metadata", mutations: 0,
-        results: conflictedReports(accounts, mirrors, () => "ambiguous/conflict",
-          "owner group contains invalid account metadata") });
-    }
     if (!dryRun) await session.lockAuthoritativePrimaryOwner(discordUserId);
     const communities = new Map();
     for (const account of accounts) {
@@ -145,15 +139,38 @@ export async function reconcileAuthoritativePlayerMirrors({
     const mirrors = new Map(playerIds.map((playerId) => [playerId,
       mirrorRows.filter((row) => row.player_id === playerId)]));
 
-    const unresolved = accounts.filter((account) => {
+    const configured = accounts.filter((account) => {
       const community = communities.get(account.playerId);
-      return !community || community.status !== "active";
+      return community?.status === "active";
     });
-    if (unresolved.length) {
-      const unresolvedIds = new Set(unresolved.map((account) => account.playerId));
+    const inactive = accounts.filter((account) => {
+      const community = communities.get(account.playerId);
+      return community && community.status !== "active";
+    });
+    const outside = accounts.filter((account) => !communities.get(account.playerId));
+    const staleOutside = outside.filter((account) =>
+      (mirrors.get(account.playerId) ?? []).length > 0);
+    const reconciliationScope = new Set([
+      ...configured, ...inactive, ...staleOutside,
+    ].map((account) => account.playerId));
+
+    if (authoritativePrimaries.length > 1) {
+      return Object.freeze({ conflict: "multiple_authoritative_primaries", mutations: 0,
+        results: conflictedReports(accounts, mirrors, () => "ambiguous/conflict",
+          "multiple authoritative bot primaries") });
+    }
+    if (accounts.some((account) => reconciliationScope.has(account.playerId)
+        && !account.metadataValid)) {
+      return Object.freeze({ conflict: "invalid_account_metadata", mutations: 0,
+        results: conflictedReports(accounts, mirrors, () => "ambiguous/conflict",
+          "owner group contains invalid account metadata") });
+    }
+    if (inactive.length) {
+      const unresolvedIds = new Set(inactive.map((account) => account.playerId));
       return Object.freeze({ conflict: "community_unresolved", mutations: 0,
         results: conflictedReports(accounts, mirrors,
-          (account) => unresolvedIds.has(account.playerId) ? "missing" : "ambiguous/conflict",
+          (account) => unresolvedIds.has(account.playerId)
+            ? "unresolved community" : "ambiguous/conflict",
           "owner group contains an unresolved community") });
     }
     const ownership = accounts.filter((account) =>
@@ -165,6 +182,14 @@ export async function reconcileAuthoritativePlayerMirrors({
         results: conflictedReports(accounts, mirrors,
           (account) => ids.has(account.playerId) ? "ownership mismatch" : "ambiguous/conflict",
           "website ownership mismatch") });
+    }
+    if (staleOutside.length) {
+      const staleIds = new Set(staleOutside.map((account) => account.playerId));
+      return Object.freeze({ conflict: "stale_mirror_relationship", mutations: 0,
+        results: conflictedReports(accounts, mirrors,
+          (account) => staleIds.has(account.playerId)
+            ? "stale mirror relationship" : "ambiguous/conflict",
+          "owner group contains a stale mirror outside booking scope") });
     }
     const ambiguous = accounts.filter((account) => {
       const counts = new Map();
@@ -180,7 +205,7 @@ export async function reconcileAuthoritativePlayerMirrors({
     }
 
     const primaryPlayerId = authoritativePrimaries[0]?.playerId ?? null;
-    const plans = accounts.map((account) => {
+    const plans = configured.map((account) => {
       const rows = mirrors.get(account.playerId) ?? [];
       const community = communities.get(account.playerId);
       const missing = !rows.some((row) => row.community_id === community.id);
@@ -206,11 +231,13 @@ export async function reconcileAuthoritativePlayerMirrors({
       ...ownerRows.filter((row) => row.is_primary !== (row.player_id === primaryPlayerId))
         .map((row) => row.id),
     ])).size;
+    const planReports = new Map(plans.map((plan) => [plan.account.playerId, plan.report]));
 
     if (dryRun) {
       return Object.freeze({ conflict: null, mutations: 0,
         plannedCreates, plannedUpdates,
-        results: plans.map((plan) => plan.report) });
+        results: accounts.map((account) => planReports.get(account.playerId)
+          ?? outsideScopeReport(account, mirrors)) });
     }
 
     let created = 0;
@@ -244,6 +271,7 @@ export async function reconcileAuthoritativePlayerMirrors({
     return Object.freeze({ conflict: null, mutations: created + metadataUpdated + primaryUpdated,
       plannedCreates, plannedUpdates,
       created, updated: metadataUpdated + primaryUpdated,
-      results: plans.map((plan) => plan.report) });
+      results: accounts.map((account) => planReports.get(account.playerId)
+        ?? outsideScopeReport(account, mirrors)) });
   });
 }

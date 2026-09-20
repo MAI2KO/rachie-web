@@ -43,7 +43,11 @@ export function canonicalRegistrationScope(body) {
 
 export async function resolveCanonicalRegistrationCommunity({ session, scope }) {
   const community = await session.findCommunityByLocationCode(scope.communityCode);
-  if (!community || community.status !== "active") {
+  if (!community) {
+    return Object.freeze({ community: null, sourceGuildId: null,
+      sourceGuildRelation: "outside_booking_scope" });
+  }
+  if (community.status !== "active") {
     contractError("unresolved_community", 409, "unresolved_community");
   }
   let sourceGuildId = null;

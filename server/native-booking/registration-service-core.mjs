@@ -74,6 +74,23 @@ export async function synchronizeAuthoritativePrimary({
   });
 }
 
+export async function synchronizeOutOfScopePrimaryProjection({
+  gameProfile, discordUserId, playerId, isPrimary, repository,
+}) {
+  if (repository.gameProfile !== gameProfile || typeof isPrimary !== "boolean") {
+    throw new TypeError("Registration repository profile mismatch.");
+  }
+  const normalizedPlayerId = validatePlayerId(playerId);
+  return repository.withTransaction(async (session) => {
+    await session.lockAuthoritativePrimaryOwner(discordUserId);
+    const updated = isPrimary
+      ? await session.clearAuthoritativePrimaryParticipants(discordUserId)
+      : await session.clearAuthoritativePlayerPrimary(discordUserId, normalizedPlayerId);
+    return Object.freeze({ playerId: normalizedPlayerId, isPrimary,
+      mirroredCharacters: Number(updated) || 0 });
+  });
+}
+
 function sha256(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }

@@ -8,7 +8,7 @@ function account(playerId, overrides = {}) {
     allianceAbbreviation: "TAG", communityCode: "1001", isPrimary: false, ...overrides };
 }
 
-function repositoryFixture({ participants = [], communities = null } = {}) {
+function repositoryFixture({ participants = [], communities = null, gameProfile = "wos" } = {}) {
   const state = { participants: structuredClone(participants), keys: [], writes: 0,
     points: [], communityPoints: [], bookings: [], events: [], notifications: [], topology: [] };
   const locations = communities ?? new Map([
@@ -21,7 +21,7 @@ function repositoryFixture({ participants = [], communities = null } = {}) {
       .map((row) => ({ ...row, location_code: row.location_code
         ?? [...locations.values()].find((community) => community.id === row.community_id)?.location_code }));
   }
-  return { gameProfile: "wos", state, nextId: () => `00000000-0000-4000-8000-${String(++nextId).padStart(12, "0")}`,
+  return { gameProfile, state, locations, nextId: () => `00000000-0000-4000-8000-${String(++nextId).padStart(12, "0")}`,
     async withTransaction(work) {
       return work({
         async lockAuthoritativePrimaryOwner() {},
@@ -168,7 +168,9 @@ test("ownership, ambiguity, invalid bot primaries, and unresolved communities sk
       conflict: "ambiguous_website_identity" },
     { participants: [], accounts: [account("111111", { isPrimary: true }),
       account("222222", { isPrimary: true })], conflict: "multiple_authoritative_primaries" },
-    { participants: [], communities: new Map(), accounts: [account("111111")],
+    { participants: [], communities: new Map([
+      ["1001", { id: "community-one", location_code: "1001", status: "archived" }],
+    ]), accounts: [account("111111")],
       conflict: "community_unresolved" },
   ]) {
     const repository = repositoryFixture(fixture);
@@ -177,7 +179,102 @@ test("ownership, ambiguity, invalid bot primaries, and unresolved communities sk
     assert.equal(result.conflict, fixture.conflict);
     assert.equal(result.mutations, 0);
     assert.equal(repository.state.writes, 0);
+    if (fixture.conflict === "community_unresolved") {
+      assert.equal(result.results[0].websiteMirrorStatus, "unresolved community");
+    }
   }
+});
+
+test("an owner with only unconfigured locations is outside booking scope and causes no writes", async () => {
+  const repository = repositoryFixture({ communities: new Map() });
+  const accounts = [account("111111", { communityCode: "3076", isPrimary: true }),
+    account("222222", { communityCode: "872", inGameName: "", allianceAbbreviation: "" })];
+  for (const dryRun of [true, false]) {
+    const result = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun,
+      repository, accounts, createId: repository.nextId });
+    assert.equal(result.conflict, null);
+    assert.equal(result.mutations, 0);
+    assert.equal(result.plannedCreates, 0);
+    assert.ok(result.results.every((row) =>
+      row.websiteMirrorStatus === "outside booking scope"
+      && row.plannedAction === "not applicable: no booking community configured"));
+  }
+  assert.equal(repository.state.writes, 0);
+});
+
+test("a configured character reconciles when its sibling is outside booking scope", async () => {
+  const repository = repositoryFixture();
+  const result = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: false,
+    repository, accounts: [account("111111", { isPrimary: true }),
+      account("222222", { communityCode: "3076" })], createId: repository.nextId });
+  assert.equal(result.conflict, null);
+  assert.equal(result.created, 1);
+  assert.deepEqual(result.results.map((row) => row.websiteMirrorStatus),
+    ["missing", "outside booking scope"]);
+  assert.deepEqual(repository.state.participants.filter((row) => row.is_primary)
+    .map((row) => row.player_id), ["111111"]);
+});
+
+test("an out-of-scope authoritative MAIN leaves configured website mirrors without a MAIN", async () => {
+  const repository = repositoryFixture({ participants: [
+    { id: "configured-alt", community_id: "community-one", discord_user_id: "1234567",
+      player_id: "111111", in_game_name: "Player 111111", alliance: "TAG",
+      is_primary: true },
+  ] });
+  const result = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: false,
+    repository, accounts: [account("111111"),
+      account("222222", { communityCode: "3076", isPrimary: true })],
+    createId: repository.nextId });
+  assert.equal(result.conflict, null);
+  assert.equal(repository.state.participants[0].is_primary, false);
+  assert.equal(result.results[0].websiteMirrorStatus, "primary mismatch");
+  assert.equal(result.results[1].websiteMirrorStatus, "outside booking scope");
+});
+
+test("later booking-community creation makes an outside character naturally reconcilable", async () => {
+  const repository = repositoryFixture({ communities: new Map() });
+  const accounts = [account("111111", { communityCode: "3076", isPrimary: true })];
+  const outside = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: true,
+    repository, accounts, createId: repository.nextId });
+  assert.equal(outside.results[0].websiteMirrorStatus, "outside booking scope");
+  repository.locations.set("3076",
+    { id: "community-3076", location_code: "3076", status: "active" });
+  const available = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: false,
+    repository, accounts, createId: repository.nextId });
+  assert.equal(available.created, 1);
+  assert.equal(available.results[0].websiteMirrorStatus, "missing");
+  assert.equal(repository.state.participants[0].community_id, "community-3076");
+  assert.equal(repository.state.participants[0].is_primary, true);
+});
+
+test("an active stale mirror for an unconfigured location remains owner-atomically blocking", async () => {
+  const repository = repositoryFixture({ participants: [
+    { id: "stale", community_id: "community-one", discord_user_id: "1234567",
+      player_id: "222222", in_game_name: "Player 222222", alliance: "TAG",
+      is_primary: false },
+  ] });
+  const before = structuredClone(repository.state);
+  const result = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: false,
+    repository, accounts: [account("111111"),
+      account("222222", { communityCode: "3076" })], createId: repository.nextId });
+  assert.equal(result.conflict, "stale_mirror_relationship");
+  assert.equal(result.results[1].websiteMirrorStatus, "stale mirror relationship");
+  assert.ok(result.results.every((row) => row.plannedAction.startsWith("skip:")));
+  assert.deepEqual(repository.state, before);
+});
+
+test("outside-scope classification remains isolated between WOS and Kingshot", async () => {
+  const wos = repositoryFixture({ communities: new Map(), gameProfile: "wos" });
+  const kingshot = repositoryFixture({ communities: new Map([
+    ["3076", { id: "kingdom-3076", location_code: "3076", status: "active" }],
+  ]), gameProfile: "kingshot" });
+  const input = [account("111111", { communityCode: "3076" })];
+  const wosResult = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: true,
+    repository: wos, accounts: input, createId: wos.nextId });
+  const kingshotResult = await reconcileAuthoritativePlayerMirrors({ gameProfile: "kingshot",
+    dryRun: true, repository: kingshot, accounts: input, createId: kingshot.nextId });
+  assert.equal(wosResult.results[0].websiteMirrorStatus, "outside booking scope");
+  assert.equal(kingshotResult.results[0].websiteMirrorStatus, "missing");
 });
 
 test("profile crossover and malformed owner groups fail closed", async () => {

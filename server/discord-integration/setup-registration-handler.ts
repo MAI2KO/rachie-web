@@ -9,8 +9,12 @@ import {
   RegistrationOwnershipAmbiguousError,
   RegistrationOwnershipMismatchError,
   synchronizeAuthoritativePrimary,
+  synchronizeOutOfScopePrimaryProjection,
 } from "@/server/native-booking/registration-service-core.mjs";
-import { InvalidRegistrationError } from "@/server/native-booking/registration-validation.mjs";
+import {
+  InvalidRegistrationError,
+  validateRegistrationInput,
+} from "@/server/native-booking/registration-validation.mjs";
 
 import { createDiscordCommunitySetupService } from "./community-setup-service-core.mjs";
 import {
@@ -120,20 +124,41 @@ export async function handleDiscordCanonicalRegistration(request: Request) {
           "invalid_request", 400, "malformed_integration_payload",
         );
       }
-      const primary = await synchronizeAuthoritativePrimary({
-        gameProfile: scope.profile, discordUserId, playerId: body.playerId, repository,
-      });
+      let outsideBookingScope = false;
+      if (body.communityCode !== undefined) {
+        const primaryScope = canonicalRegistrationScope({ ...body, guildId: null });
+        const resolution = await repository.withTransaction((session) =>
+          resolveCanonicalRegistrationCommunity({ session, scope: primaryScope }));
+        outsideBookingScope = resolution.community === null;
+      }
+      const primary = outsideBookingScope
+        ? await synchronizeOutOfScopePrimaryProjection({ gameProfile: scope.profile,
+          discordUserId, playerId: body.playerId, isPrimary: true, repository })
+        : await synchronizeAuthoritativePrimary({
+          gameProfile: scope.profile, discordUserId, playerId: body.playerId, repository,
+        });
+      if (outsideBookingScope) {
+        return json({ ok: true, outcome: "outside_booking_scope", primary });
+      }
       return json({ ok: true, outcome: "primary_synchronized", primary });
     }
     const registrationScope = canonicalRegistrationScope(body);
-    const resolution = await repository.withTransaction((session) =>
-      resolveCanonicalRegistrationCommunity({ session, scope: registrationScope }));
-    const community = resolution.community;
-    const registration = {
+    const registration = validateRegistrationInput({
       playerId: body.playerId,
       inGameName: body.inGameName,
       alliance: body.allianceAbbreviation,
-    };
+    });
+    const resolution = await repository.withTransaction((session) =>
+      resolveCanonicalRegistrationCommunity({ session, scope: registrationScope }));
+    const community = resolution.community;
+    if (!community) {
+      const primary = await synchronizeOutOfScopePrimaryProjection({
+        gameProfile: scope.profile, discordUserId, playerId: registration.playerId,
+        isPrimary: body.isPrimary, repository,
+      });
+      return json({ ok: true, outcome: "outside_booking_scope", primary,
+        sync: { sourceGuildRelation: resolution.sourceGuildRelation } });
+    }
     const idempotencyKey = canonicalRegistrationIdempotencyKey({
       profile: scope.profile, discordUserId,
       communityCode: registrationScope.communityCode, registration,

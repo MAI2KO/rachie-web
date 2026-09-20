@@ -53,7 +53,7 @@ test("canonical retry keys are stable and distinguish authoritative MAIN changes
     canonicalRegistrationIdempotencyKey({ ...input, isPrimary: false }));
 });
 
-test("canonical registration refuses unresolved, cross-community, and malformed contracts", async () => {
+test("canonical registration classifies absent communities as outside scope but refuses inactive ones", async () => {
   assert.throws(() => canonicalRegistrationScope({
     ...valid, canonicalCommunityCode: "1002",
   }), (error) => error instanceof CanonicalRegistrationContractError
@@ -64,10 +64,20 @@ test("canonical registration refuses unresolved, cross-community, and malformed 
   assert.throws(() => canonicalRegistrationScope({
     ...valid, isPrimary: "true",
   }), (error) => error.code === "invalid_request");
-  await assert.rejects(resolveCanonicalRegistrationCommunity({
+  const outside = await resolveCanonicalRegistrationCommunity({
     scope: canonicalRegistrationScope(valid),
     session: {
       async findCommunityByLocationCode() { return null; },
+    },
+  });
+  assert.equal(outside.community, null);
+  assert.equal(outside.sourceGuildRelation, "outside_booking_scope");
+  await assert.rejects(resolveCanonicalRegistrationCommunity({
+    scope: canonicalRegistrationScope(valid),
+    session: {
+      async findCommunityByLocationCode() {
+        return { id: "community-one", location_code: "1001", status: "archived" };
+      },
     },
   }), (error) => error.code === "unresolved_community");
 });

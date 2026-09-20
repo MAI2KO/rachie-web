@@ -898,23 +898,23 @@ class ProfileScopedBookingSession {
   }
 
   async clearAuthoritativePrimaryParticipants(discordUserId) {
-    await this.client.query(
+    return (await this.client.query(
       `UPDATE booking_participants
           SET is_primary=false,updated_at=now()
         WHERE game_profile=$1 AND discord_user_id=$2
           AND status='active' AND is_primary=true`,
       [this.gameProfile, discordUserId],
-    );
+    )).rowCount;
   }
 
   async clearAuthoritativePlayerPrimary(discordUserId, playerId) {
-    await this.client.query(
+    return (await this.client.query(
       `UPDATE booking_participants
           SET is_primary=false,updated_at=now()
         WHERE game_profile=$1 AND discord_user_id=$2 AND player_id=$3
           AND status='active' AND is_primary=true`,
       [this.gameProfile, discordUserId, playerId],
-    );
+    )).rowCount;
   }
 
   async markAuthoritativePrimaryParticipants(discordUserId, playerId) {

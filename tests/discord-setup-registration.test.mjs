@@ -39,6 +39,7 @@ test("Discord setup and registration routes reuse signed profile scope and nativ
   assert.match(handler, /deactivateAuthoritativeParticipantMirrors/);
   assert.match(handler, /createRegistrationService/);
   assert.match(handler, /synchronizeAuthoritativePrimary/);
+  assert.match(handler, /synchronizeOutOfScopePrimaryProjection/);
   assert.match(handler, /primarySyncOnly === true/);
   assert.match(handler, /body\.isPrimary !== true/);
   assert.match(handler, /allianceAbbreviation/);

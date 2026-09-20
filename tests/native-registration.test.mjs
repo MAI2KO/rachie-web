@@ -12,6 +12,7 @@ import {
   RegistrationIdempotencyConflictError,
   RegistrationOwnershipMismatchError,
   synchronizeAuthoritativePrimary,
+  synchronizeOutOfScopePrimaryProjection,
 } from "../server/native-booking/registration-service-core.mjs";
 import {
   InvalidIdempotencyKeyError,
@@ -93,17 +94,27 @@ function createTransactionalRepository(gameProfile = "wos") {
               && participant.player_id === playerId && participant.status === "active");
         },
         async clearAuthoritativePrimaryParticipants(discordUserId) {
+          let updated = 0;
           for (const participant of draft.participants) {
             if (participant.discord_user_id === discordUserId
-                && participant.status === "active") participant.is_primary = false;
+                && participant.status === "active" && participant.is_primary) {
+              participant.is_primary = false;
+              updated += 1;
+            }
           }
+          return updated;
         },
         async clearAuthoritativePlayerPrimary(discordUserId, playerId) {
+          let updated = 0;
           for (const participant of draft.participants) {
             if (participant.discord_user_id === discordUserId
                 && participant.player_id === playerId
-                && participant.status === "active") participant.is_primary = false;
+                && participant.status === "active" && participant.is_primary) {
+              participant.is_primary = false;
+              updated += 1;
+            }
           }
+          return updated;
         },
         async markAuthoritativePrimaryParticipants(discordUserId, playerId) {
           let updated = 0;
@@ -375,6 +386,22 @@ test("registration without trusted primary authority never invents MAIN", async 
   const created = await fixture.instance.upsert(registration(), "registration-no-primary-0001");
   assert.equal(created.body.registration.isPrimary, false);
   assert.equal(fixture.repository.state.participants[0].is_primary, false);
+});
+
+test("an out-of-scope MAIN clears the website MAIN projection without creating a target", async () => {
+  const repository = createTransactionalRepository();
+  const configured = service(trustedContext(), repository).instance;
+  await configured.upsert(
+    registration({ playerId: "111111111", inGameName: "Configured" }),
+    "configured-main-before-outside-0001", { isPrimary: true },
+  );
+  const result = await synchronizeOutOfScopePrimaryProjection({
+    gameProfile: "wos", discordUserId: "wos-discord-user",
+    playerId: "999999999", isPrimary: true, repository,
+  });
+  assert.equal(result.mirroredCharacters, 1);
+  assert.deepEqual(repository.state.participants.filter((row) => row.is_primary), []);
+  assert.equal(repository.state.participants.length, 1);
 });
 
 test("Player ID active ownership is unique across a profile", async () => {
