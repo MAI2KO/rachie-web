@@ -328,10 +328,13 @@ test(
         }).upsert({ playerId: "555551", inGameName: "Legacy Player", alliance: "LEG" },
         "cleanup-existing-0001", { isPrimary: true });
         const candidate = { accountRef: "0123456789abcdef", playerId: "555551",
-          discordUserId: "5555555", reasons: ["invalid_in_game_name"] };
+          ownerRef: "fedcba9876543210", discordUserId: "5555555",
+          stateOrKingdomNumber: "1001", botIsPrimary: true,
+          reasons: ["invalid_in_game_name"] };
         const preview = await inspectOrDeactivateLegacyPlayerAccounts({ gameProfile: "wos",
           candidates: [candidate], dryRun: true, repository: wosRepository });
         assert.equal(preview.results[0].participantMirrors, 1);
+        assert.equal(preview.results[0].bookingScope, "configured_active");
         assert.ok(preview.results[0].historyReferences > 0);
         const executed = await inspectOrDeactivateLegacyPlayerAccounts({ gameProfile: "wos",
           candidates: [candidate], dryRun: false, repository: wosRepository });

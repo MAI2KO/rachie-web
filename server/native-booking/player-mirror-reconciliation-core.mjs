@@ -5,6 +5,10 @@ import {
   validatePlayerId,
   validateRegistrationInput,
 } from "./registration-validation.mjs";
+import {
+  classifyPlayerBookingScope,
+  PLAYER_BOOKING_SCOPES,
+} from "./player-booking-scope.mjs";
 
 const PROFILES = new Set(["wos", "kingshot"]);
 const DISCORD_USER_ID = /^\d{1,20}$/;
@@ -139,17 +143,18 @@ export async function reconcileAuthoritativePlayerMirrors({
     const mirrors = new Map(playerIds.map((playerId) => [playerId,
       mirrorRows.filter((row) => row.player_id === playerId)]));
 
-    const configured = accounts.filter((account) => {
-      const community = communities.get(account.playerId);
-      return community?.status === "active";
-    });
-    const inactive = accounts.filter((account) => {
-      const community = communities.get(account.playerId);
-      return community && community.status !== "active";
-    });
-    const outside = accounts.filter((account) => !communities.get(account.playerId));
-    const staleOutside = outside.filter((account) =>
-      (mirrors.get(account.playerId) ?? []).length > 0);
+    const bookingScopes = new Map(accounts.map((account) => [account.playerId,
+      classifyPlayerBookingScope({
+        communityCode: account.communityCode,
+        community: communities.get(account.playerId),
+        activeMirrorCount: (mirrors.get(account.playerId) ?? []).length,
+      })]));
+    const configured = accounts.filter((account) =>
+      bookingScopes.get(account.playerId) === PLAYER_BOOKING_SCOPES.configuredActive);
+    const inactive = accounts.filter((account) =>
+      bookingScopes.get(account.playerId) === PLAYER_BOOKING_SCOPES.inactiveCommunity);
+    const staleOutside = accounts.filter((account) =>
+      bookingScopes.get(account.playerId) === PLAYER_BOOKING_SCOPES.staleMirrorRelationship);
     const reconciliationScope = new Set([
       ...configured, ...inactive, ...staleOutside,
     ].map((account) => account.playerId));
