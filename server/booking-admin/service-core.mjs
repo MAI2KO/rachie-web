@@ -311,19 +311,15 @@ export function createBookingAdminService({
     if (change.section !== "cycleSchedule" || gameProfile !== "wos") {
       throw new BookingAdminValidationError();
     }
-    const before = await repository.withTransaction((session) => session.readSnapshot(communityId));
-    if (!before) throw new BookingAdminUnavailableError();
-    const existing = before.scheduleOverrides.find(
-      (override) => Number(override.cycle_index) === change.cycleIndex,
-    ) ?? null;
-    const recurringDefault = before.recurringDefault ? {
-      openMinuteUtc: Number(before.recurringDefault.open_minute_utc),
-      closeOffsetMinutes: Number(before.recurringDefault.close_offset_minutes),
-    } : null;
-    const timing = validateCycleScheduleTiming(change, now(), existing, recurringDefault);
     const result = await repository.withTransaction(async (session) => {
       const community = await session.lockCommunity(communityId);
       if (!community || community.status !== "active") throw new BookingAdminUnavailableError();
+      const before = await session.readSnapshot(communityId, community);
+      if (!before) throw new BookingAdminUnavailableError();
+      const existing = before.scheduleOverrides.find(
+        (override) => Number(override.cycle_index) === change.cycleIndex,
+      ) ?? null;
+      const timing = validateCycleScheduleTiming(change, now(), existing);
       let changed = false;
       if (change.action === "restore") {
         changed = Boolean(await session.removeCycleScheduleOverride(communityId, change.cycleIndex));
@@ -352,44 +348,6 @@ export function createBookingAdminService({
     return Object.freeze({ configuration: await modelForSnapshot(result.snapshot), changed: result.changed });
   }
 
-  async function updateRecurringWindowDefault(rawChange) {
-    const change = validateBookingAdminChange(rawChange);
-    if (change.section !== "recurringWindowDefault" || gameProfile !== "wos") {
-      throw new BookingAdminValidationError();
-    }
-    const result = await repository.withTransaction(async (session) => {
-      const community = await session.lockCommunity(communityId);
-      if (!community || community.status !== "active") throw new BookingAdminUnavailableError();
-      const before = await session.readSnapshot(communityId, community);
-      if (!before) throw new BookingAdminUnavailableError();
-      const previous = before.recurringDefault;
-      const changed = !previous
-        || Number(previous.open_minute_utc) !== change.openMinuteUtc
-        || Number(previous.close_offset_minutes) !== change.closeOffsetMinutes;
-      await session.upsertRecurringWindowDefault({ communityId,
-        openMinuteUtc: change.openMinuteUtc, closeOffsetMinutes: change.closeOffsetMinutes,
-        actorId: actor.discordUserId });
-      if (changed) {
-        await session.insertRecurringWindowDefaultAudit({ id: createId(), communityId,
-          actorId: actor.discordUserId, correlationId: createId(),
-          eventType: previous ? "booking_recurring_window_default_changed"
-            : "booking_recurring_window_default_created",
-          beforeData: previous ? {
-            openMinuteUtc: Number(previous.open_minute_utc),
-            closeOffsetMinutes: Number(previous.close_offset_minutes),
-          } : null,
-          afterData: { openMinuteUtc: change.openMinuteUtc,
-            closeOffsetMinutes: change.closeOffsetMinutes },
-        });
-      }
-      const snapshot = await session.readSnapshot(communityId, community);
-      if (!snapshot) throw new BookingAdminUnavailableError();
-      return { snapshot, changed };
-    });
-    return Object.freeze({ configuration: await modelForSnapshot(result.snapshot),
-      changed: result.changed });
-  }
-
   return Object.freeze({ read, readActivity, update, updateGuestLink, unlinkAllianceGuild,
-    decideGuildLinkRequest, updateCycleSchedule, updateRecurringWindowDefault });
+    decideGuildLinkRequest, updateCycleSchedule });
 }

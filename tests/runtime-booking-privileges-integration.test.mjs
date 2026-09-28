@@ -224,6 +224,7 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
         gameProfile: "wos", communityId, managerContext,
         repository: createProfileScopedBookingAdminRepository("wos", runtime),
         guestTokenSecret: "runtime-booking-integration-secret-value-123456",
+        now: () => new Date("2026-08-27T12:00:00.000Z"),
       });
       assert.equal((await adminService.update({ section: "booking", enabled: false }))
         .community.bookingsEnabled, false);
@@ -236,10 +237,11 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
         .requirements.find(({ code }) => code === "fc").enabled, true);
       assert.equal((await adminService.update({ section: "guestApproval", enabled: false }))
         .guestApproval.requireUnregistered, false);
-      assert.equal((await adminService.updateRecurringWindowDefault({
-        section: "recurringWindowDefault", openMinuteUtc: 0,
-        closeOffsetMinutes: (5 * 1440) + 1439,
-      })).configuration.defaultWindow.source, "community");
+      assert.equal((await adminService.updateCycleSchedule({
+        section: "cycleSchedule", action: "override", cycleIndex: 1,
+        opensAt: "2026-08-31T18:00:00.000Z", closesAt: "2026-09-08T09:00:00.000Z",
+        confirmedOpenChange: false,
+      })).configuration.automaticCycle.overridden, true);
       const generated = await adminService.updateGuestLink({
         section: "guestLink", action: "generate",
       });
@@ -256,7 +258,7 @@ test("staging-equivalent runtime grants support native booking writes", { skip: 
         pool: runtime, now: new Date("2026-09-01T00:00:00.000Z"),
       });
       assert.equal(result.communities.length, 1);
-      assert.equal(result.communities[0].cycles.every(({ status }) => status === "draft"), true);
+      assert.deepEqual(result.communities[0].cycles.map(({ status }) => status), ["open", "draft"]);
       const automaticWindows = await withProfile(runtime, "wos", (client) => client.query(
         `SELECT count(*)::int AS count FROM booking_windows
           WHERE community_id=$1 AND created_by_actor_id='automatic-wos-28-day-cycle-v1'`,

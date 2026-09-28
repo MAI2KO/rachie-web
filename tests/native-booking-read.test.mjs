@@ -456,3 +456,19 @@ test("rate limiter uses predictable fixed windows and policy isolation", async (
   assert.match(calls[0].subjectHash, /^[0-9a-f]{64}$/);
   assert.equal(RATE_LIMIT_POLICIES.futureBookingMutation.limit, 10);
 });
+
+
+test("member context and availability respect persisted UTC window boundaries", async () => {
+  const window = { id: "window-id", status: "open",
+    opens_at: "2026-09-02T00:00:00Z", closes_at: "2026-09-06T12:00:00Z" };
+  const repository = fakeRepository({ findCurrentBookingWindow: async () => window });
+  for (const [instant, expected] of [
+    ["2026-09-01T23:59:59.999Z", false],
+    ["2026-09-02T00:00:00.000Z", true],
+    ["2026-09-06T12:00:00.000Z", false],
+  ]) {
+    const service = readService(repository, { now: () => new Date(instant) });
+    assert.equal((await service.getContext()).bookingsOpen, expected);
+    assert.equal((await service.getAvailability("construction")).bookingsOpen, expected);
+  }
+});

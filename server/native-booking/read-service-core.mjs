@@ -38,6 +38,17 @@ function mapRequirements(settings) {
   };
 }
 
+function bookingDateString(value) {
+  if (!(value instanceof Date)) return value;
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function windowAcceptsBookings(window, now) {
+  return window?.status === "open"
+    && (!window.opens_at || new Date(window.opens_at) <= now)
+    && (!window.closes_at || new Date(window.closes_at) > now);
+}
+
 async function requireCommunity(session, communityId) {
   const community = await session.findCommunityById(communityId);
   if (!community || community.status !== "active") {
@@ -50,6 +61,7 @@ export function createNativeBookingReadService({
   gameProfile,
   communityId,
   repository,
+  now = () => new Date(),
 }) {
   return Object.freeze({
     gameProfile,
@@ -67,10 +79,10 @@ export function createNativeBookingReadService({
           ? await session.listServiceDates(community.id, window.id)
           : [];
         const datesByService = new Map(
-          dates.map((date) => [date.service_code, date.booking_date]),
+          dates.map((date) => [date.service_code, bookingDateString(date.booking_date)]),
         );
         const bookingsOpen =
-          community.bookings_open && window?.status === "open";
+          community.bookings_open && windowAcceptsBookings(window, now());
 
         return {
           community: {
@@ -109,7 +121,7 @@ export function createNativeBookingReadService({
         const serviceDate =
           dates.find((date) => date.service_code === serviceCode) ?? null;
         const bookingsOpen =
-          community.bookings_open && window?.status === "open";
+          community.bookings_open && windowAcceptsBookings(window, now());
         const slots =
           bookingsOpen && window && serviceDate
             ? await session.listAvailableAppointmentSlots(
@@ -124,7 +136,7 @@ export function createNativeBookingReadService({
             code: service.service_code,
             displayLabel: service.display_label,
           },
-          date: serviceDate?.booking_date ?? null,
+          date: serviceDate ? bookingDateString(serviceDate.booking_date) : null,
           bookingsOpen,
           slots: [...slots]
             .sort(

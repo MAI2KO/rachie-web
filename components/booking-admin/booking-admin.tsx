@@ -66,11 +66,15 @@ type BookingAdminConfiguration = {
       readonly canUnlink: boolean;
     }[];
   };
-  readonly defaultWindow: {
-    readonly openMinuteUtc: number;
-    readonly closeOffsetMinutes: number;
-    readonly source: "community" | "system";
-  } | null;
+  readonly bookingWindowState: {
+    readonly status: "open" | "closed";
+    readonly reason: "open" | "paused" | "before_open" | "after_close" | "window_not_open";
+    readonly persistedWindowStatus: string;
+    readonly nextTransitionAt: string | null;
+    readonly nextTransitionKind: "opens" | "closes" | null;
+    readonly nextScheduledOpening: string | null;
+    readonly nextScheduledClosing: string | null;
+  };
   readonly automaticCycle: {
     readonly cycleIndex: number;
     readonly status: "draft" | "open" | "closed";
@@ -111,10 +115,6 @@ type Change =
       readonly enabled: boolean;
     };
 
-function statusLabel(status: string) {
-  return status ? `${status[0].toUpperCase()}${status.slice(1)}` : "Unavailable";
-}
-
 function cycleStatusLabel(status: "draft" | "open" | "closed") {
   if (status === "draft") return "Upcoming";
   if (status === "open") return "Open now";
@@ -138,26 +138,27 @@ function displayUtcInstant(instant: string) {
   }).format(new Date(instant))} UTC`;
 }
 
-function utcInputValue(instant: string) {
-  return new Date(instant).toISOString().slice(0, 16);
+function utcDate(instant: string) {
+  return new Date(instant).toISOString().slice(0, 10);
 }
 
-function minuteOfDayValue(minutes: number) {
-  const normalized = Math.max(0, Math.min(1439, minutes));
-  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
+function utcTime(instant: string) {
+  return new Date(instant).toISOString().slice(11, 16);
 }
 
-function parseMinuteOfDay(value: string) {
-  const [hours, minutes] = value.split(":").map(Number);
-  return (hours * 60) + minutes;
+function bookingCalendarDays(cycleOpensAt: string) {
+  const opening = Date.parse(cycleOpensAt);
+  const firstAllowed = opening - (7 * 86_400_000);
+  const lastAllowed = opening + (14 * 86_400_000);
+  const weekday = (new Date(firstAllowed).getUTCDay() + 6) % 7;
+  const firstVisible = firstAllowed - (weekday * 86_400_000);
+  const count = Math.ceil(((lastAllowed - firstVisible) / 86_400_000 + 1) / 7) * 7;
+  return Array.from({ length: count }, (_, index) => {
+    const at = firstVisible + index * 86_400_000;
+    return { date: new Date(at).toISOString().slice(0, 10),
+      enabled: at >= firstAllowed && at <= lastAllowed };
+  });
 }
-
-const CLOSE_DAY_LABELS = Object.freeze([
-  "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday",
-  "Wednesday (+1 week)", "Thursday (+1 week)", "Friday (+1 week)",
-  "Saturday (+1 week)", "Sunday (+1 week)", "Monday (+1 week)", "Tuesday (+1 week)",
-  "Wednesday (+2 weeks)",
-]);
 
 function activityActionLabel(activity: Activity) {
   if (activity.action === "booking_created") return "Booked appointment";
@@ -263,25 +264,20 @@ export function BookingAdmin({ initialConfiguration }: {
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [newGuestUrl, setNewGuestUrl] = useState("");
-  const [cycleOpensAt, setCycleOpensAt] = useState(
-    initialConfiguration.automaticCycle ? utcInputValue(initialConfiguration.automaticCycle.opensAt) : "",
+  const [openDate, setOpenDate] = useState(
+    initialConfiguration.automaticCycle ? utcDate(initialConfiguration.automaticCycle.opensAt) : "",
   );
-  const [cycleClosesAt, setCycleClosesAt] = useState(
-    initialConfiguration.automaticCycle ? utcInputValue(initialConfiguration.automaticCycle.closesAt) : "",
+  const [openTime, setOpenTime] = useState(
+    initialConfiguration.automaticCycle ? utcTime(initialConfiguration.automaticCycle.opensAt) : "00:00",
   );
+  const [closeDate, setCloseDate] = useState(
+    initialConfiguration.automaticCycle ? utcDate(initialConfiguration.automaticCycle.closesAt) : "",
+  );
+  const [closeTime, setCloseTime] = useState(
+    initialConfiguration.automaticCycle ? utcTime(initialConfiguration.automaticCycle.closesAt) : "12:00",
+  );
+  const [calendarEndpoint, setCalendarEndpoint] = useState<"open" | "close">("open");
   const [confirmOpenChange, setConfirmOpenChange] = useState(false);
-  const [defaultOpenTime, setDefaultOpenTime] = useState(
-    initialConfiguration.defaultWindow
-      ? minuteOfDayValue(initialConfiguration.defaultWindow.openMinuteUtc) : "00:00",
-  );
-  const [defaultCloseDay, setDefaultCloseDay] = useState(
-    initialConfiguration.defaultWindow
-      ? String(Math.floor(initialConfiguration.defaultWindow.closeOffsetMinutes / 1440)) : "4",
-  );
-  const [defaultCloseTime, setDefaultCloseTime] = useState(
-    initialConfiguration.defaultWindow
-      ? minuteOfDayValue(initialConfiguration.defaultWindow.closeOffsetMinutes % 1440) : "12:00",
-  );
   const [confirmedGuildId, setConfirmedGuildId] = useState("");
   const noun = configuration.profile === "kingshot" ? "Kingdom" : "State";
   const endpoint = `/api/v1/booking-admin/${encodeURIComponent(configuration.community.code)}`;
@@ -365,15 +361,31 @@ export function BookingAdmin({ initialConfiguration }: {
   function adoptConfiguration(next: BookingAdminConfiguration) {
     setConfiguration(next);
     if (next.automaticCycle) {
-      setCycleOpensAt(utcInputValue(next.automaticCycle.opensAt));
-      setCycleClosesAt(utcInputValue(next.automaticCycle.closesAt));
-    }
-    if (next.defaultWindow) {
-      setDefaultOpenTime(minuteOfDayValue(next.defaultWindow.openMinuteUtc));
-      setDefaultCloseDay(String(Math.floor(next.defaultWindow.closeOffsetMinutes / 1440)));
-      setDefaultCloseTime(minuteOfDayValue(next.defaultWindow.closeOffsetMinutes % 1440));
+      setOpenDate(utcDate(next.automaticCycle.opensAt));
+      setOpenTime(utcTime(next.automaticCycle.opensAt));
+      setCloseDate(utcDate(next.automaticCycle.closesAt));
+      setCloseTime(utcTime(next.automaticCycle.closesAt));
+      setCalendarEndpoint("open");
     }
     setConfirmOpenChange(false);
+  }
+
+  async function refreshBookingStatus() {
+    setBusy("refresh-status");
+    setNotice("");
+    try {
+      const response = await fetch(endpoint, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok || !payload.configuration) {
+        throw new Error(payload.error ?? "Booking status could not be refreshed.");
+      }
+      adoptConfiguration(payload.configuration);
+      setNotice("Booking status refreshed.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Booking status could not be refreshed.");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function loadMoreActivity() {
@@ -403,33 +415,6 @@ export function BookingAdmin({ initialConfiguration }: {
     }
   }
 
-  async function saveDefaultWindow() {
-    if (!configuration.defaultWindow) return;
-    setBusy("default-window");
-    setNotice("");
-    try {
-      const response = await fetch(endpoint, {
-        method: "PATCH",
-        headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
-        body: JSON.stringify({ section: "recurringWindowDefault",
-          openMinuteUtc: parseMinuteOfDay(defaultOpenTime),
-          closeOffsetMinutes: (Number(defaultCloseDay) * 1440)
-            + parseMinuteOfDay(defaultCloseTime) }),
-      });
-      const payload = await response.json();
-      if (!response.ok || !payload.configuration) {
-        throw new Error(payload.error ?? "The default booking window could not be changed.");
-      }
-      adoptConfiguration(payload.configuration);
-      setNotice("Default booking window saved for future cycles.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message
-        : "The default booking window could not be changed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
   async function changeCycleSchedule(action: "override" | "restore") {
     const cycle = configuration.automaticCycle;
     if (!cycle) return;
@@ -440,7 +425,8 @@ export function BookingAdmin({ initialConfiguration }: {
         ? { section: "cycleSchedule", action, cycleIndex: cycle.cycleIndex,
             confirmedOpenChange: confirmOpenChange }
         : { section: "cycleSchedule", action, cycleIndex: cycle.cycleIndex,
-            opensAt: `${cycleOpensAt}:00.000Z`, closesAt: `${cycleClosesAt}:00.000Z`,
+            opensAt: `${openDate}T${openTime}:00.000Z`,
+            closesAt: `${closeDate}T${closeTime}:00.000Z`,
             confirmedOpenChange: confirmOpenChange };
       const response = await fetch(endpoint, {
         method: "PATCH",
@@ -508,14 +494,36 @@ export function BookingAdmin({ initialConfiguration }: {
   }
 
   const controlsDisabled = !csrfToken;
+  const cycle = configuration.automaticCycle;
+  const firstAllowed = cycle ? Date.parse(cycle.automaticOpensAt) - 7 * 86_400_000 : 0;
+  const lastAllowed = cycle ? Date.parse(cycle.automaticOpensAt) + 14 * 86_400_000 : 0;
+  const proposedOpen = Date.parse(`${openDate}T${openTime}:00.000Z`);
+  const proposedClose = Date.parse(`${closeDate}T${closeTime}:00.000Z`);
+  const validRange = Boolean(cycle) && Number.isFinite(proposedOpen) && Number.isFinite(proposedClose)
+    && proposedOpen >= firstAllowed && proposedOpen < proposedClose
+    && proposedClose <= lastAllowed;
+  const calendarDays = cycle ? bookingCalendarDays(cycle.automaticOpensAt) : [];
+  function selectCalendarDate(date: string) {
+    if (calendarEndpoint === "open") {
+      setOpenDate(date);
+      setCalendarEndpoint("close");
+    } else {
+      setCloseDate(date);
+      setCalendarEndpoint("open");
+    }
+  }
   return <article className="booking-admin">
     <CommunityPageChrome communityCode={configuration.community.code} current="admin"
       displayName={configuration.community.displayName} profile={configuration.profile} showAdmin />
     {notice ? <p aria-live="polite" className="booking-notice" role="status">{notice}</p> : null}
 
-    <section className="booking-admin-section" aria-labelledby="booking-admin-booking">
+    {configuration.profile === "kingshot" ? <section className="booking-admin-section" aria-labelledby="booking-admin-booking">
       <div><h2 id="booking-admin-booking">Member bookings</h2>
-        <p>Turn normal player bookings on or off for this {noun}.</p></div>
+        <p>Turn normal player bookings on or off for this {noun}.</p>
+        <p role="status"><strong>Player bookings: {configuration.bookingWindowState.status.toUpperCase()}</strong>
+          {configuration.bookingWindowState.reason === "paused" ? " — access paused"
+            : configuration.bookingWindowState.reason === "open" ? " — persisted window open"
+              : " — persisted window closed"}</p></div>
       <div className="booking-admin-setting">
         <div><strong>Booking enabled</strong>
           <span>Players can book only while this is enabled and the booking window is open.</span></div>
@@ -525,7 +533,7 @@ export function BookingAdmin({ initialConfiguration }: {
             section: "booking", enabled: !configuration.community.bookingsEnabled,
           }, `Member booking ${configuration.community.bookingsEnabled ? "disabled" : "enabled"}.`)} />
       </div>
-    </section>
+    </section> : null}
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-guest-link">
       <div><h2 id="booking-admin-guest-link">Guest booking link</h2>
@@ -582,69 +590,120 @@ export function BookingAdmin({ initialConfiguration }: {
     {configuration.automaticCycle ? <section className="booking-admin-section"
       aria-labelledby="booking-admin-automatic-cycle">
       <div><h2 id="booking-admin-automatic-cycle">Booking window</h2>
-        <p>Choose when players can sign up for each appointment cycle. Times are shown in UTC.
-          The {noun}&apos;s main booking switch above can still close bookings at any time.</p></div>
-      {configuration.defaultWindow ? <div className="booking-admin-settings-list">
-        <div><h3>Default booking window</h3>
-          <p>This repeats automatically every 28 days. Closing can be no more than 14 days after opening.</p></div>
-        <label>Opens Wednesday
-          <input type="time" value={defaultOpenTime}
-            onChange={(event) => setDefaultOpenTime(event.currentTarget.value)} />
-          <span>UTC</span>
-        </label>
-        <label>Closes
-          <select value={defaultCloseDay}
-            onChange={(event) => setDefaultCloseDay(event.currentTarget.value)}>
-            {CLOSE_DAY_LABELS.map((label, offset) => <option key={label} value={offset}>{label}</option>)}
-          </select>
-        </label>
-        <label>Closing time
-          <input type="time" value={defaultCloseTime}
-            onChange={(event) => setDefaultCloseTime(event.currentTarget.value)} />
-          <span>UTC</span>
-        </label>
-        <div className="booking-admin-actions">
-          <button disabled={controlsDisabled || Boolean(busy)}
-            onClick={() => void saveDefaultWindow()} type="button">Save default window</button>
-        </div>
-      </div> : null}
-      <div><h3>Current booking window</h3>
+        <p>One UTC date range for this WOS cycle controls when bookings and permitted changes are open.</p></div>
+      <div className="booking-admin-window-status" role="status">
+        <strong>Player bookings: {configuration.bookingWindowState.status.toUpperCase()}</strong>
+        <p>{configuration.bookingWindowState.reason === "paused"
+          ? "Paused for this State. The schedule continues; resume only when the persisted window is open."
+          : configuration.bookingWindowState.reason === "window_not_open"
+            ? "The persisted booking window is not open yet. The cycle worker updates it each minute."
+            : configuration.bookingWindowState.reason === "before_open"
+              ? "The opening time has not arrived."
+              : configuration.bookingWindowState.reason === "after_close"
+                ? "The closing time has passed."
+                : "The persisted window is open and accepting bookings."}</p>
+        <p><strong>Next transition:</strong> {configuration.bookingWindowState.nextTransitionAt
+          ? `${configuration.bookingWindowState.nextTransitionKind === "opens" ? "Opens" : "Closes"} ${displayUtcInstant(configuration.bookingWindowState.nextTransitionAt)}`
+          : configuration.bookingWindowState.reason === "paused" ? "Resume bookings manually"
+            : "Awaiting window activation"}</p>
+        <p><strong>Next scheduled opening:</strong> {configuration.bookingWindowState.nextScheduledOpening
+          ? displayUtcInstant(configuration.bookingWindowState.nextScheduledOpening) : "Unavailable"}</p>
+        <p><strong>Next scheduled closing:</strong> {configuration.bookingWindowState.nextScheduledClosing
+          ? displayUtcInstant(configuration.bookingWindowState.nextScheduledClosing) : "Unavailable"}</p>
+        <button disabled={Boolean(busy)} onClick={() => void refreshBookingStatus()}
+          type="button">Refresh booking status</button>
+      </div>
+      <div className="booking-admin-setting">
+        <div><strong>Player booking access</strong>
+          <span>This State-wide pause takes effect immediately and stays until you resume it. Resuming does not force a closed window open.</span></div>
+        <SettingSwitch checked={configuration.community.bookingsEnabled}
+          disabled={controlsDisabled || Boolean(busy)} label="Player booking access"
+          onChange={() => void changeSetting("booking", {
+            section: "booking", enabled: !configuration.community.bookingsEnabled,
+          }, `Player booking access ${configuration.community.bookingsEnabled ? "paused" : "resumed"}.`)} />
+      </div>
+      <div><h3>Cycle #{configuration.automaticCycle.cycleIndex} booking range</h3>
+        <p>The default for this cycle is Wednesday 00:00 UTC to Sunday 12:00 UTC.
+          These dates control booking actions; everyone can still view the schedule after closing.</p>
         <p>{configuration.automaticCycle.overridden
-          ? "Using an explicit override for this cycle."
-          : configuration.defaultWindow?.source === "community"
-            ? `Using this ${noun}'s default window.` : "Using the platform default window."}</p></div>
+          ? `A saved override applies only to cycle #${configuration.automaticCycle.cycleIndex}. Use default window to clear it.`
+          : "This cycle uses the default window."}</p></div>
       <dl className="booking-admin-cycle-summary">
-        <div><dt>Cycle</dt><dd>{cycleStatusLabel(configuration.automaticCycle.status)}</dd></div>
-        <div><dt>Default opening</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticOpensAt)}</dd></div>
-        <div><dt>Default closing</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticClosesAt)}</dd></div>
-        <div><dt>Opens</dt><dd><time dateTime={configuration.automaticCycle.opensAt}>
-          {displayUtcInstant(configuration.automaticCycle.opensAt)}</time></dd></div>
-        <div><dt>Closes</dt><dd><time dateTime={configuration.automaticCycle.closesAt}>
-          {displayUtcInstant(configuration.automaticCycle.closesAt)}</time></dd></div>
+        <div><dt>Cycle</dt><dd>#{configuration.automaticCycle.cycleIndex} — {displayDate(configuration.automaticCycle.automaticOpensAt.slice(0, 10))} to {displayDate(configuration.automaticCycle.appointments.at(-1)?.date ?? configuration.automaticCycle.automaticClosesAt.slice(0, 10))}</dd></div>
+        <div><dt>Schedule phase</dt><dd>{cycleStatusLabel(configuration.automaticCycle.status)}</dd></div>
+        <div><dt>Default open</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticOpensAt)}</dd></div>
+        <div><dt>Default close</dt><dd>{displayUtcInstant(configuration.automaticCycle.automaticClosesAt)}</dd></div>
+        <div><dt>Effective open</dt><dd>{displayUtcInstant(configuration.automaticCycle.opensAt)}</dd></div>
+        <div><dt>Effective close</dt><dd>{displayUtcInstant(configuration.automaticCycle.closesAt)}</dd></div>
       </dl>
-      <div className="booking-admin-settings-list">
-        <div><h3>Override this cycle</h3>
-          <p>These dates affect only the cycle shown above and take priority over the recurring default.</p></div>
-        <label>Open (UTC)
-          <input type="datetime-local" value={cycleOpensAt}
-            onChange={(event) => setCycleOpensAt(event.currentTarget.value)} />
-        </label>
-        <label>Close (UTC)
-          <input type="datetime-local" value={cycleClosesAt}
-            onChange={(event) => setCycleClosesAt(event.currentTarget.value)} />
-        </label>
+      <div className="booking-window-range" aria-label={`Booking range for cycle ${configuration.automaticCycle.cycleIndex}`}>
+        <div className="booking-window-range__calendar" role="group" aria-label="Choose opening and closing dates in UTC">
+          <p>{displayDate(new Date(firstAllowed).toISOString().slice(0, 10))} – {displayDate(new Date(lastAllowed).toISOString().slice(0, 10))}</p>
+          <p>Select {calendarEndpoint === "open" ? "OPEN" : "CLOSE"} date</p>
+          <div className="booking-window-range__grid">
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) =>
+              <strong aria-hidden="true" key={day}>{day}</strong>)}
+            {calendarDays.map(({ date, enabled }) => {
+              const isOpen = date === openDate;
+              const isClose = date === closeDate;
+              const inRange = date > openDate && date < closeDate;
+              return <button aria-label={displayDate(date)} aria-pressed={isOpen || isClose}
+                className={`${isOpen ? "is-open " : ""}${isClose ? "is-close " : ""}${inRange ? "is-in-range" : ""}`}
+                disabled={!enabled || Boolean(busy)} key={date}
+                onClick={() => selectCalendarDate(date)} type="button">
+                <span>{Number(date.slice(8, 10))}</span>
+                {date.slice(8, 10) === "01" || date === calendarDays.find((day) => day.enabled)?.date
+                  ? <small>{new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" })
+                    .format(new Date(`${date}T00:00:00.000Z`))}</small> : null}
+                {isOpen ? <small>OPEN</small> : isClose ? <small>CLOSE</small> : null}
+              </button>;
+            })}
+          </div>
+        </div>
+        <div className="booking-window-range__endpoints">
+          <div className={calendarEndpoint === "open" ? "is-selecting" : ""}>
+            <button aria-pressed={calendarEndpoint === "open"} onClick={() => setCalendarEndpoint("open")}
+              type="button">OPEN</button>
+            <label>Opening date (UTC)
+              <input max={new Date(lastAllowed).toISOString().slice(0, 10)}
+                min={new Date(firstAllowed).toISOString().slice(0, 10)}
+                onChange={(event) => setOpenDate(event.currentTarget.value)} type="date" value={openDate} />
+            </label>
+            <label>Opening time (UTC)
+              <input onChange={(event) => setOpenTime(event.currentTarget.value)} type="time" value={openTime} />
+            </label>
+          </div>
+          <div className={calendarEndpoint === "close" ? "is-selecting" : ""}>
+            <button aria-pressed={calendarEndpoint === "close"} onClick={() => setCalendarEndpoint("close")}
+              type="button">CLOSE</button>
+            <label>Closing date (UTC)
+              <input max={new Date(lastAllowed).toISOString().slice(0, 10)}
+                min={new Date(firstAllowed).toISOString().slice(0, 10)}
+                onChange={(event) => setCloseDate(event.currentTarget.value)} type="date" value={closeDate} />
+            </label>
+            <label>Closing time (UTC)
+              <input onChange={(event) => setCloseTime(event.currentTarget.value)} type="time" value={closeTime} />
+            </label>
+          </div>
+        </div>
+        <p>Allowed range: {displayDate(new Date(firstAllowed).toISOString().slice(0, 10))} through {displayDate(new Date(lastAllowed).toISOString().slice(0, 10))}.
+          The opening must be before the closing. Saved changes take effect after the cycle worker reconciles, usually within one minute.</p>
+        {!validRange ? <p role="alert">Choose an opening before closing within this cycle&apos;s allowed range.</p> : null}
         {configuration.automaticCycle.status === "open" ? <label>
           <input checked={confirmOpenChange} type="checkbox"
             onChange={(event) => setConfirmOpenChange(event.currentTarget.checked)} />
           I understand this changes an already-open booking cycle.
         </label> : null}
         <div className="booking-admin-actions">
-          <button disabled={controlsDisabled || Boolean(busy)}
-            onClick={() => void changeCycleSchedule("override")} type="button">Save times</button>
-          <button disabled={controlsDisabled || Boolean(busy) || !configuration.automaticCycle.overridden}
-            onClick={() => void changeCycleSchedule("restore")} type="button">Use default times</button>
+          <button disabled={controlsDisabled || Boolean(busy) || !validRange
+              || (configuration.automaticCycle.status === "open" && !confirmOpenChange)}
+            onClick={() => void changeCycleSchedule("override")} type="button">Save booking window</button>
+          <button disabled={controlsDisabled || Boolean(busy) || !configuration.automaticCycle.overridden
+              || (configuration.automaticCycle.status === "open" && !confirmOpenChange)}
+            onClick={() => void changeCycleSchedule("restore")} type="button">Use default window</button>
         </div>
       </div>
+      <p><strong>Event dates for cycle #{configuration.automaticCycle.cycleIndex}</strong></p>
       <ul className="booking-admin-cycle-appointments">
         {configuration.automaticCycle.appointments.map((appointment) => <li key={appointment.serviceCode}>
           <strong>{serviceDisplayName({ code: appointment.serviceCode,
@@ -733,20 +792,12 @@ export function BookingAdmin({ initialConfiguration }: {
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-dates">
       <div><h2 id="booking-admin-dates">Upcoming appointment dates</h2>
-        <p>These dates are created automatically from the booking schedule.</p></div>
-      <div className="booking-admin-window-status">
-        {configuration.windows.length
-          ? configuration.windows.map((window, index) => <p key={`${window.status}:${window.opensAt}:${index}`}>
-            <strong>Booking window:</strong> {statusLabel(window.status)}
-          </p>)
-          : <p>No booking window is currently configured.</p>}
-      </div>
+        <p>These dates are created automatically from the booking schedule. They can remain visible after player bookings close.</p></div>
       {configuration.dates.length
         ? <ul className="booking-admin-dates">{configuration.dates.map((date) => <li
           key={`${date.date}:${date.serviceCode}:${date.windowStatus}`}>
           <time dateTime={date.date}>{displayDate(date.date)}</time>
           <span>{serviceDisplayName({ code: date.serviceCode, displayName: date.serviceName })}</span>
-          <strong>{statusLabel(date.windowStatus)}</strong>
         </li>)}</ul>
         : <p>No service dates are currently configured.</p>}
     </section>

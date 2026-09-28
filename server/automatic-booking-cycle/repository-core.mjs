@@ -38,12 +38,8 @@ async function transaction(pool, work) {
 
 async function listCommunities(pool) {
   return transaction(pool, async (client) => (await client.query(
-    `SELECT community.id,community.location_code,
-            defaults.open_minute_utc,defaults.close_offset_minutes
+    `SELECT community.id,community.location_code
        FROM booking_communities AS community
-       LEFT JOIN booking_community_window_defaults AS defaults
-         ON defaults.game_profile=community.game_profile
-        AND defaults.community_id=community.id
       WHERE community.game_profile=$1 AND community.status='active'
       ORDER BY community.id`,
     [PROFILE],
@@ -75,11 +71,7 @@ async function findCycleWindow(client, communityId, cycle) {
 }
 
 async function effectiveCycleForCommunity(client, community, cycle) {
-  const recurring = community.open_minute_utc == null ? null : {
-    openMinuteUtc: Number(community.open_minute_utc),
-    closeOffsetMinutes: Number(community.close_offset_minutes),
-  };
-  const recurringCycle = resolveWosBookingCycleWindow(cycle, recurring);
+  const defaultCycle = resolveWosBookingCycleWindow(cycle);
   const override = (await client.query(
     `SELECT opens_at,closes_at
        FROM booking_cycle_schedule_overrides
@@ -87,10 +79,10 @@ async function effectiveCycleForCommunity(client, community, cycle) {
     [PROFILE, community.id, cycle.index],
   )).rows[0];
   return override ? Object.freeze({
-    ...recurringCycle,
+    ...defaultCycle,
     opensAt: new Date(override.opens_at).toISOString(),
     closesAt: new Date(override.closes_at).toISOString(),
-  }) : recurringCycle;
+  }) : defaultCycle;
 }
 
 async function latestSlotTemplate(client, communityId, serviceCode, beforeDate) {

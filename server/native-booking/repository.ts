@@ -34,6 +34,8 @@ export interface BookingWindowRecord {
   readonly id: string;
   readonly community_id: string;
   readonly status: "open" | "closed";
+  readonly opens_at: Date | null;
+  readonly closes_at: Date | null;
 }
 
 export interface MinisterServiceRecord {

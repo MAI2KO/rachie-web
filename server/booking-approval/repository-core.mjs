@@ -521,13 +521,33 @@ class ProfileScopedApprovalSession {
 
   async listBoardRows(communityId, at) {
     const result = await this.client.query(
-      `WITH current_window AS (
-         SELECT booking_window.id
-         FROM booking_windows AS booking_window
-         WHERE booking_window.game_profile=$1 AND booking_window.community_id=$2
-           AND booking_window.status<>'archived'
-         ORDER BY CASE booking_window.status WHEN 'open' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
-                  booking_window.created_at DESC,booking_window.id DESC
+      `WITH schedule_windows AS (
+         SELECT booking_window.id,booking_window.status,booking_window.opens_at,
+                booking_window.closes_at,booking_window.created_at,MIN(dates.booking_date) AS service_start,
+                (MAX(dates.booking_date)::timestamp + interval '1 day') AT TIME ZONE 'UTC' AS service_end
+           FROM booking_windows AS booking_window
+           JOIN booking_service_dates AS dates
+             ON dates.game_profile=booking_window.game_profile
+            AND dates.community_id=booking_window.community_id
+            AND dates.window_id=booking_window.id
+          WHERE booking_window.game_profile=$1 AND booking_window.community_id=$2
+            AND booking_window.status<>'archived'
+          GROUP BY booking_window.id,booking_window.status,booking_window.opens_at,
+                   booking_window.closes_at,booking_window.created_at
+       ), current_window AS (
+         SELECT id FROM schedule_windows
+          ORDER BY CASE
+             WHEN $1='wos' AND ((status='open'
+               AND (opens_at IS NULL OR opens_at <= $3)
+               AND (closes_at IS NULL OR $3 < closes_at))
+               OR (opens_at <= $3 AND $3 < service_end)) THEN 0
+             WHEN $1='wos' AND service_start > $3::date THEN 1
+             WHEN $1='wos' THEN 2
+             ELSE CASE status WHEN 'open' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END
+           END,
+           CASE WHEN $1='wos' AND service_start > $3::date THEN service_start END ASC,
+           CASE WHEN $1='wos' THEN service_end END DESC,
+           created_at DESC,id DESC
          LIMIT 1
        )
        SELECT slot.service_code,service.display_label AS service_label,service.sort_order,
@@ -564,7 +584,7 @@ class ProfileScopedApprovalSession {
     const result = await this.client.query(
       `WITH schedule_windows AS (
          SELECT booking_window.id,booking_window.status,booking_window.opens_at,
-                booking_window.created_at,MIN(dates.booking_date) AS service_start,
+                booking_window.closes_at,booking_window.created_at,MIN(dates.booking_date) AS service_start,
                 (MAX(dates.booking_date)::timestamp + interval '1 day') AT TIME ZONE 'UTC' AS service_end
            FROM booking_windows AS booking_window
            JOIN booking_service_dates AS dates
@@ -573,14 +593,17 @@ class ProfileScopedApprovalSession {
             AND dates.window_id=booking_window.id
           WHERE booking_window.game_profile=$1 AND booking_window.community_id=$2
             AND booking_window.status<>'archived'
-          GROUP BY booking_window.id,booking_window.status,booking_window.opens_at,booking_window.created_at
+          GROUP BY booking_window.id,booking_window.status,booking_window.opens_at,
+                   booking_window.closes_at,booking_window.created_at
        ), current_window AS (
          SELECT id,status FROM schedule_windows
           WHERE ($4::uuid IS NOT NULL AND id=$4)
              OR ($4::uuid IS NULL)
           ORDER BY CASE
              WHEN $4::uuid IS NOT NULL THEN 0
-             WHEN $1='wos' AND ((opens_at IS NULL AND status='open')
+             WHEN $1='wos' AND ((status='open'
+               AND (opens_at IS NULL OR opens_at <= $3)
+               AND (closes_at IS NULL OR $3 < closes_at))
                OR (opens_at <= $3 AND $3 < service_end)) THEN 0
              WHEN $1='wos' AND service_start > $3::date THEN 1
              WHEN $1='wos' THEN 2
@@ -643,7 +666,7 @@ class ProfileScopedApprovalSession {
     const result = await this.client.query(
       `WITH schedule_windows AS (
          SELECT booking_window.id,booking_window.status,booking_window.opens_at,
-                booking_window.created_at,MIN(dates.booking_date) AS service_start,
+                booking_window.closes_at,booking_window.created_at,MIN(dates.booking_date) AS service_start,
                 (MAX(dates.booking_date)::timestamp + interval '1 day') AT TIME ZONE 'UTC' AS service_end
            FROM booking_windows AS booking_window
            JOIN booking_service_dates AS dates
@@ -652,11 +675,14 @@ class ProfileScopedApprovalSession {
             AND dates.window_id=booking_window.id
           WHERE booking_window.game_profile=$1 AND booking_window.community_id=$2
             AND booking_window.status<>'archived'
-          GROUP BY booking_window.id,booking_window.status,booking_window.opens_at,booking_window.created_at
+          GROUP BY booking_window.id,booking_window.status,booking_window.opens_at,
+                   booking_window.closes_at,booking_window.created_at
        ), current_window AS (
          SELECT * FROM schedule_windows
           ORDER BY CASE
-             WHEN $1='wos' AND ((opens_at IS NULL AND status='open')
+             WHEN $1='wos' AND ((status='open'
+               AND (opens_at IS NULL OR opens_at <= $3)
+               AND (closes_at IS NULL OR $3 < closes_at))
                OR (opens_at <= $3 AND $3 < service_end)) THEN 0
              WHEN $1='wos' AND service_start > $3::date THEN 1
              WHEN $1='wos' THEN 2

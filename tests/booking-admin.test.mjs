@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   bookingAdminModel,
+  effectiveBookingWindowState,
   BookingAdminGuildLinkDecisionDeniedError,
   BookingAdminTopologyDeniedError,
   BookingAdminValidationError,
@@ -499,61 +500,42 @@ test("without State, an existing active alliance owner may approve or reject ano
   assert.equal(rejectedRepository.audits[0].decision, "rejected");
 });
 
-test("cycle override validation is cycle-scoped, bounded, historical-safe, and explicit when open", () => {
-  const draftNow = new Date("2026-09-01T12:00:00.000Z");
-  const valid = validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
-    cycleIndex: 1, opensAt: "2026-09-01T18:00:00.000Z", closesAt: "2026-09-06T18:00:00.000Z",
+test("cycle override accepts concrete Monday and Tuesday UTC dates within one cycle", () => {
+  const draftNow = new Date("2026-08-27T12:00:00.000Z");
+  const monday = validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
+    cycleIndex: 1, opensAt: "2026-08-31T18:00:00.000Z", closesAt: "2026-09-08T09:00:00.000Z",
     confirmedOpenChange: false }, draftNow);
-  assert.equal(valid.opensAt, "2026-09-01T18:00:00.000Z");
+  assert.equal(monday.opensAt, "2026-08-31T18:00:00.000Z");
+  assert.equal(monday.closesAt, "2026-09-08T09:00:00.000Z");
+  assert.doesNotThrow(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
+    cycleIndex: 1, opensAt: "2026-09-01T18:00:00.000Z", closesAt: "2026-09-08T09:00:00.000Z",
+    confirmedOpenChange: false }, draftNow));
+  for (const [opensAt, closesAt] of [
+    ["2026-09-08T09:00:00.000Z", "2026-08-31T18:00:00.000Z"],
+    ["2026-08-25T23:59:00.000Z", "2026-09-06T12:00:00.000Z"],
+    ["2026-09-02T00:00:00.000Z", "2026-09-16T00:01:00.000Z"],
+  ]) {
+    assert.throws(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
+      cycleIndex: 1, opensAt, closesAt, confirmedOpenChange: false }, draftNow),
+    (error) => error.code === "invalid_schedule");
+  }
   assert.throws(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
-    cycleIndex: 2, opensAt: valid.opensAt, closesAt: valid.closesAt, confirmedOpenChange: false }, draftNow),
-  (error) => error.code === "cycle_not_current");
-  assert.throws(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
-    cycleIndex: 1, opensAt: valid.closesAt, closesAt: valid.opensAt, confirmedOpenChange: false }, draftNow),
-  (error) => error.code === "invalid_schedule");
+    cycleIndex: 2, opensAt: monday.opensAt, closesAt: monday.closesAt,
+    confirmedOpenChange: false }, draftNow), (error) => error.code === "cycle_not_current");
+  assert.throws(() => validateBookingAdminChange({ section: "cycleSchedule", action: "override",
+    cycleIndex: 1, opensAt: "2026-08-31T18:00", closesAt: monday.closesAt,
+    confirmedOpenChange: false }), (error) => error.code === "invalid_schedule");
   const openNow = new Date("2026-09-03T12:00:00.000Z");
   assert.throws(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
-    cycleIndex: 1, opensAt: "2026-09-02T00:00:00.000Z", closesAt: "2026-09-06T12:00:00.000Z",
+    cycleIndex: 1, opensAt: monday.opensAt, closesAt: "2026-09-03T12:00:00.000Z",
     confirmedOpenChange: false }, openNow), (error) => error.code === "confirmation_required");
-  assert.throws(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "restore",
-    cycleIndex: 1, confirmedOpenChange: true }, new Date("2026-09-07T01:00:00.000Z"), {
-    cycle_index: 1, opens_at: "2026-09-02T00:00:00.000Z", closes_at: "2026-09-06T18:00:00.000Z",
-  }), (error) => error.code === "historical_cycle");
-});
-
-test("recurring community window validates bounds and becomes the default without changing appointments", async () => {
-  assert.deepEqual(validateBookingAdminChange({ section: "recurringWindowDefault",
-    openMinuteUtc: 0, closeOffsetMinutes: (5 * 1440) + 1439 }), {
-    section: "recurringWindowDefault", openMinuteUtc: 0,
-    closeOffsetMinutes: (5 * 1440) + 1439,
-  });
-  for (const closeOffsetMinutes of [0, (14 * 1440) + 1]) {
-    assert.throws(() => validateBookingAdminChange({ section: "recurringWindowDefault",
-      openMinuteUtc: 0, closeOffsetMinutes }),
-    (error) => error.code === "invalid_recurring_window");
-  }
-  assert.doesNotThrow(() => validateBookingAdminChange({ section: "recurringWindowDefault",
-    openMinuteUtc: 60, closeOffsetMinutes: 60 + (14 * 1440) }));
-
-  const repository = fakeRepository();
-  const service = createBookingAdminService({ gameProfile: "wos", communityId,
-    managerContext: manager, repository, now: () => new Date("2026-08-26T12:00:00Z") });
-  const result = await service.updateRecurringWindowDefault({
-    section: "recurringWindowDefault", openMinuteUtc: 0,
-    closeOffsetMinutes: (5 * 1440) + 1439,
-  });
-  assert.deepEqual(result.configuration.defaultWindow, {
-    openMinuteUtc: 0, closeOffsetMinutes: 8639, source: "community",
-  });
-  assert.equal(result.configuration.automaticCycle.closesAt, "2026-09-07T23:59:00.000Z");
-  assert.deepEqual(result.configuration.automaticCycle.appointments.map(({ serviceCode, date }) => ({
-    serviceCode, date,
-  })), [
-    { serviceCode: "construction", date: "2026-09-07" },
-    { serviceCode: "research", date: "2026-09-08" },
-    { serviceCode: "troop", date: "2026-09-10" },
-  ]);
-  assert.equal(repository.audits.at(-1).eventType, "booking_recurring_window_default_created");
+  assert.doesNotThrow(() => validateCycleScheduleTiming({ section: "cycleSchedule", action: "override",
+    cycleIndex: 1, opensAt: monday.opensAt, closesAt: "2026-09-03T12:00:00.000Z",
+    confirmedOpenChange: true }, openNow));
+  assert.equal(validateCycleScheduleTiming({ section: "cycleSchedule", action: "restore",
+    cycleIndex: 1, confirmedOpenChange: false }, new Date("2026-09-07T01:00:00.000Z"), {
+    cycle_index: 1, opens_at: monday.opensAt, closes_at: "2026-09-06T18:00:00.000Z",
+  }).closesAt, "2026-09-06T12:00:00.000Z");
 });
 
 test("admin routes and UI reuse manager authorization and expose no destructive date controls", () => {
@@ -577,8 +559,9 @@ test("admin routes and UI reuse manager authorization and expose no destructive 
   assert.match(handler, /bookingAdminMutation/);
   assert.match(ui, /role="switch"/); assert.match(ui, /Member bookings/);
   assert.match(ui, /Booking enabled/); assert.match(ui, /Booking window/);
-  assert.match(ui, /Default booking window/); assert.match(ui, /Save default window/);
-  assert.match(ui, /Save times/); assert.match(ui, /Use default times/);
+  assert.match(ui, /booking-window-range__calendar/); assert.match(ui, /Opening date \(UTC\)/);
+  assert.match(ui, /Closing date \(UTC\)/); assert.match(ui, /Save booking window/);
+  assert.match(ui, /Use default window/); assert.match(ui, /is-in-range/);
   assert.match(ui, /Discord access/); assert.match(ui, /Unlink alliance/);
   assert.match(ui, /members may lose website access/);
   assert.match(ui, /Guest booking link/); assert.match(ui, /Generate new link/);
@@ -662,4 +645,54 @@ test("Booking Admin activity query is stable keyset pagination without audit del
   ), { createdAt: "2026-09-01T12:00:00.000Z", id: "10000000-0000-4000-8000-000000000010" });
   assert.throws(() => parseBookingActivityCursor("newest"),
     (error) => error.code === "invalid_activity_cursor");
+});
+
+
+test("admin booking status follows persisted window, timestamps, and community pause", () => {
+  const state = snapshot();
+  state.windows = [{ status: "open", opens_at: "2026-09-02T00:00:00Z",
+    closes_at: "2026-09-06T12:00:00Z" }];
+  const before = bookingAdminModel("wos", state, new Date("2026-09-01T12:00:00Z"));
+  assert.equal(before.bookingWindowState.status, "closed");
+  assert.equal(before.bookingWindowState.nextTransitionAt, "2026-09-02T00:00:00.000Z");
+  const open = bookingAdminModel("wos", state, new Date("2026-09-03T12:00:00Z"));
+  assert.equal(open.bookingWindowState.status, "open");
+  assert.equal(open.bookingWindowState.nextTransitionKind, "closes");
+  assert.equal(open.bookingWindowState.nextTransitionAt, "2026-09-06T12:00:00.000Z");
+  const after = bookingAdminModel("wos", state, new Date("2026-09-06T12:00:00Z"));
+  assert.equal(after.bookingWindowState.status, "closed");
+  assert.equal(after.bookingWindowState.nextScheduledOpening, "2026-09-30T00:00:00.000Z");
+  state.community.bookings_open = false;
+  const paused = bookingAdminModel("wos", state, new Date("2026-09-03T12:00:00Z"));
+  assert.equal(paused.bookingWindowState.reason, "paused");
+  assert.equal(paused.bookingWindowState.nextTransitionAt, null);
+  assert.equal(effectiveBookingWindowState(state, new Date("2026-09-03T12:00:00Z")).status, "closed");
+});
+
+test("cycle override applies only to selected WOS cycle and next cycle uses fixed default", () => {
+  const state = snapshot();
+  state.scheduleOverrides = [{ cycle_index: 1, opens_at: "2026-08-31T18:00:00Z",
+    closes_at: "2026-09-08T09:00:00Z" }];
+  const first = bookingAdminModel("wos", state, new Date("2026-09-03T00:00:00Z"));
+  assert.equal(first.automaticCycle.opensAt, "2026-08-31T18:00:00.000Z");
+  assert.equal(first.automaticCycle.closesAt, "2026-09-08T09:00:00.000Z");
+  assert.equal(first.automaticCycle.overridden, true);
+  const next = bookingAdminModel("wos", state, new Date("2026-09-30T00:00:00Z"));
+  assert.equal(next.automaticCycle.cycleIndex, 2);
+  assert.equal(next.automaticCycle.opensAt, "2026-09-30T00:00:00.000Z");
+  assert.equal(next.automaticCycle.closesAt, "2026-10-04T12:00:00.000Z");
+  assert.equal(next.automaticCycle.overridden, false);
+  assert.equal(bookingAdminModel("kingshot", state).automaticCycle, null);
+});
+
+test("long cycle override remains displayed while its booking window is open", () => {
+  const state = snapshot();
+  state.scheduleOverrides = [{ cycle_index: 1, opens_at: "2026-09-02T00:00:00Z",
+    closes_at: "2026-09-16T00:00:00Z" }];
+  state.windows = [{ status: "open", opens_at: "2026-09-02T00:00:00Z",
+    closes_at: "2026-09-16T00:00:00Z" }];
+  const model = bookingAdminModel("wos", state, new Date("2026-09-11T12:00:00Z"));
+  assert.equal(model.automaticCycle.cycleIndex, 1);
+  assert.equal(model.bookingWindowState.status, "open");
+  assert.equal(model.bookingWindowState.nextTransitionAt, "2026-09-16T00:00:00.000Z");
 });

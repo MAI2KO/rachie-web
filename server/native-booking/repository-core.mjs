@@ -696,7 +696,7 @@ class ProfileScopedBookingSession {
 
   async findCurrentBookingWindow(communityId) {
     const result = await this.client.query(
-      `SELECT game_profile, id, community_id, status
+      `SELECT game_profile, id, community_id, status, opens_at, closes_at
        FROM booking_windows
        WHERE game_profile = $1
          AND community_id = $2
