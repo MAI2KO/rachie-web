@@ -45,6 +45,16 @@ test("world-map public model has stable numeric ordering, correct routes, and no
   assert.equal(communityPath("kingshot", "9999"), "/kingdom/9999");
 });
 
+test("reserved numeric code keeps leading zeros in both public routes", () => {
+  const rows = [{ location_code: "000", display_name: "Reserved" }, { location_code: "0", display_name: "Zero" }];
+  for (const [profile, prefix] of [["wos", "/state/"], ["kingshot", "/kingdom/"]]) {
+    const communities = publicWorldMapCommunities(profile, rows);
+    assert.equal(communities.find((community) => community.code === "000")?.href, `${prefix}000`);
+    assert.equal(communities.find((community) => community.code === "0")?.href, `${prefix}0`);
+    assert.notEqual(communityPath(profile, "000"), communityPath(profile, "0"));
+  }
+});
+
 test("anonymous world-map API uses hostname profile and ignores profile query overrides", async () => {
   const seen = [];
   const dependencies = {
@@ -243,16 +253,25 @@ test("PostgreSQL world-map reads include only active communities and isolate ide
           await client.query("SELECT set_config('app.game_profile',$1,true)", [profile]);
           await client.query(
             `INSERT INTO booking_communities (game_profile,id,location_code,display_name,status)
-             VALUES ($1,$2,'9999',$3,'active'),($1,$4,'8888','Archived','archived')`,
-            [profile, randomUUID(), name, randomUUID()],
+             VALUES ($1,$2,'9999',$3,'active'),($1,$4,'8888','Archived','archived'),
+                    ($1,$5,'000',$6,'active'),($1,$7,'0','Literal zero','active')`,
+            [profile, randomUUID(), name, randomUUID(), randomUUID(), `${profile} Reserved`, randomUUID()],
           );
           await client.query("COMMIT");
         } finally { client.release(); }
       }
       const wos = await createProfileScopedWorldMapRepository("wos", pool).listRegisteredCommunities();
       const kingshot = await createProfileScopedWorldMapRepository("kingshot", pool).listRegisteredCommunities();
-      assert.deepEqual(wos, [{ location_code: "9999", display_name: "WOS Test" }]);
-      assert.deepEqual(kingshot, [{ location_code: "9999", display_name: "Kingshot Test" }]);
+      assert.deepEqual(wos.sort((a, b) => a.location_code.localeCompare(b.location_code)), [
+        { location_code: "0", display_name: "Literal zero" },
+        { location_code: "000", display_name: "wos Reserved" },
+        { location_code: "9999", display_name: "WOS Test" },
+      ]);
+      assert.deepEqual(kingshot.sort((a, b) => a.location_code.localeCompare(b.location_code)), [
+        { location_code: "0", display_name: "Literal zero" },
+        { location_code: "000", display_name: "kingshot Reserved" },
+        { location_code: "9999", display_name: "Kingshot Test" },
+      ]);
     } finally {
       await pool.end();
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);

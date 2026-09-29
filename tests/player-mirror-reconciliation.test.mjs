@@ -49,7 +49,7 @@ function repositoryFixture({ participants = [], communities = null, gameProfile 
           state.participants.push({ id: value.id, community_id: value.communityId,
             discord_user_id: value.discordUserId, player_id: value.playerId,
             in_game_name: value.inGameName, alliance: value.alliance,
-            is_primary: false, location_code: "1001" });
+            is_primary: false, location_code: [...locations.values()].find((community) => community.id === value.communityId)?.location_code });
           state.writes += 1;
         },
         async updateReconciledParticipant(value) {
@@ -284,4 +284,27 @@ test("profile crossover and malformed owner groups fail closed", async () => {
   await assert.rejects(reconcileAuthoritativePlayerMirrors({ gameProfile: "wos",
     dryRun: true, repository, accounts: [account("111111"),
       account("222222", { discordUserId: "7654321" })] }), /owner_group/);
+});
+
+test("moving an account to 000 creates its new mirror but leaves the old active mirror", async () => {
+  const old = { id: "old-mirror", community_id: "community-one", discord_user_id: "1234567",
+    player_id: "111111", in_game_name: "Player 111111", alliance: "TAG", is_primary: false,
+    location_code: "1001" };
+  const communities = new Map([
+    ["1001", { id: "community-one", location_code: "1001", status: "active" }],
+    ["000", { id: "reserved-wos", location_code: "000", status: "active" }],
+  ]);
+  const repository = repositoryFixture({ participants: [old], communities });
+  const moved = account("111111", { communityCode: "000" });
+  const preview = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: true,
+    repository, accounts: [moved], createId: repository.nextId });
+  assert.equal(preview.plannedCreates, 1);
+  assert.deepEqual(preview.results[0].communities, ["1001"]);
+  assert.equal(repository.state.participants.length, 1);
+  const applied = await reconcileAuthoritativePlayerMirrors({ gameProfile: "wos", dryRun: false,
+    repository, accounts: [moved], createId: repository.nextId });
+  assert.equal(applied.created, 1);
+  assert.deepEqual(repository.state.participants.map((row) => row.location_code).sort(), ["000", "1001"]);
+  assert.deepEqual(repository.state.participants.map((row) => row.discord_user_id), ["1234567", "1234567"]);
+  assert.equal(repository.state.participants.filter((row) => row.player_id === "111111").length, 2);
 });

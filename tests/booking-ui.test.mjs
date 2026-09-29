@@ -17,6 +17,27 @@ test("booking UI resolves unauthenticated, community, registration, and dashboar
   assert.equal(resolveBookingUiState(selected, null, null, "membership_verification_unavailable"), "unavailable");
 });
 
+test("registration can reopen the verified community chooser without signing out", () => {
+  const registration = { registration: { status: "unregistered" }, characters: [] };
+  const registered = { registration: { status: "registered" }, characters: [{ participantId: "p1" }] };
+  for (const count of [1, 2]) {
+    const session = { ...selected, communities: Array.from({ length: count }, (_, index) => ({ locationCode: String(index + 1) })) };
+    assert.equal(resolveBookingUiState(session, context, registration), "registration");
+    assert.equal(resolveBookingUiState(session, context, registration, null, true), "community-selection");
+    assert.equal(resolveBookingUiState(session, context, registered), "dashboard");
+    assert.equal(resolveBookingUiState(session, context, registered, null, true), "community-selection");
+  }
+  assert.equal(resolveBookingUiState({ authenticated: false }, context, registration, null, true), "unauthenticated");
+  assert.equal(resolveBookingUiState(selected, context, registration, "membership_refresh_required", true), "reauthentication-required");
+
+  const source = fs.readFileSync(new URL("../components/booking/booking-experience.tsx", import.meta.url), "utf8");
+  assert.match(source, /registration-community-action.*setShowCommunityChoices\(true\).*Change \{terms\.community\}/);
+  assert.match(source, /setShowCommunityChoices\(false\).*Back to \{terms\.community\}/);
+  assert.match(source, /setSession\(nextSession\); setShowCommunityChoices\(false\)/);
+  assert.match(source, /type="button">Change \{terms\.community\}/);
+  assert.match(source, /session\.communities\?\.length \?\? 0\) > 1 && <section className="booking-community-switcher"/);
+});
+
 test("server membership refresh failures have clear non-OAuth UI messages", () => {
   assert.match(uiError("membership_verification_unavailable", "7"), /retry in 7 seconds/i);
   assert.match(uiError("community_membership_lost"), /selected Discord community/i);

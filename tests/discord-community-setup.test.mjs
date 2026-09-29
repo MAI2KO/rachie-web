@@ -190,3 +190,24 @@ test("Kingshot reports the missing default cycle instead of inventing one", asyn
   assert.equal(state.creates, 0);
   assert.equal(state.links.size, 0);
 });
+
+test("setup looks up exact 000 within each profile and Kingshot needs preconfigured defaults", async () => {
+  for (const profile of ["wos", "kingshot"]) {
+    const { state, repository } = fixture(profile);
+    const service = createDiscordCommunitySetupService({ gameProfile: profile, repository });
+    const preview = await service.reconcile({ ...input, communityCode: "000", dryRun: true });
+    assert.equal(state.creates, 0);
+    if (profile === "wos") {
+      assert.equal(preview.community.code, "000");
+      assert.equal(preview.created, true);
+    } else {
+      assert.deepEqual(preview, { error: "kingshot_defaults_unavailable" });
+    }
+    state.communities.set("000", { id: `${profile}-reserved`, location_code: "000",
+      display_name: "Reserved", status: "active", bookings_open: false });
+    const existing = await service.reconcile({ ...input, communityCode: "000", dryRun: true });
+    assert.equal(existing.community.code, "000");
+    assert.equal(existing.created, false);
+    assert.equal(state.communities.has("0"), false);
+  }
+});

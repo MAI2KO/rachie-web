@@ -273,6 +273,8 @@ button:focus-visible,
 .community-options span { color: var(--brand-text-muted); font-size: 0.8125rem; font-weight: 500; }
 
 .registration-form { display: grid; gap: 1rem; }
+.registration-community-action { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; }
+.registration-community-action span { color: var(--brand-text-muted); font-size: 0.8rem; }
 .registration-form label,
 .requirement-fields label { display: grid; gap: 0.35rem; color: var(--brand-text-muted); font-size: 0.8125rem; font-weight: 700; }
 .requirement-help { font-weight: 500; }

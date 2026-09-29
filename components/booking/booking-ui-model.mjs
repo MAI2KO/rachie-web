@@ -88,11 +88,12 @@ export function createLatestRequestCoordinator() {
   });
 }
 
-export function resolveBookingUiState(session, context, me, errorCode = /** @type {string | null} */ (null)) {
+export function resolveBookingUiState(session, context, me, errorCode = /** @type {string | null} */ (null), showCommunityChoices = false) {
   if (!session) return "loading";
   if (!session.authenticated) return "unauthenticated";
   if (!session.selectedCommunity) return "community-selection";
   if (["membership_refresh_required", "authentication_required"].includes(errorCode)) return "reauthentication-required";
+  if (showCommunityChoices) return "community-selection";
   if (!context || !me) return errorCode ? "unavailable" : "loading-booking";
   if (me.registration?.status !== "registered") return "registration";
   return "dashboard";

@@ -74,6 +74,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   const [selectedService, setSelectedService] = useState("construction");
   const [selectedSlot, setSelectedSlot] = useState("");
   const [selectedParticipantId, setSelectedParticipantId] = useState("");
+  const [showCommunityChoices, setShowCommunityChoices] = useState(false);
   const [requirements, setRequirements] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<{ type: "reschedule" | "cancel"; booking: Booking } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -157,7 +158,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
 
   const service = context?.services.find((item) => item.code === selectedService) ?? null;
   const fields = useMemo(() => requirementFields(profile, selectedService, context?.requirements), [profile, selectedService, context]);
-  const uiState = resolveBookingUiState(session, context, me, errorCode);
+  const uiState = resolveBookingUiState(session, context, me, errorCode, showCommunityChoices);
   const bookingCommunity = context?.community ?? { locationCode: "", displayName: "" };
   const bookingCommunityPresentation = communityPresentation(profile, bookingCommunity);
   const bookingsOpen = context?.bookingsOpen ?? false;
@@ -192,12 +193,16 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
   }
 
   async function selectCommunity(locationCode: string) {
+    if (locationCode === session?.selectedCommunity?.locationCode) {
+      setShowCommunityChoices(false);
+      return;
+    }
     setBusy(true); setError("");
     try {
       const nextSession = await jsonRequest<Session>("/api/v1/auth/community", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": session?.csrfToken ?? "" }, body: JSON.stringify({ locationCode }) });
       setContext(null); setMe(null); setAvailability(null); setSelectedParticipantId("");
       setSelectedSlot(""); setMode(null); availabilityRequests.current.cancel();
-      setSession(nextSession);
+      setSession(nextSession); setShowCommunityChoices(false);
     }
     catch (caught) { explainError(caught); } finally { setBusy(false); }
   }
@@ -207,7 +212,7 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
     try {
       const response = await jsonRequest<Session>("/api/v1/auth/logout", { method: "POST", headers: { "x-csrf-token": session?.csrfToken ?? "" } });
       const signedOut = signedOutBookingState(response);
-      setSession(signedOut.session); setContext(signedOut.context); setMe(signedOut.me); setAvailability(signedOut.availability); setAvailabilityFailed(signedOut.availabilityFailed);
+      setSession(signedOut.session); setShowCommunityChoices(false); setContext(signedOut.context); setMe(signedOut.me); setAvailability(signedOut.availability); setAvailabilityFailed(signedOut.availabilityFailed);
       setSelectedService(signedOut.selectedService); setSelectedSlot(signedOut.selectedSlot); setRequirements(signedOut.requirements); setMode(signedOut.mode);
       setError(signedOut.error); setErrorCode(signedOut.errorCode); setSuccess(signedOut.success); setConfirmation(signedOut.confirmation); attempts.current.clear();
       availabilityRequests.current.cancel(); setAvailabilityLoading(false); bootstrapRequests.current.clear();
@@ -272,11 +277,11 @@ export function BookingExperience({ brand }: { brand: ActiveBrand }) {
     {success && <StatusNotice kind="success" message={success} noticeRef={successRef} />}
     {confirmation && <section className="booking-confirmation" aria-labelledby="confirmation-title"><div><p className="booking-kicker">Confirmed</p><h2 id="confirmation-title">{appointmentTypeLabel(selectedService, confirmation.serviceLabel)}</h2></div><dl><div><dt>Date</dt><dd>{confirmation.date}</dd></div><div><dt>Time</dt><dd>{confirmation.displayTime}</dd></div><div><dt>Player</dt><dd>{confirmation.playerName}</dd></div><div><dt>Alliance</dt><dd>{confirmation.alliance}</dd></div>{confirmation.requirements.map((answer) => <div key={answer.code}><dt>{answer.label}</dt><dd>{answer.value}{answer.unit ? ` ${answer.unit}` : ""}</dd></div>)}</dl></section>}
     {uiState === "unauthenticated" ? <div className="booking-gate"><p>Sign in with Discord to verify your community and manage your appointments.</p><a className="booking-button" href="/api/v1/auth/login">Sign in with Discord</a></div>
-    : uiState === "community-selection" ? <div className="booking-gate"><h2>Choose your {terms.community}</h2><p>Only communities verified through your Discord membership are shown.</p><div className="community-options">{session.communities?.length ? session.communities.map((community) => <Button disabled={busy} key={community.locationCode} onClick={() => void selectCommunity(community.locationCode)} secondary><strong>{community.displayName}</strong><span>{terms.community} {community.locationCode}</span></Button>) : <p>No verified communities are available for this Discord account.</p>}</div></div>
+    : uiState === "community-selection" ? <div className="booking-gate"><h2>Choose your {terms.community}</h2><p>Only communities verified through your Discord membership are shown.</p><div className="community-options">{session.communities?.length ? session.communities.map((community) => <Button aria-pressed={session.selectedCommunity?.locationCode === community.locationCode} disabled={busy} key={community.locationCode} onClick={() => void selectCommunity(community.locationCode)} secondary type="button"><strong>{community.displayName}</strong><span>{terms.community} {community.locationCode}</span></Button>) : <p>No verified communities are available for this Discord account.</p>}</div>{session.selectedCommunity && <Button disabled={busy} onClick={() => setShowCommunityChoices(false)} secondary type="button">Back to {terms.community} {session.selectedCommunity.locationCode}</Button>}</div>
     : uiState === "reauthentication-required" ? <div className="booking-gate"><h2>Refresh Discord access</h2><p>Your membership verification is no longer fresh enough to manage appointments.</p><a className="booking-button" href="/api/v1/auth/login">Sign in again</a></div>
     : uiState === "unavailable" ? <div className="booking-gate"><h2>Booking is temporarily unavailable</h2><Button onClick={() => void loadBookingData()} secondary>Try again</Button></div>
     : uiState === "loading-booking" ? <div className="booking-gate" aria-busy="true"><h2>Preparing your {terms.community}</h2><div className="booking-loading" /></div>
-    : uiState === "registration" && context ? <form className="registration-form" onSubmit={register}><div><p className="booking-kicker">{bookingCommunityPresentation.compactLabel}</p><h2>Register your player</h2><p>Your saved identity is copied into each appointment confirmation.</p></div><label>Player ID<input autoComplete="off" inputMode="numeric" name="playerId" pattern="[0-9]+" required /></label><label>In-game name<input autoComplete="nickname" maxLength={30} name="inGameName" required /></label><label>Alliance<input autoCapitalize="characters" maxLength={3} minLength={3} name="alliance" pattern="[A-Za-z0-9]{3}" required /></label><Button disabled={busy} type="submit">{busy ? "Saving..." : "Save registration"}</Button></form>
+    : uiState === "registration" && context ? <form className="registration-form" onSubmit={register}><div><p className="booking-kicker">{bookingCommunityPresentation.compactLabel}</p><h2>Register your player</h2><p>Your saved identity is copied into each appointment confirmation.</p></div><div className="registration-community-action"><Button disabled={busy} onClick={() => setShowCommunityChoices(true)} secondary type="button">Change {terms.community}</Button><span>{(session.communities?.length ?? 0) > 1 ? `Choose another verified ${terms.community}.` : `This is your only verified ${terms.community}.`}</span></div><label>Player ID<input autoComplete="off" inputMode="numeric" name="playerId" pattern="[0-9]+" required /></label><label>In-game name<input autoComplete="nickname" maxLength={30} name="inGameName" required /></label><label>Alliance<input autoCapitalize="characters" maxLength={3} minLength={3} name="alliance" pattern="[A-Za-z0-9]{3}" required /></label><Button disabled={busy} type="submit">{busy ? "Saving..." : "Save registration"}</Button></form>
     : <div className="booking-dashboard">
       {(session.communities?.length ?? 0) > 1 && <section className="booking-community-switcher" aria-label={`Choose your ${terms.community}`}><strong>{terms.community} for booking</strong><div className="community-options">{session.communities?.map((community) => <Button aria-pressed={session.selectedCommunity?.locationCode === community.locationCode} disabled={busy || session.selectedCommunity?.locationCode === community.locationCode} key={community.locationCode} onClick={() => void selectCommunity(community.locationCode)} secondary type="button"><strong>{community.displayName}</strong><span>{terms.community} {community.locationCode}</span></Button>)}</div></section>}
       <div className="booking-summary"><div><span>{bookingCommunityPresentation.codeLabel}</span><strong>{bookingCommunityPresentation.displayName}</strong></div><div><span>Registered player</span><strong>{registration?.inGameName} · {registration?.alliance}</strong><small>ID {registration?.playerId}</small></div><div><span>Booking window</span><strong>{bookingsOpen ? "Open" : "Closed"}</strong></div></div>

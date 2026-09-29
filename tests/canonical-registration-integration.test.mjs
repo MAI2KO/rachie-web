@@ -99,3 +99,22 @@ test("WOS and Kingshot codes resolve only through their injected profile-scoped 
     assert.equal(result.sourceGuildRelation, "not_supplied");
   }
 });
+
+test("canonical registration preserves 000 and only resolves a configured exact-code community", async () => {
+  const scope = canonicalRegistrationScope({ ...valid, guildId: null,
+    communityCode: "000", canonicalCommunityCode: "000" });
+  assert.equal(scope.communityCode, "000");
+  const seen = [];
+  const result = await resolveCanonicalRegistrationCommunity({ scope, session: {
+    async findCommunityByLocationCode(code) {
+      seen.push(code);
+      return code === "000" ? { id: "reserved", location_code: code, status: "active" } : null;
+    },
+  } });
+  assert.deepEqual(seen, ["000"]);
+  assert.equal(result.community.location_code, "000");
+  assert.notEqual(canonicalRegistrationIdempotencyKey({ profile: "wos", discordUserId: valid.discordUserId,
+    communityCode: "000", registration: { playerId: "123" }, isPrimary: false }),
+  canonicalRegistrationIdempotencyKey({ profile: "wos", discordUserId: valid.discordUserId,
+    communityCode: "0", registration: { playerId: "123" }, isPrimary: false }));
+});
