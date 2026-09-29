@@ -359,3 +359,74 @@ test("Booking Admin migration backfills existing communities through profile RLS
     await admin.end();
   }
 });
+
+test("Discord connections read only active stored guild links in the selected profile and community", {
+  skip: !databaseUrl && "TEST_DATABASE_URL is not configured",
+}, async () => {
+  const schema = `booking_discord_connections_${randomUUID().replaceAll("-", "")}`;
+  const admin = new pg.Pool({ connectionString: databaseUrl });
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  const pool = new pg.Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` });
+  const sharedId = randomUUID();
+  const otherId = randomUUID();
+  try {
+    await runMigrations(pool, await loadMigrations(migrationsDirectory));
+    await withProfile(pool, "wos", async (client) => {
+      await client.query(`INSERT INTO booking_communities
+        (game_profile,id,location_code,display_name) VALUES
+        ('wos',$1,'9999','State 9999'),('wos',$2,'8888','State 8888')`, [sharedId, otherId]);
+      await client.query(`INSERT INTO booking_discord_guilds
+        (game_profile,discord_guild_id,community_id,discord_guild_name,guild_kind,announcement_channel_id)
+        VALUES ('wos','820000000000000001',$1,'State Hub','state','920000000000000001'),
+               ('wos','820000000000000002',$1,'First Alliance','alliance','920000000000000002'),
+               ('wos','820000000000000003',$1,'Second Alliance','alliance',NULL),
+               ('wos','820000000000000004',$2,'Other State Alliance','alliance',NULL)`,
+        [sharedId, otherId]);
+      await client.query(`INSERT INTO community_guild_link_requests
+        (game_profile,id,community_id,requesting_discord_guild_id,
+         requesting_discord_guild_name,alliance_abbreviation,requested_guild_kind,
+         requested_by_discord_user_id,status,decided_by_discord_user_id,decided_at)
+        VALUES ('wos',$1,$2,'820000000000000002','First Alliance','ONE','alliance',
+                '111111111111111111','approved','111111111111111111',now())`,
+        [randomUUID(), sharedId]);
+    });
+    await withProfile(pool, "kingshot", async (client) => {
+      await client.query(`INSERT INTO booking_communities
+        (game_profile,id,location_code,display_name)
+        VALUES ('kingshot',$1,'9999','Kingdom 9999')`, [sharedId]);
+      await client.query(`INSERT INTO booking_discord_guilds
+        (game_profile,discord_guild_id,community_id,discord_guild_name,guild_kind)
+        VALUES ('kingshot','830000000000000001',$1,'Kingshot Hub','state')`, [sharedId]);
+    });
+    const repository = createProfileScopedBookingAdminRepository("wos", pool);
+    const read = (id) => createBookingAdminService({ gameProfile: "wos", communityId: id,
+      managerContext: { gameProfile: "wos", authorizedCommunityId: id,
+        discordUserId: "111111111111111111", displayName: "Manager" }, repository,
+    }).read();
+    const connections = (await read(sharedId)).discordAccess;
+    assert.deepEqual(connections.stateGuild, {
+      displayName: "State Hub", announcementChannelConfigured: true,
+    });
+    assert.deepEqual(connections.guilds.map(({ displayName, alliance, announcementChannelConfigured }) =>
+      ({ displayName, alliance, announcementChannelConfigured })), [
+      { displayName: "First Alliance", alliance: "ONE", announcementChannelConfigured: true },
+      { displayName: "Second Alliance", alliance: null, announcementChannelConfigured: false },
+    ]);
+    assert.equal(JSON.stringify(connections).includes("Kingshot Hub"), false);
+    assert.equal(JSON.stringify(connections).includes("Other State Alliance"), false);
+    const other = (await read(otherId)).discordAccess;
+    assert.equal(other.stateGuild, null);
+    assert.deepEqual(other.guilds.map(({ displayName }) => displayName), ["Other State Alliance"]);
+    const king = await createBookingAdminService({ gameProfile: "kingshot", communityId: sharedId,
+      managerContext: { gameProfile: "kingshot", authorizedCommunityId: sharedId,
+        discordUserId: "111111111111111111", displayName: "Manager" },
+      repository: createProfileScopedBookingAdminRepository("kingshot", pool),
+    }).read();
+    assert.equal(king.discordAccess.stateGuild.displayName, "Kingshot Hub");
+    assert.deepEqual(king.discordAccess.guilds, []);
+  } finally {
+    await pool.end();
+    await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+    await admin.end();
+  }
+});

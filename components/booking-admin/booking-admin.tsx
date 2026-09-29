@@ -47,6 +47,7 @@ type BookingAdminConfiguration = {
   readonly guestApproval: { readonly requireUnregistered: boolean };
   readonly discordAccess: {
     readonly stateGuildConfigured: boolean;
+    readonly stateGuild: { readonly displayName: string; readonly announcementChannelConfigured: boolean } | null;
     readonly pendingRequests: readonly {
       readonly id: string;
       readonly guildId: string;
@@ -64,6 +65,8 @@ type BookingAdminConfiguration = {
     readonly guilds: readonly {
       readonly id: string;
       readonly displayName: string;
+      readonly alliance: string | null;
+      readonly announcementChannelConfigured: boolean;
       readonly canUnlink: boolean;
     }[];
   };
@@ -712,6 +715,23 @@ export function BookingAdmin({ initialConfiguration }: {
         </div>
       </div>
     </section> : null}
+
+    <section className="booking-admin-section" aria-labelledby="booking-admin-discord-connections">
+      <div><h2 id="booking-admin-discord-connections">Discord connections</h2></div>
+      <div className="booking-admin-connections">
+        <div><strong>{noun} Discord</strong>{configuration.discordAccess.stateGuild
+          ? <><span>Linked · {configuration.discordAccess.stateGuild.displayName}</span>
+            {configuration.discordAccess.stateGuild.announcementChannelConfigured
+              ? <small>Announcement channel configured</small> : null}</>
+          : <span>Not linked</span>}</div>
+        <div><strong>Alliance Discord{configuration.discordAccess.guilds.length === 1 ? "" : "s"}</strong>
+          {configuration.discordAccess.guilds.length
+            ? <ul>{configuration.discordAccess.guilds.map((guild) => <li key={guild.id}>
+              <span>Linked · {guild.displayName}{guild.alliance ? ` · [${guild.alliance}]` : ""}</span>
+              {guild.announcementChannelConfigured ? <small>Announcement channel configured</small> : null}
+            </li>)}</ul> : <span>Not linked</span>}</div>
+      </div>
+    </section>
 
     <section className="booking-admin-section" aria-labelledby="booking-admin-discord-access">
       <div><h2 id="booking-admin-discord-access">Discord access</h2>

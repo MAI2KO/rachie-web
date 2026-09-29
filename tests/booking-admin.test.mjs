@@ -696,3 +696,48 @@ test("long cycle override remains displayed while its booking window is open", (
   assert.equal(model.bookingWindowState.status, "open");
   assert.equal(model.bookingWindowState.nextTransitionAt, "2026-09-16T00:00:00.000Z");
 });
+
+test("Discord connections model uses only active links and hides internal IDs", () => {
+  const state = snapshot();
+  state.guilds = [
+    { discord_guild_id: "state-private-id", discord_guild_name: "State Hub", guild_kind: "state",
+      link_status: "active", announcement_channel_configured: true },
+    { discord_guild_id: "alliance-one-private-id", discord_guild_name: "First Alliance",
+      guild_kind: "alliance", link_status: "active", alliance_abbreviation: "ONE",
+      announcement_channel_configured: true },
+    { discord_guild_id: "alliance-two-private-id", discord_guild_name: "Second Alliance",
+      guild_kind: "alliance", link_status: "active", alliance_abbreviation: null,
+      announcement_channel_configured: false },
+    { discord_guild_id: "revoked-private-id", discord_guild_name: "Revoked Alliance",
+      guild_kind: "alliance", link_status: "revoked", alliance_abbreviation: "OLD" },
+  ];
+  const connections = bookingAdminModel("wos", state).discordAccess;
+  assert.deepEqual(connections.stateGuild, {
+    displayName: "State Hub", announcementChannelConfigured: true,
+  });
+  assert.deepEqual(connections.guilds.map(({ displayName, alliance, announcementChannelConfigured }) =>
+    ({ displayName, alliance, announcementChannelConfigured })), [
+    { displayName: "First Alliance", alliance: "ONE", announcementChannelConfigured: true },
+    { displayName: "Second Alliance", alliance: null, announcementChannelConfigured: false },
+  ]);
+  assert.equal(connections.guilds.length, 2);
+  assert.equal(JSON.stringify({ stateGuild: connections.stateGuild, guilds: connections.guilds.map(
+    ({ displayName, alliance, announcementChannelConfigured }) =>
+      ({ displayName, alliance, announcementChannelConfigured })) }).includes("private-id"), false);
+  const unlinked = bookingAdminModel("wos", snapshot()).discordAccess;
+  assert.equal(unlinked.stateGuild, null);
+  assert.deepEqual(unlinked.guilds, []);
+});
+
+test("Discord connections UI names linked and unlinked State and alliance servers without channel IDs", () => {
+  const ui = fs.readFileSync(new URL("../components/booking-admin/booking-admin.tsx", import.meta.url), "utf8");
+  assert.match(ui, /Discord connections/);
+  assert.match(ui, /configuration\.discordAccess\.stateGuild\.displayName/);
+  assert.match(ui, /configuration\.discordAccess\.guilds\.map/);
+  assert.match(ui, /guild\.alliance/);
+  assert.match(ui, /Announcement channel configured/);
+  assert.match(ui, /Not linked/);
+  const summary = ui.slice(ui.indexOf('id="booking-admin-discord-connections"'),
+    ui.indexOf('id="booking-admin-discord-access"'));
+  assert.doesNotMatch(summary, /\{guild\.id\}<|channelId|discordGuildId/);
+});

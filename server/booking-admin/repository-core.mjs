@@ -84,10 +84,24 @@ class BookingAdminSession {
         [this.gameProfile, communityId],
       ),
       this.client.query(
-        `SELECT discord_guild_id,discord_guild_name,guild_kind,link_status,revoked_at
-           FROM booking_discord_guilds
-          WHERE game_profile=$1 AND community_id=$2
-          ORDER BY CASE guild_kind WHEN 'state' THEN 0 ELSE 1 END,discord_guild_name,discord_guild_id`,
+        `SELECT guild.discord_guild_id,guild.discord_guild_name,guild.guild_kind,
+                guild.link_status,guild.revoked_at,
+                (guild.announcement_channel_id IS NOT NULL) AS announcement_channel_configured,
+                approved.alliance_abbreviation
+           FROM booking_discord_guilds AS guild
+           LEFT JOIN LATERAL (
+             SELECT request.alliance_abbreviation
+               FROM community_guild_link_requests AS request
+              WHERE request.game_profile=guild.game_profile
+                AND request.community_id=guild.community_id
+                AND request.requesting_discord_guild_id=guild.discord_guild_id
+                AND request.requested_guild_kind='alliance'
+                AND request.status='approved'
+              ORDER BY request.decided_at DESC,request.id DESC LIMIT 1
+           ) AS approved ON true
+          WHERE guild.game_profile=$1 AND guild.community_id=$2
+          ORDER BY CASE guild.guild_kind WHEN 'state' THEN 0 ELSE 1 END,
+                   guild.discord_guild_name,guild.discord_guild_id`,
         [this.gameProfile, communityId],
       ),
       this.client.query(

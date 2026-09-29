@@ -155,3 +155,18 @@ test("shared booking component uses only native APIs and explicit confirmation f
   assert.match(source, /Loading replacement times\.\.\./);
   assert.match(source, /Availability could not be loaded\..*Try again/);
 });
+
+test("booking page shows community choice and booking-time character choice", () => {
+  const ui = fs.readFileSync(new URL("../components/booking/booking-experience.tsx", import.meta.url), "utf8");
+  assert.match(ui, /session\.communities\?\.length \?\? 0\) > 1/);
+  assert.match(ui, /booking-community-switcher/);
+  assert.match(ui, /selectCommunity\(community\.locationCode\)/);
+  assert.match(ui, /setContext\(null\); setMe\(null\); setAvailability\(null\); setSelectedParticipantId\(""\)/);
+  const bookingSection = ui.slice(ui.indexOf('className="service-booking"'));
+  assert.match(bookingSection, /Booking as/);
+  assert.match(bookingSection, /characters\.length > 1 \? <div className="character-options"/);
+  assert.match(bookingSection, /character\.isPrimary \? "★ MAIN · "/);
+  assert.match(bookingSection, /setSelectedParticipantId\(character\.participantId\)/);
+  assert.match(ui, /participantId: selectedParticipantId \|\| undefined/);
+  assert.match(bookingSection, /!selectedParticipantId/);
+});

@@ -302,7 +302,8 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
   const guestLinkActive = Boolean(guestLink && !guestLink.revoked_at
     && (!guestLink.expires_at || new Date(guestLink.expires_at) > now));
   const activeGuilds = guilds.filter((guild) => guild.link_status === "active");
-  const stateGuildConfigured = activeGuilds.some((guild) => guild.guild_kind === "state");
+  const stateGuild = activeGuilds.find((guild) => guild.guild_kind === "state") ?? null;
+  const stateGuildConfigured = Boolean(stateGuild);
   const canDecideGuildLinks = stateGuildConfigured ? ownership.get("state") === true
     : activeGuilds.some((guild) => guild.guild_kind === "alliance"
       && ownership.get(guild.discord_guild_id) === true);
@@ -327,6 +328,10 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
     }),
     discordAccess: Object.freeze({
       stateGuildConfigured,
+      stateGuild: stateGuild ? Object.freeze({
+        displayName: stateGuild.discord_guild_name,
+        announcementChannelConfigured: Boolean(stateGuild.announcement_channel_configured),
+      }) : null,
       pendingRequests: Object.freeze((snapshot.guildLinkRequests ?? []).map((request) => Object.freeze({
         id: request.id,
         guildId: request.requesting_discord_guild_id,
@@ -346,6 +351,8 @@ export function bookingAdminModel(gameProfile, snapshot, now = new Date(), owner
         && guild.link_status === "active").map((guild) => Object.freeze({
         id: guild.discord_guild_id,
         displayName: guild.discord_guild_name,
+        alliance: guild.alliance_abbreviation ?? null,
+        announcementChannelConfigured: Boolean(guild.announcement_channel_configured),
         canUnlink: ownership.get(guild.discord_guild_id) === true
           || ownership.get("state") === true,
       }))),

@@ -11,6 +11,7 @@ import { createBookingCreationService, BookingIdempotencyConflictError } from ".
 import { createNativeBookingReadService } from "../server/native-booking/read-service-core.mjs";
 import { createProfileScopedBookingRepository } from "../server/native-booking/repository-core.mjs";
 import { createRegistrationService } from "../server/native-booking/registration-service-core.mjs";
+import { createDiscordIntegrationRepository } from "../server/discord-integration/repository-core.mjs";
 
 const databaseUrl = String(process.env.TEST_DATABASE_URL ?? "").trim();
 configurePostgresTypeParsers(pg.types);
@@ -59,10 +60,10 @@ test("native booking creation is atomic under restricted PostgreSQL RLS", { skip
         await client.query(`INSERT INTO booking_communities (game_profile,id,location_code,display_name,bookings_open) VALUES ($1,$2,$3,$4,true)`, [profile, communityId, profile === "wos" ? "1001" : "2002", profile === "wos" ? "State 1001" : "Kingdom 2002"]);
         await client.query(`INSERT INTO booking_settings (game_profile,community_id,construction_fc_required,construction_rfc_required,construction_speedups_required,research_shards_required) VALUES ($1,$2,true,true,true,true)`, [profile, communityId]);
         await client.query(`INSERT INTO booking_windows (game_profile,id,community_id,status,opens_at,closes_at,created_by_actor_type) VALUES ($1,$2,$3,'open',now()-interval '1 hour',now()+interval '1 day','system')`, [profile, windowId, communityId]);
-        await client.query(`INSERT INTO booking_service_dates (game_profile,id,community_id,window_id,service_code,booking_date) VALUES ($1,$2,$3,$4,'construction','2026-08-20')`, [profile, dateId, communityId, windowId]);
+        await client.query(`INSERT INTO booking_service_dates (game_profile,id,community_id,window_id,service_code,booking_date) VALUES ($1,$2,$3,$4,'construction','2030-08-20')`, [profile, dateId, communityId, windowId]);
         for (let ordinal = 0; ordinal < 12; ordinal++) {
           const slot = randomUUID(); fixtures[profile].slots.push(slot);
-          await client.query(`INSERT INTO appointment_slots (game_profile,id,community_id,window_id,service_date_id,service_code,booking_date,ordinal,display_time_label) VALUES ($1,$2,$3,$4,$5,'construction','2026-08-20',$6,$7)`, [profile, slot, communityId, windowId, dateId, ordinal, `${String(ordinal).padStart(2, "0")}:00`]);
+          await client.query(`INSERT INTO appointment_slots (game_profile,id,community_id,window_id,service_date_id,service_code,booking_date,ordinal,display_time_label,local_start_time,time_zone,starts_at) VALUES ($1,$2,$3,$4,$5,'construction','2030-08-20',$6,$7,$7::text::time,'UTC',$8)`, [profile, slot, communityId, windowId, dateId, ordinal, `${String(ordinal).padStart(2, "0")}:00`, new Date(Date.UTC(2030, 7, 20, ordinal)).toISOString()]);
         }
       });
     }
@@ -97,6 +98,79 @@ test("native booking creation is atomic under restricted PostgreSQL RLS", { skip
       assert.deepEqual(rows.outbox.rows, [{ event_type: "booking.created", status: "pending" }]);
       assert.deepEqual(rows.speedups.rows, [{ value: 7, unit: "days", display_label: "Speed-ups (days)" }]);
       assert.equal((await withProfile(runtime, "wos", (client) => client.query("SELECT count(*)::int AS count FROM minister_bookings WHERE id=$1", [kingshot.body.booking.bookingId]))).rows[0].count, 0);
+    });
+
+    await t.test("two owned characters can be selected without duplicate mirrors or cross-State leakage", async () => {
+      const userId = "user-109";
+      const primaryService = createRegistrationService({
+        context: context("wos", fixtures.wos.communityId, userId), repository: repositories.wos,
+      });
+      await primaryService.upsert({ playerId: "10901", inGameName: "Main 109", alliance: "ONE" },
+        "register-user-109-main-0001", { isPrimary: true });
+      await primaryService.upsert({ playerId: "10902", inGameName: "Alt 109", alliance: "TWO" },
+        "register-user-109-alt-0001", { isPrimary: false });
+      const otherStateId = randomUUID();
+      await withProfile(runtime, "wos", (client) => client.query(
+        `INSERT INTO booking_communities (game_profile,id,location_code,display_name,bookings_open)
+         VALUES ('wos',$1,'1009','State 1009',true)`, [otherStateId]));
+      await createRegistrationService({ context: context("wos", otherStateId, userId),
+        repository: repositories.wos }).upsert({ playerId: "10903", inGameName: "Other State",
+        alliance: "OTH" }, "register-user-109-other-state-0001");
+      await createRegistrationService({ context: context("kingshot", fixtures.kingshot.communityId, userId),
+        repository: repositories.kingshot }).upsert({ playerId: "20901", inGameName: "Kingshot 109",
+        alliance: "KIN" }, "register-user-109-kingshot-0001");
+      const read = createNativeBookingReadService({ gameProfile: "wos",
+        communityId: fixtures.wos.communityId, repository: repositories.wos });
+      const before = await read.getParticipantBookingsForDiscordUser(userId);
+      assert.deepEqual(before.characters.map(({ playerId, isPrimary }) => ({ playerId, isPrimary })), [
+        { playerId: "10901", isPrimary: true }, { playerId: "10902", isPrimary: false },
+      ]);
+      assert.equal(before.registration.playerId, "10901");
+      assert.deepEqual((await createNativeBookingReadService({ gameProfile: "wos",
+        communityId: otherStateId, repository: repositories.wos })
+        .getParticipantBookingsForDiscordUser(userId)).characters.map(({ playerId }) => playerId), ["10903"]);
+      assert.deepEqual((await createNativeBookingReadService({ gameProfile: "kingshot",
+        communityId: fixtures.kingshot.communityId, repository: repositories.kingshot })
+        .getParticipantBookingsForDiscordUser(userId)).characters.map(({ playerId }) => playerId), ["20901"]);
+      await assert.rejects(bookingService("wos", userId).create(choice("wos", 8),
+        "booking-user-109-no-choice-0001"), (error) => error.code === "character_selection_required");
+      const selected = before.characters[1];
+      const booked = await bookingService("wos", userId).create({ ...choice("wos", 8),
+        participantId: selected.participantId }, "booking-user-109-alt-0001");
+      assert.equal(booked.body.booking.playerName, "Alt 109");
+      assert.equal(booked.body.booking.alliance, "TWO");
+      const rows = await withProfile(runtime, "wos", (client) => client.query(
+        `SELECT booking.participant_id,booking.player_id_snapshot,
+                outbox.payload->'participant'->>'playerId' AS outbox_player_id,
+                (SELECT count(*)::int FROM booking_participants
+                  WHERE game_profile='wos' AND community_id=$2 AND discord_user_id=$3
+                    AND status='active') AS participant_count
+           FROM minister_bookings AS booking
+           JOIN booking_outbox AS outbox ON outbox.game_profile=booking.game_profile
+             AND outbox.payload->>'bookingId'=booking.id::text
+          WHERE booking.game_profile='wos' AND booking.id=$1`,
+        [booked.body.booking.bookingId, fixtures.wos.communityId, userId]));
+      assert.deepEqual(rows.rows.map(({ participant_id, player_id_snapshot,
+        outbox_player_id, participant_count }) => ({ participant_id, player_id_snapshot,
+        outbox_player_id, participant_count })), [{ participant_id: selected.participantId,
+        player_id_snapshot: "10902", outbox_player_id: "10902", participant_count: 2 }]);
+      const work = await createDiscordIntegrationRepository("wos", runtime)
+        .withTransaction((session) => session.claim(25));
+      const confirmation = work.find((item) => item.bookingId === booked.body.booking.bookingId
+        && item.type === "player_confirmed");
+      assert.equal(confirmation.playerName, "Alt 109");
+      assert.equal(confirmation.recipientDiscordUserId, userId);
+      const reminder = await withProfile(runtime, "wos", (client) => client.query(
+        `SELECT notification_type,booking_id,recipient_discord_user_id FROM booking_discord_notifications
+          WHERE game_profile='wos' AND booking_id=$1 AND notification_type='appointment_reminder'`,
+        [booked.body.booking.bookingId]));
+      assert.deepEqual(reminder.rows, [{ notification_type: "appointment_reminder",
+        booking_id: booked.body.booking.bookingId, recipient_discord_user_id: userId }]);
+      await assert.rejects(bookingService("wos", userId).create({ ...choice("wos", 9),
+        participantId: (await createNativeBookingReadService({ gameProfile: "wos",
+          communityId: otherStateId, repository: repositories.wos })
+          .getParticipantBookingsForDiscordUser(userId)).characters[0].participantId },
+      "booking-user-109-wrong-state-0001"), (error) => error.code === "invalid_character");
     });
 
     await t.test("registration, closure, inactive service, block, and occupied slot fail closed", async () => {
